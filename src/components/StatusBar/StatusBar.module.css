@@ -1,0 +1,27 @@
+.statusBar {
+  height: 24px;
+  background-color: #0d0d18;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 10px;
+  color: #6b7a8d;
+  border-top: 1px solid #ffffff10;
+  user-select: none;
+}
+
+.left {
+  flex: 1;
+  text-align: left;
+}
+
+.center {
+  flex: 1;
+  text-align: center;
+}
+
+.right {
+  flex: 1;
+  text-align: right;
+}

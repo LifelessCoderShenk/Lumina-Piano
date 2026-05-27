@@ -1,0 +1,50 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: #13131a;
+  border: 1px solid #ffffff10;
+  border-radius: 8px;
+}
+
+.sectionHeader {
+  color: #6b7a8d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.tabRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tab,
+.tabActive {
+  height: 28px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tab {
+  border: 1px solid #ffffff10;
+  background: #13131a;
+  color: #6b7a8d;
+}
+
+.tabActive {
+  border: 1px solid #4f8ef7;
+  background: #1a2535;
+  color: #ffffff;
+}
+
+.helperText {
+  color: #8899aa;
+  font-size: 12px;
+  line-height: 1.5;
+}

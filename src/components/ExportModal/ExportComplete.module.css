@@ -1,0 +1,114 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding-top: 6px;
+}
+
+.iconBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: rgb(79 247 160 / 16%);
+  color: #4ff7a0;
+}
+
+.checkIcon {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.textBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.fileName {
+  margin: 0;
+  color: #c0c8e0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.progressBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.progressMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #8899aa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+}
+
+.closeButton,
+.openButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1 1 0;
+  height: 42px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.closeButton {
+  border: 1px solid #ffffff15;
+  background: transparent;
+  color: #c0c8e0;
+}
+
+.closeButton:hover {
+  border-color: #ffffff15;
+  color: #ffffff;
+}
+
+.openButton {
+  border: none;
+  background: #4ff7a0;
+  color: #0a0a0f;
+}
+
+.openButton:hover {
+  background: #4ff7a0;
+}
+
+.folderIcon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}

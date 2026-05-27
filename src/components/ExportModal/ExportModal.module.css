@@ -1,0 +1,159 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 75%);
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+  box-sizing: border-box;
+}
+
+.dialog {
+  width: 480px;
+  max-width: min(480px, calc(100vw - 48px));
+  background: #13131a;
+  border: 1px solid #ffffff15;
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 48%);
+  overflow: hidden;
+}
+
+.dialogLocked {
+  user-select: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid rgb(255 255 255 / 4%);
+}
+
+.title {
+  margin: 0;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #8899aa;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.closeButton:hover:not(:disabled) {
+  color: #ffffff;
+  background: rgb(255 255 255 / 4%);
+}
+
+.closeButton:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.body {
+  padding: 20px;
+}
+
+.errorState {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.errorBanner {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgb(247 103 79 / 28%);
+  border-radius: 8px;
+  background: rgb(247 103 79 / 10%);
+}
+
+.errorIcon {
+  flex: 0 0 auto;
+  color: #f7674f;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.errorText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.errorText strong {
+  color: #ffffff;
+  font-size: 15px;
+}
+
+.errorText span {
+  color: #c0c8e0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.errorActions {
+  display: flex;
+  gap: 12px;
+}
+
+.retryButton,
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  height: 42px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.retryButton {
+  border: none;
+  background: #4f8ef7;
+  color: #ffffff;
+}
+
+.retryButton:hover {
+  background: #4f8ef7;
+}
+
+.secondaryButton {
+  border: 1px solid #ffffff15;
+  background: transparent;
+  color: #8899aa;
+}
+
+.secondaryButton:hover {
+  border-color: #ffffff15;
+  color: #ffffff;
+}

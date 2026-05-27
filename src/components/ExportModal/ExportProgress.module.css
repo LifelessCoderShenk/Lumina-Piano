@@ -1,0 +1,212 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionLabel {
+  margin: 0;
+  color: #8899aa;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.formatRow {
+  display: flex;
+}
+
+.formatChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #4f8ef7;
+  border-radius: 6px;
+  background: #13131a;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.formatIcon {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.toggleRow {
+  display: flex;
+  gap: 8px;
+}
+
+.switchColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #c0c8e0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.switchLabel {
+  color: #c0c8e0;
+}
+
+.switchControl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 46px;
+  height: 28px;
+}
+
+.switchInput {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  z-index: 2;
+}
+
+.switchTrack {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #13131a;
+  border: 1px solid #ffffff15;
+}
+
+.switchThumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #8899aa;
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.switchInput:checked ~ .switchTrack {
+  background: rgb(79 142 247 / 22%);
+  border-color: #4f8ef7;
+}
+
+.switchInput:checked ~ .switchThumb {
+  transform: translateX(18px);
+  background: #4f8ef7;
+}
+
+.progressSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+.progressHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progressLabel {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.progressEta {
+  color: #8899aa;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.progressBar {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #13131a;
+}
+
+.progressBar::-webkit-progress-bar {
+  background: #13131a;
+  border-radius: 999px;
+}
+
+.progressBar::-webkit-progress-value {
+  background: #4f8ef7;
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+
+.progressBar::-moz-progress-bar {
+  background: #4f8ef7;
+  border-radius: 999px;
+}
+
+.progressBarComplete::-webkit-progress-value {
+  background: #4ff7a0;
+}
+
+.progressBarComplete::-moz-progress-bar {
+  background: #4ff7a0;
+}
+
+.progressMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #8899aa;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cancelButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 42px;
+  border: 1px solid #ffffff15;
+  border-radius: 6px;
+  background: transparent;
+  color: #8899aa;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
+}
+
+.cancelButton:hover {
+  border-color: #ffffff15;
+  color: #ffffff;
+  background: rgb(255 255 255 / 3%);
+}

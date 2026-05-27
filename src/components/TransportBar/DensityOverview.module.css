@@ -1,0 +1,16 @@
+.overview {
+  position: absolute;
+  inset: 0 0 6px;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+}
+
+.bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  background: #4f8ef7;
+  border-radius: 1px 1px 0 0;
+  opacity: 0.45;
+}

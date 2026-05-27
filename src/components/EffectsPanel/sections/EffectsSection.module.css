@@ -1,0 +1,115 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: #13131a;
+  border: 1px solid #ffffff10;
+  border-radius: 8px;
+}
+
+.sectionHeader {
+  color: #6b7a8d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.effectRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.effectHeader {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.effectLabel {
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.effectValue {
+  color: #8899aa;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.toggle {
+  position: relative;
+  width: 24px;
+  height: 14px;
+}
+
+.toggle input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+}
+
+.toggleTrack {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #2a3040;
+}
+
+.toggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 140ms ease;
+}
+
+.toggle input:checked ~ .toggleTrack {
+  background: #4f8ef7;
+}
+
+.toggle input:checked ~ .toggleThumb {
+  transform: translateX(10px);
+}
+
+.sliderGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sliderRow {
+  display: grid;
+  grid-template-columns: 28px 1fr 34px;
+  align-items: center;
+  gap: 8px;
+}
+
+.sliderLabel {
+  color: #6b7a8d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.slider {
+  width: 100%;
+  accent-color: #4f8ef7;
+}
+
+.sliderValue {
+  color: #8899aa;
+  font-size: 11px;
+  text-align: right;
+}

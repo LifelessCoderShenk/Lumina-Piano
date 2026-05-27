@@ -1,0 +1,171 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionLabel {
+  margin: 0;
+  color: #8899aa;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.toggleRow {
+  display: flex;
+  gap: 8px;
+}
+
+.pathRow {
+  display: flex;
+  gap: 10px;
+}
+
+.pathInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid #ffffff15;
+  border-radius: 6px;
+  background: #0d0d18;
+  color: #8899aa;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.pathInput:focus {
+  outline: 1px solid #4f8ef7;
+  outline-offset: 0;
+}
+
+.browseButton {
+  flex: 0 0 auto;
+  min-width: 88px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid #ffffff15;
+  border-radius: 6px;
+  background: #13131a;
+  color: #c0c8e0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
+}
+
+.browseButton:hover {
+  border-color: #ffffff28;
+  color: #ffffff;
+}
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #c0c8e0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.switchLabel {
+  color: #c0c8e0;
+}
+
+.switchControl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 46px;
+  height: 28px;
+}
+
+.switchInput {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.switchTrack {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #13131a;
+  border: 1px solid #ffffff15;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.switchThumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #8899aa;
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.switchInput:checked ~ .switchTrack {
+  background: rgb(79 142 247 / 22%);
+  border-color: #4f8ef7;
+}
+
+.switchInput:checked ~ .switchThumb {
+  transform: translateX(18px);
+  background: #4f8ef7;
+}
+
+.startButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  border: none;
+  border-radius: 6px;
+  background: #4f8ef7;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.startButton:hover:not(:disabled) {
+  background: #4f8ef7;
+}
+
+.startButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.startButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.startIcon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}

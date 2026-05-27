@@ -1,0 +1,74 @@
+.titleBar {
+  height: 32px;
+  background-color: #0a0a0f;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #ffffff10;
+  position: relative;
+  user-select: none;
+}
+
+.dragRegion {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 150px;
+  bottom: 0;
+  -webkit-app-region: drag;
+}
+
+.wordmark {
+  padding-left: 24px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  -webkit-app-region: drag;
+  z-index: 1;
+}
+
+.lumina {
+  color: #4f8ef7;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+
+.piano {
+  color: #8899aa;
+  font-size: 12px;
+}
+
+.windowControls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
+  z-index: 1;
+}
+
+.windowControls button {
+  background: transparent;
+  border: none;
+  color: #8899aa;
+  width: 48px;
+  height: 100%;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.windowControls button:hover {
+  background: #ffffff10;
+  color: #ffffff;
+}
+
+.windowControls button:active {
+  background: #ffffff15;
+}
+
+.windowControls button:last-child:hover {
+  background: #f7674f;
+}

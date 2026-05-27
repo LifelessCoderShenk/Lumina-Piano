@@ -1,0 +1,34 @@
+.button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #ffffff10;
+  border-radius: 6px;
+  background: #13131a;
+  color: #6b7a8d;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.button:hover:not(:disabled) {
+  color: #c0c8e0;
+}
+
+.selected {
+  background: #0d0d18;
+  border-color: #4f8ef7;
+  color: #ffffff;
+}
+
+.disabled {
+  cursor: default;
+  opacity: 0.68;
+}
