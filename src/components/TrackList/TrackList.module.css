@@ -39,24 +39,23 @@
   gap: 8px;
 }
 
-.swatch {
-  width: 12px;
-  height: 12px;
-  border: none;
-  border-radius: 50%;
-  padding: 0;
+.hiddenColorInput {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.colorSwatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid #ffffff20;
   cursor: pointer;
-  background: transparent;
   flex-shrink: 0;
-}
-
-.swatch::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-.swatch::-webkit-color-swatch {
-  border: none;
-  border-radius: 50%;
+  position: relative;
+  display: inline-block;
 }
 
 .trackName {

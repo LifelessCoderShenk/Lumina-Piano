@@ -5,7 +5,6 @@ import type { IndexedNote } from '../spatial/SpatialIndex'
 import { getAppState, subscribeToStore } from '../store/store'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
-  KEYBOARD_HEIGHT,
   KEY_GLOW_ALPHA_END,
   KEY_GLOW_ALPHA_START,
   KEY_GLOW_HEIGHT,
@@ -13,6 +12,7 @@ import {
   KEY_GLOW_WIDTH_STEP,
   KEY_GLOW_X_STEP,
   WHITE_KEY_ACTIVE_ALPHA,
+  getKeyboardLayoutMetrics,
 } from '../renderer/layoutConstants'
 import { resolveNoteColor } from '../renderer/colorUtils'
 import type { RenderLayers } from '../renderer/Renderer'
@@ -163,7 +163,7 @@ export class EffectsLayer {
       return
     }
 
-    const keyboardTopY = Math.round(canvasHeight - KEYBOARD_HEIGHT)
+    const { keyboardY: keyboardTopY } = getKeyboardLayoutMetrics(canvasHeight)
     const rangeStart = Math.min(this.lastTick, currentTick)
     const rangeEnd = Math.max(this.lastTick, currentTick)
 
@@ -207,7 +207,7 @@ export class EffectsLayer {
     glowGraphic.clear()
 
     const state = getAppState()
-    const keyTopY = Math.round(canvasHeight - KEYBOARD_HEIGHT)
+    const { keyboardY: keyTopY } = getKeyboardLayoutMetrics(canvasHeight)
 
     if (!state.keyGlowEnabled) {
       return

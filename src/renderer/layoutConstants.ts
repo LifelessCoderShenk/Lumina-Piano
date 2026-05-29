@@ -24,3 +24,20 @@ export const KEY_GLOW_X_STEP = 2
 
 export const WHITE_KEY_BOTTOM_SHADOW_HEIGHT = 4
 export const BLACK_KEY_BOTTOM_SHADOW_HEIGHT = 6
+export const NOTE_MIN_HEIGHT = 6
+
+export interface KeyboardLayoutMetrics {
+  keyboardHeight: number
+  keyboardY: number
+}
+
+export function getKeyboardLayoutMetrics(canvasHeight: number): KeyboardLayoutMetrics {
+  const safeCanvasHeight = Number.isFinite(canvasHeight) ? Math.max(0, Math.round(canvasHeight)) : 0
+  const keyboardHeight = Math.min(KEYBOARD_HEIGHT, safeCanvasHeight)
+  const keyboardY = Math.max(0, safeCanvasHeight - keyboardHeight)
+
+  return {
+    keyboardHeight,
+    keyboardY,
+  }
+}

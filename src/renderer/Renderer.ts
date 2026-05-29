@@ -8,7 +8,11 @@ import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
 import { getAppState, subscribeToStore } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
 import { KeyboardPool, type KeyboardGraphic } from './KeyboardPool'
+import { GradientTextureCache } from './GradientTextureCache'
+import { getNoteLabel } from './labelUtils'
 import { NotePool } from './NotePool'
+import { SpritePool } from './SpritePool'
+import { TextPool } from './TextPool'
 import { RendererError } from './errors'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
@@ -18,15 +22,16 @@ import {
   BLACK_KEY_SHADOW_COLOR,
   HIT_LINE_HEIGHT,
   KEYBOARD_BACKING_COLOR,
-  KEYBOARD_HEIGHT,
+  NOTE_MIN_HEIGHT,
   WHITE_KEY_ACTIVE_ALPHA,
   WHITE_KEY_BOTTOM_SHADOW_HEIGHT,
   WHITE_KEY_COLOR,
   WHITE_KEY_SEPARATOR_COLOR,
   WHITE_KEY_SEPARATOR_WIDTH,
   WHITE_KEY_SHADOW_COLOR,
+  getKeyboardLayoutMetrics,
 } from './layoutConstants'
-import { hexToPixi, resolveNoteColor } from './colorUtils'
+import { hexToPixi, pixiToHex, resolveNoteColor, resolveNoteGradientColors } from './colorUtils'
 import { getNoteScreenRect, getVisibleTickWindow } from './noteMotion'
 import {
   PIANO_MAX_PITCH,
@@ -40,7 +45,7 @@ import {
   pitchToKeyX,
 } from './pianoMath'
 
-const LANE_LINE_COLOR = 0x0a0a14
+const LANE_LINE_COLOR = 0xffffff
 const HIT_LINE_COLOR = 0x000000
 const HIT_LINE_ALPHA = 0.6
 const BLACK_KEY_HEIGHT_RATIO = 0.62
@@ -58,7 +63,9 @@ const BLACK_KEY_BOTTOM_INSET = 2
 const BLACK_KEY_SHADOW_ALPHA = 0.22
 const WHITE_KEY_SHADOW_ALPHA = 0.3
 const BLACK_KEY_HIGHLIGHT_ALPHA = 0.6
-
+const BLACK_KEY_NOTE_INSET = 2
+const BLACK_KEY_VERTICAL_INSET = 3
+const BLACK_KEY_NOTE_ALPHA = 0.85
 export interface RenderLayers {
   background: PIXI.Container
   laneLines: PIXI.Container
@@ -72,7 +79,28 @@ export class Renderer {
   private app: PIXI.Application | null = null
   private layers: RenderLayers | null = null
   private notePool = new NotePool()
+  private gradientSpritePool = new SpritePool()
   private keyboardPool = new KeyboardPool()
+  private gradientTextureCache = new GradientTextureCache()
+  private noteLabelPool = new TextPool({
+    compactFontSize: 8,
+    fill: 0xffffff,
+    fontFamily: 'Arial, sans-serif',
+    fontSize: 11,
+    fontWeight: 'bold',
+    prewarmCount: 200,
+    resolution: getLabelResolution(),
+  })
+  private keyLabelPool = new TextPool({
+    anchorY: 1,
+    dropShadow: false,
+    fill: 0xffffff,
+    fontFamily: 'Arial, sans-serif',
+    fontSize: 11,
+    fontWeight: 'bold',
+    prewarmCount: PIANO_WHITE_KEY_COUNT,
+    resolution: getLabelResolution(),
+  })
   private isInitialized = false
   private unsubscribeStore: (() => void) | null = null
   private backgroundGraphic: PIXI.Graphics | null = null
@@ -80,6 +108,7 @@ export class Renderer {
   private hitLineGraphic: PIXI.Graphics | null = null
   private keyboardBackingGraphic: PIXI.Graphics | null = null
   private overlayDrawCallback: ((currentTick: number) => void) | null = null
+  private keyLabelsDirty = true
 
   private readonly handleTick: PlaybackEventMap['onTick'] = (currentTick) => {
     this.renderFrame(currentTick)
@@ -108,12 +137,12 @@ export class Renderer {
 
     try {
       this.app = new PIXI.Application({
-        antialias: true,
+        antialias: false,
         autoDensity: true,
         autoStart: false,
-        backgroundAlpha: 0,
+        backgroundColor: 0x0a0a0f,
         height: state.viewportHeight || REFERENCE_HEIGHT,
-        resolution: Math.max(1, state.renderScale || 1),
+        resolution: getCanvasResolution(),
         sharedTicker: false,
         view: canvas,
         width: state.viewportWidth || REFERENCE_WIDTH,
@@ -149,7 +178,9 @@ export class Renderer {
     this.initKeyboard()
 
     if (state.projectData != null) {
-      this.notePool.prewarm(getProjectNoteCount(state.projectData.tracks))
+      const projectNoteCount = getProjectNoteCount(state.projectData.tracks)
+      this.notePool.prewarm(projectNoteCount)
+      this.gradientSpritePool.prewarm(projectNoteCount)
     }
 
     this.unsubscribeStore = subscribeToStore((nextState, previousState) => {
@@ -158,17 +189,25 @@ export class Renderer {
         nextState.viewportHeight !== previousState.viewportHeight ||
         nextState.renderScale !== previousState.renderScale
       ) {
+        this.keyLabelsDirty = true
         this.resize(nextState.viewportWidth, nextState.viewportHeight)
       }
 
       if (nextState.projectData !== previousState.projectData) {
         if (nextState.projectData != null) {
-          this.notePool.prewarm(getProjectNoteCount(nextState.projectData.tracks))
+          const projectNoteCount = getProjectNoteCount(nextState.projectData.tracks)
+          this.notePool.prewarm(projectNoteCount)
+          this.gradientSpritePool.prewarm(projectNoteCount)
         } else {
           this.notePool.releaseAll()
+          this.gradientSpritePool.releaseAll()
         }
 
         this.renderFrame(nextState.currentTick)
+      }
+
+      if (haveGradientTextureSettingsChanged(nextState, previousState)) {
+        this.gradientTextureCache.clear()
       }
 
       if (nextState.trackColors !== previousState.trackColors && !nextState.isPlaying) {
@@ -181,6 +220,17 @@ export class Renderer {
         nextState.panY !== previousState.panY
       ) {
         this.renderFrame(nextState.currentTick)
+      }
+
+      if (
+        nextState.noteLabelsOnKeys !== previousState.noteLabelsOnKeys ||
+        nextState.noteLabelFormat !== previousState.noteLabelFormat ||
+        nextState.noteLabelColor !== previousState.noteLabelColor ||
+        nextState.noteLabelSize !== previousState.noteLabelSize
+      ) {
+        this.keyLabelsDirty = true
+        this.updateKeyboard(nextState.currentTick)
+        this.app?.render()
       }
 
       if (
@@ -226,6 +276,13 @@ export class Renderer {
 
     this.notePool.releaseAll()
     this.notePool.destroy()
+    this.gradientSpritePool.releaseAll()
+    this.gradientSpritePool.destroy()
+    this.gradientTextureCache.destroy()
+    this.noteLabelPool.releaseAll()
+    this.noteLabelPool.destroy()
+    this.keyLabelPool.releaseAll()
+    this.keyLabelPool.destroy()
     this.keyboardPool.destroy()
 
     this.backgroundGraphic = null
@@ -259,6 +316,7 @@ export class Renderer {
 
   renderFrame(currentTick: number): void {
     this.assertInitialized()
+    this.syncLabelStyles()
 
     const app = this.requireApp()
     const visibleNotes = this.updateNotes(currentTick)
@@ -278,20 +336,21 @@ export class Renderer {
       })
     }
 
-    this.ensureCameraReady(width, height)
+    this.syncViewportSize(width, height)
 
     if (this.app != null) {
-      this.app.renderer.resolution = Math.max(1, cameraSystem.getRenderScale())
+      this.app.renderer.resolution = getCanvasResolution()
       this.app.renderer.resize(width, height)
-      this.app.view.style.width = `${width}px`
-      this.app.view.style.height = `${height}px`
+      this.app.view.style.width = '100%'
+      this.app.view.style.height = '100%'
     }
 
     this.drawBackground()
     this.drawLaneLines()
     this.drawHitLine()
     this.drawKeyboardBacking()
-    this.updateKeyboard(getAppState().currentTick)
+    this.keyLabelsDirty = true
+    this.renderFrame(getAppState().currentTick)
   }
 
   private drawBackground(): void {
@@ -308,7 +367,8 @@ export class Renderer {
   private drawLaneLines(): void {
     const app = this.requireApp()
     const laneLineGraphic = this.requireGraphic(this.laneLineGraphic)
-    const noteFieldHeight = app.screen.height - KEYBOARD_HEIGHT
+    const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const noteFieldHeight = keyboardY
     const laneAlpha = (getAppState().laneOpacity / 100) * 0.15
 
     laneLineGraphic.clear()
@@ -326,7 +386,8 @@ export class Renderer {
   private drawHitLine(): void {
     const app = this.requireApp()
     const hitLineGraphic = this.requireGraphic(this.hitLineGraphic)
-    const hitLineY = app.screen.height - KEYBOARD_HEIGHT - HIT_LINE_HEIGHT
+    const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const hitLineY = keyboardY - HIT_LINE_HEIGHT
 
     hitLineGraphic.clear()
     hitLineGraphic.beginFill(HIT_LINE_COLOR, HIT_LINE_ALPHA)
@@ -358,9 +419,10 @@ export class Renderer {
   private drawKeyboardBacking(): void {
     const app = this.requireApp()
     const keyboardBackingGraphic = this.requireGraphic(this.keyboardBackingGraphic)
-    const backingY = Math.round(app.screen.height - KEYBOARD_HEIGHT - 2)
+    const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const backingY = Math.round(keyboardY - 2)
     const backingWidth = Math.round(app.screen.width)
-    const backingHeight = Math.round(KEYBOARD_HEIGHT + 2)
+    const backingHeight = Math.round(keyboardHeight + 2)
 
     keyboardBackingGraphic.clear()
     keyboardBackingGraphic.beginFill(KEYBOARD_BACKING_COLOR, 1)
@@ -374,12 +436,15 @@ export class Renderer {
     const state = getAppState()
 
     this.notePool.releaseAll()
+    this.gradientSpritePool.releaseAll()
+    this.noteLabelPool.releaseAll()
 
     if (state.projectData == null || state.precomputedTempoMap == null) {
       return []
     }
 
-    const hitLineY = app.screen.height - KEYBOARD_HEIGHT
+    const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const hitLineY = keyboardY
     const currentSeconds = tickToSeconds(currentTick, state.precomputedTempoMap)
     const visibleTickWindow = getVisibleTickWindow(
       currentTick,
@@ -401,45 +466,139 @@ export class Renderer {
     const noteStyle = state.noteStyle
 
     for (const indexedNote of visibleNotes) {
-      const rect = getNoteScreenRect(indexedNote.note, {
-        canvasHeight: app.screen.height,
-        canvasWidth: app.screen.width,
-        currentSeconds,
-        currentTick,
-        tempoMap: state.precomputedTempoMap,
-        worldZoom: state.worldZoom,
-      }, nextNotesById.get(indexedNote.note.id) ?? null)
-
-      if (rect == null) {
+      if (!isBlackKey(indexedNote.note.pitch)) {
         continue
       }
 
-      const graphic = this.notePool.acquire()
-      const noteColor = resolveNoteColor(indexedNote.note, indexedNote.trackId, state)
-      const isActive = currentTick >= indexedNote.note.startTick && currentTick <= indexedNote.note.visualEndTick
-      const isSelected = selectedNoteIds.has(indexedNote.note.id)
-      const isHovered = hoveredNoteId === indexedNote.note.id
+      if (this.renderNote(indexedNote, nextNotesById, currentTick, currentSeconds, noteStyle, selectedNoteIds, hoveredNoteId, state)) {
+        renderedNotes.push(indexedNote)
+      }
+    }
 
-      let brightness = 1
-      if (isHovered) {
-        brightness = Math.max(brightness, HOVERED_NOTE_FILL_BRIGHTNESS)
-      }
-      if (isSelected) {
-        brightness = Math.max(brightness, SELECTED_NOTE_FILL_BRIGHTNESS)
-      }
-      if (isActive) {
-        brightness = Math.max(brightness, NOTE_ACTIVE_BRIGHTNESS)
+    for (const indexedNote of visibleNotes) {
+      if (isBlackKey(indexedNote.note.pitch)) {
+        continue
       }
 
-      const fillColor = brightness === 1 ? noteColor : brightenColor(noteColor, brightness)
-
-      graphic.clear()
-      this.drawStyledNote(graphic, rect.x, rect.y, rect.w, rect.h, fillColor, noteStyle)
-      layers.notes.addChild(graphic)
-      renderedNotes.push(indexedNote)
+      if (this.renderNote(indexedNote, nextNotesById, currentTick, currentSeconds, noteStyle, selectedNoteIds, hoveredNoteId, state)) {
+        renderedNotes.push(indexedNote)
+      }
     }
 
     return renderedNotes
+  }
+
+  private renderNote(
+    indexedNote: IndexedNote,
+    nextNotesById: Map<string, IndexedNote>,
+    currentTick: number,
+    currentSeconds: number,
+    noteStyle: ReturnType<typeof getAppState>['noteStyle'],
+    selectedNoteIds: Set<string>,
+    hoveredNoteId: string | null,
+    state: ReturnType<typeof getAppState>,
+  ): boolean {
+    const app = this.requireApp()
+    const layers = this.requireLayers()
+    const rect = getNoteScreenRect(indexedNote.note, {
+      canvasHeight: app.screen.height,
+      canvasWidth: app.screen.width,
+      currentSeconds,
+      currentTick,
+      tempoMap: state.precomputedTempoMap!,
+      worldZoom: state.worldZoom,
+    }, nextNotesById.get(indexedNote.note.id) ?? null)
+
+    if (rect == null) {
+      return false
+    }
+
+    const noteIsBlack = isBlackKey(indexedNote.note.pitch)
+    const inset = noteIsBlack ? BLACK_KEY_NOTE_INSET : 0
+    const verticalInset = noteIsBlack ? BLACK_KEY_VERTICAL_INSET : 0
+    const adjustedRect = {
+      ...rect,
+      h: Math.max(NOTE_MIN_HEIGHT, rect.h - (verticalInset * 2)),
+      w: Math.max(4, rect.w - (inset * 2)),
+      x: rect.x + inset,
+      y: rect.y + verticalInset,
+    }
+    const noteColor = resolveNoteColor(indexedNote.note, indexedNote.trackId, state)
+    const isActive = currentTick >= indexedNote.note.startTick && currentTick <= indexedNote.note.visualEndTick
+    const isSelected = selectedNoteIds.has(indexedNote.note.id)
+    const isHovered = hoveredNoteId === indexedNote.note.id
+
+    let brightness = 1
+    if (isHovered) {
+      brightness = Math.max(brightness, HOVERED_NOTE_FILL_BRIGHTNESS)
+    }
+    if (isSelected) {
+      brightness = Math.max(brightness, SELECTED_NOTE_FILL_BRIGHTNESS)
+    }
+    if (isActive) {
+      brightness = Math.max(brightness, NOTE_ACTIVE_BRIGHTNESS)
+    }
+
+    const fillColor = brightness === 1 ? noteColor : brightenColor(noteColor, brightness)
+
+    if (noteStyle === 'gradient') {
+      const gradientColors = resolveNoteGradientColors(indexedNote.note, indexedNote.trackId, state)
+      const topColor = pixiToHex(brightenColor(hexToPixi(gradientColors.topColor), brightness))
+      const bottomColor = pixiToHex(brightenColor(hexToPixi(gradientColors.bottomColor), brightness))
+      const sprite = this.gradientSpritePool.acquire()
+      sprite.texture = this.gradientTextureCache.getTexture(
+        topColor,
+        bottomColor,
+        adjustedRect.h,
+        state.noteGradientDirection,
+      )
+      sprite.x = adjustedRect.x
+      sprite.y = adjustedRect.y
+      sprite.width = adjustedRect.w
+      sprite.height = adjustedRect.h
+      sprite.alpha = noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA
+      layers.notes.addChild(sprite)
+    } else {
+      const graphic = this.notePool.acquire()
+      graphic.clear()
+      this.drawStyledNote(
+        graphic,
+        adjustedRect.x,
+        adjustedRect.y,
+        adjustedRect.w,
+        adjustedRect.h,
+        fillColor,
+        noteStyle,
+        noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA,
+      )
+      layers.notes.addChild(graphic)
+    }
+
+    if (state.noteLabelsOnNotes) {
+      const label = this.noteLabelPool.acquire(adjustedRect.w < 14)
+      label.text = getNoteLabel(indexedNote.note.pitch, state.noteLabelFormat)
+      label.x = adjustedRect.x + (adjustedRect.w / 2)
+      label.y = adjustedRect.y + (adjustedRect.h / 2)
+      label.resolution = getLabelResolution()
+
+      if (adjustedRect.w < 8 || adjustedRect.h < 8 || (noteIsBlack && adjustedRect.h < 20)) {
+        label.visible = false
+      } else {
+        const configuredFontSize = Math.max(8, state.noteLabelSize)
+        const fittedFontSize = Math.min(
+          configuredFontSize,
+          Math.floor(adjustedRect.w * 0.7),
+          Math.floor(adjustedRect.h * 0.6),
+        )
+        const visibleFontSize = Math.max(6, fittedFontSize)
+        label.visible = true
+        label.scale.set(visibleFontSize / configuredFontSize)
+      }
+
+      layers.notes.addChild(label)
+    }
+
+    return true
   }
 
   private getNextNotesById(visibleNotes: IndexedNote[]): Map<string, IndexedNote> {
@@ -473,20 +632,22 @@ export class Renderer {
   private updateKeyboard(currentTick: number): void {
     const app = this.requireApp()
     const state = getAppState()
-    const keyboardY = Math.round(app.screen.height - KEYBOARD_HEIGHT)
+    const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
     const blackKeyWidth = Math.max(1, Math.round(getBlackKeyWidth(app.screen.width)))
-    const blackKeyHeight = Math.max(1, Math.round(KEYBOARD_HEIGHT * BLACK_KEY_HEIGHT_RATIO))
+    const blackKeyHeight = Math.max(1, Math.round(keyboardHeight * BLACK_KEY_HEIGHT_RATIO))
     const activeNotesByPitch = this.getActiveNotesByPitch(currentTick)
 
     for (const entry of this.keyboardPool.getEntries()) {
       const activeNote = activeNotesByPitch.get(entry.pitch) ?? null
       const whiteKeyBounds = entry.isBlack ? null : getWhiteKeyBounds(entry.pitch, app.screen.width)
       const keyWidth = entry.isBlack ? blackKeyWidth : whiteKeyBounds.width
-      const keyHeight = entry.isBlack ? blackKeyHeight : Math.round(KEYBOARD_HEIGHT)
+      const keyHeight = entry.isBlack ? blackKeyHeight : Math.round(keyboardHeight)
       const keyX = entry.isBlack ? Math.round(pitchToKeyX(entry.pitch, app.screen.width)) : whiteKeyBounds.x
 
       this.drawKeyboardKey(entry, keyX, keyboardY, keyWidth, keyHeight, activeNote, state)
     }
+
+    this.updateKeyboardLabels(app.screen.width, app.screen.height, state)
   }
 
   private drawKeyboardKey(
@@ -582,40 +743,85 @@ export class Renderer {
     height: number,
     color: number,
     noteStyle: ReturnType<typeof getAppState>['noteStyle'],
+    alpha: number,
   ): void {
     if (noteStyle === 'gradient') {
-      const steps = 8
-
-      for (let index = 0; index < steps; index += 1) {
-        const stripY = y + ((height / steps) * index)
-        const stripHeight = Math.max(1, Math.ceil(height / steps))
-        const alpha = 0.3 + ((index / Math.max(1, steps - 1)) * 0.7)
-
-        graphic.beginFill(color, alpha)
-        graphic.drawRect(x, stripY, width, stripHeight)
-        graphic.endFill()
-      }
       return
     }
 
     if (noteStyle === 'saber') {
-      graphic.beginFill(color, 0.3)
-      graphic.drawRect(x - 2, y, width + 4, height)
+      graphic.beginFill(color, 0.3 * alpha)
+      drawTopRoundedRect(graphic, x - 2, y, width + 4, height, NOTE_CORNER_RADIUS)
       graphic.endFill()
 
-      graphic.beginFill(color, 0.7)
-      graphic.drawRect(x, y, width, height)
+      graphic.beginFill(color, 0.7 * alpha)
+      drawTopRoundedRect(graphic, x, y, width, height, NOTE_CORNER_RADIUS)
       graphic.endFill()
 
-      graphic.beginFill(0xffffff, 0.9)
-      graphic.drawRect(x + 1, y, Math.max(1, width - 2), height)
+      graphic.beginFill(0xffffff, 0.9 * alpha)
+      drawTopRoundedRect(graphic, x + 1, y, Math.max(1, width - 2), height, NOTE_CORNER_RADIUS)
       graphic.endFill()
       return
     }
 
-    graphic.beginFill(color, NOTE_ALPHA)
-    graphic.drawRoundedRect(x, y, width, height, NOTE_CORNER_RADIUS)
+    graphic.beginFill(color, alpha)
+    drawTopRoundedRect(graphic, x, y, width, height, NOTE_CORNER_RADIUS)
     graphic.endFill()
+  }
+
+  private updateKeyboardLabels(
+    canvasWidth: number,
+    canvasHeight: number,
+    state: ReturnType<typeof getAppState>,
+  ): void {
+    if (!this.keyLabelsDirty) {
+      return
+    }
+
+    this.keyLabelPool.releaseAll()
+    this.keyLabelsDirty = false
+
+    if (!state.noteLabelsOnKeys) {
+      return
+    }
+
+    const keyboardLayer = this.requireLayers().keyboard
+    const labelY = canvasHeight - 8
+
+    for (const entry of this.keyboardPool.getWhiteEntries()) {
+      const whiteKeyBounds = getWhiteKeyBounds(entry.pitch, canvasWidth)
+      const label = this.keyLabelPool.acquire()
+      label.text = getNoteLabel(entry.pitch, state.noteLabelFormat)
+      label.x = whiteKeyBounds.x + (whiteKeyBounds.width / 2)
+      label.y = labelY
+      label.scale.set(1)
+      label.resolution = getLabelResolution()
+      keyboardLayer.addChild(label)
+    }
+  }
+
+  private syncLabelStyles(): void {
+    const state = getAppState()
+    const textResolution = getLabelResolution()
+
+    this.noteLabelPool.updateStyles({
+      compactFill: hexToPixi(state.noteLabelColor),
+      compactFontSize: Math.max(8, state.noteLabelSize - 1),
+      fill: hexToPixi(state.noteLabelColor),
+      fontFamily: 'Arial, sans-serif',
+      fontSize: state.noteLabelSize,
+      fontWeight: 'bold',
+      resolution: textResolution,
+    })
+
+    this.keyLabelPool.updateStyles({
+      dropShadow: false,
+      fill: hexToPixi(state.noteLabelColor),
+      fontFamily: 'Arial, sans-serif',
+      fontSize: state.noteLabelSize,
+      fontWeight: 'bold',
+      resolution: textResolution,
+    })
   }
 
   private getActiveNotesByPitch(currentTick: number): Map<number, IndexedNote> {
@@ -659,6 +865,15 @@ export class Renderer {
   private ensureCameraReady(width: number, height: number): void {
     if (!cameraSystem.isInitialized()) {
       throw new RendererError('CameraSystem must be initialized before Renderer.init().', 'NOT_INITIALIZED')
+    }
+
+    this.syncViewportSize(width, height)
+  }
+
+  private syncViewportSize(width: number, height: number): void {
+    const state = getAppState()
+    if (state.viewportWidth === Math.round(width) && state.viewportHeight === Math.round(height)) {
+      return
     }
 
     cameraSystem.setViewportSize(width, height)
@@ -713,6 +928,41 @@ function brightenColor(color: number, brightness: number): number {
   return (red << 16) | (green << 8) | blue
 }
 
+function getCanvasResolution(): number {
+  if (typeof window === 'undefined' || !Number.isFinite(window.devicePixelRatio) || window.devicePixelRatio <= 0) {
+    return 1
+  }
+
+  return window.devicePixelRatio
+}
+
+function getLabelResolution(): number {
+  if (typeof window === 'undefined' || !Number.isFinite(window.devicePixelRatio) || window.devicePixelRatio <= 0) {
+    return 2
+  }
+
+  return Math.max(2, window.devicePixelRatio * 2)
+}
+
+function drawTopRoundedRect(
+  graphic: PIXI.Graphics,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  const clampedRadius = Math.max(0, Math.min(radius, width / 2, height / 2))
+
+  graphic.moveTo(x, y + height)
+  graphic.lineTo(x, y + clampedRadius)
+  graphic.quadraticCurveTo(x, y, x + clampedRadius, y)
+  graphic.lineTo(x + width - clampedRadius, y)
+  graphic.quadraticCurveTo(x + width, y, x + width, y + clampedRadius)
+  graphic.lineTo(x + width, y + height)
+  graphic.closePath()
+}
+
 function haveVisualizerSettingsChanged(
   nextState: ReturnType<typeof getAppState>,
   previousState: ReturnType<typeof getAppState>,
@@ -723,9 +973,20 @@ function haveVisualizerSettingsChanged(
     nextState.bloomRadius !== previousState.bloomRadius ||
     nextState.bloomStrength !== previousState.bloomStrength ||
     nextState.colorMode !== previousState.colorMode ||
+    nextState.gradientBottomColorLeft !== previousState.gradientBottomColorLeft ||
+    nextState.gradientBottomColorLeftBlack !== previousState.gradientBottomColorLeftBlack ||
+    nextState.gradientBottomColorRight !== previousState.gradientBottomColorRight ||
+    nextState.gradientBottomColorRightBlack !== previousState.gradientBottomColorRightBlack ||
+    nextState.gradientTopColor !== previousState.gradientTopColor ||
     nextState.keyGlowEnabled !== previousState.keyGlowEnabled ||
     nextState.keyGlowIntensity !== previousState.keyGlowIntensity ||
     nextState.leftHandColor !== previousState.leftHandColor ||
+    nextState.noteLabelColor !== previousState.noteLabelColor ||
+    nextState.noteGradientDirection !== previousState.noteGradientDirection ||
+    nextState.noteLabelFormat !== previousState.noteLabelFormat ||
+    nextState.noteLabelSize !== previousState.noteLabelSize ||
+    nextState.noteLabelsOnKeys !== previousState.noteLabelsOnKeys ||
+    nextState.noteLabelsOnNotes !== previousState.noteLabelsOnNotes ||
     nextState.noteStyle !== previousState.noteStyle ||
     nextState.particleCount !== previousState.particleCount ||
     nextState.particleSize !== previousState.particleSize ||
@@ -735,6 +996,20 @@ function haveVisualizerSettingsChanged(
     nextState.splitPitch !== previousState.splitPitch ||
     nextState.velocityHighColor !== previousState.velocityHighColor ||
     nextState.velocityLowColor !== previousState.velocityLowColor
+  )
+}
+
+function haveGradientTextureSettingsChanged(
+  nextState: ReturnType<typeof getAppState>,
+  previousState: ReturnType<typeof getAppState>,
+): boolean {
+  return (
+    nextState.gradientBottomColorLeft !== previousState.gradientBottomColorLeft ||
+    nextState.gradientBottomColorLeftBlack !== previousState.gradientBottomColorLeftBlack ||
+    nextState.gradientBottomColorRight !== previousState.gradientBottomColorRight ||
+    nextState.gradientBottomColorRightBlack !== previousState.gradientBottomColorRightBlack ||
+    nextState.gradientTopColor !== previousState.gradientTopColor ||
+    nextState.noteGradientDirection !== previousState.noteGradientDirection
   )
 }
 

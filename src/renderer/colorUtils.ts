@@ -1,13 +1,24 @@
 import type { Note } from '../midi/types'
 import type { AppState } from '../store/store'
+import { isBlackKey } from './pianoMath'
 
 const DEFAULT_COLOR = '#4f8ef7'
+const DEFAULT_TOP_COLOR = '#ffffff'
+
+export interface NoteGradientColors {
+  topColor: string
+  bottomColor: string
+}
 
 export function resolveNoteColor(
   note: Note,
   trackId: string,
   state: AppState,
 ): number {
+  if (state.colorMode === 'split' && state.noteStyle === 'gradient') {
+    return hexToPixi(resolveSplitGradientBottomColor(note.pitch, state))
+  }
+
   switch (state.colorMode) {
     case 'track':
       return hexToPixi(state.trackColors[trackId] ?? DEFAULT_COLOR)
@@ -26,6 +37,24 @@ export function resolveNoteColor(
         hexToPixi(state.velocityHighColor),
         note.velocity / 127,
       )
+  }
+}
+
+export function resolveNoteGradientColors(
+  note: Note,
+  trackId: string,
+  state: AppState,
+): NoteGradientColors {
+  if (state.colorMode === 'split' && state.noteStyle === 'gradient') {
+    return {
+      bottomColor: resolveSplitGradientBottomColor(note.pitch, state),
+      topColor: state.gradientTopColor,
+    }
+  }
+
+  return {
+    bottomColor: pixiToHex(resolveNoteColor(note, trackId, state)),
+    topColor: state.gradientTopColor ?? DEFAULT_TOP_COLOR,
   }
 }
 
@@ -63,6 +92,22 @@ export function hexToPixi(hex: string): number {
   const blue = (hexNibble(normalized.charCodeAt(4)) << 4) | hexNibble(normalized.charCodeAt(5))
 
   return (red << 16) | (green << 8) | blue
+}
+
+export function pixiToHex(color: number): string {
+  const normalized = Math.max(0, Math.min(0xffffff, Math.round(color)))
+  return `#${normalized.toString(16).padStart(6, '0')}`
+}
+
+function resolveSplitGradientBottomColor(pitch: number, state: AppState): string {
+  const isRightHand = pitch >= state.splitPitch
+  const isBlack = isBlackKey(pitch)
+
+  if (isRightHand) {
+    return isBlack ? state.gradientBottomColorRightBlack : state.gradientBottomColorRight
+  }
+
+  return isBlack ? state.gradientBottomColorLeftBlack : state.gradientBottomColorLeft
 }
 
 function clamp01(value: number): number {

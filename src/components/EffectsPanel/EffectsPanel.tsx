@@ -4,6 +4,7 @@ import styles from './EffectsPanel.module.css'
 import { BackgroundSection } from './sections/BackgroundSection'
 import { ColorModeSection } from './sections/ColorModeSection'
 import { EffectsSection } from './sections/EffectsSection'
+import { NoteLabelsSection } from './sections/NoteLabelsSection'
 import { NoteStyleSection } from './sections/NoteStyleSection'
 
 export interface EffectsPanelProps {
@@ -65,6 +66,7 @@ export function EffectsPanel({ onClose }: EffectsPanelProps) {
       <div className={styles.content}>
         <ColorModeSection />
         <NoteStyleSection />
+        <NoteLabelsSection />
         <EffectsSection />
         <BackgroundSection />
       </div>

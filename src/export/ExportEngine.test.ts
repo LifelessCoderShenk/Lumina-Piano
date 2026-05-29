@@ -14,26 +14,32 @@ const mockResize = vi.hoisted(() => vi.fn())
 const mockEffectsSeek = vi.hoisted(() => vi.fn())
 const mockGetTempDir = vi.hoisted(() => vi.fn(() => Promise.resolve('C:\\temp\\lumina-export-test')))
 const mockSaveFile = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const mockToneOffline = vi.hoisted(() => vi.fn(() => Promise.resolve(createMockAudioBuffer())))
 const mockFfmpegRun = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+const mockFsWriteFile = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+const mockToneLoaded = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+const mockToneOffline = vi.hoisted(() => vi.fn(async (callback: () => Promise<void>, _duration: number) => {
+  await callback()
+  return createMockAudioBuffer()
+}))
+const mockSamplerToDestination = vi.hoisted(() => vi.fn())
+const mockSamplerTriggerAttackRelease = vi.hoisted(() => vi.fn())
+const mockTransportCancel = vi.hoisted(() => vi.fn())
 const mockSetViewportSize = vi.hoisted(() => vi.fn())
 const mockMuxerAddVideoChunk = vi.hoisted(() => vi.fn())
-const mockMuxerAddAudioChunk = vi.hoisted(() => vi.fn())
 const mockMuxerFinalize = vi.hoisted(() => vi.fn())
 const mockVideoEncoderConfigure = vi.hoisted(() => vi.fn())
 const mockVideoEncoderEncode = vi.hoisted(() => vi.fn())
 const mockVideoEncoderFlush = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const mockVideoEncoderClose = vi.hoisted(() => vi.fn())
-const mockAudioEncoderConfigure = vi.hoisted(() => vi.fn())
-const mockAudioEncoderEncode = vi.hoisted(() => vi.fn())
-const mockAudioEncoderFlush = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const mockAudioEncoderClose = vi.hoisted(() => vi.fn())
 const mockVideoFrameClose = vi.hoisted(() => vi.fn())
-const mockAudioDataClose = vi.hoisted(() => vi.fn())
+const mockPlaybackPlay = vi.hoisted(() => vi.fn())
+const mockPlaybackPause = vi.hoisted(() => vi.fn())
+const mockPlaybackSeek = vi.hoisted(() => vi.fn())
 
 vi.mock('./exportFileSystem', () => ({
   mkdirExportDir: mockMkdir,
   rmExportDir: mockRm,
+  writeExportFile: mockFsWriteFile,
 }))
 
 vi.mock('webm-muxer', () => ({
@@ -41,7 +47,6 @@ vi.mock('webm-muxer', () => ({
     buffer = new Uint8Array([1, 2, 3, 4]).buffer
   },
   Muxer: class Muxer {
-    addAudioChunk = mockMuxerAddAudioChunk
     addVideoChunk = mockMuxerAddVideoChunk
     finalize = mockMuxerFinalize
   },
@@ -50,11 +55,25 @@ vi.mock('webm-muxer', () => ({
 vi.mock('tone', () => ({
   Frequency: vi.fn(() => ({ toNote: () => 'C4' })),
   Offline: mockToneOffline,
-  Sampler: vi.fn(() => ({
-    toDestination: vi.fn().mockReturnThis(),
-    triggerAttackRelease: vi.fn(),
-  })),
-  loaded: vi.fn(() => Promise.resolve()),
+  Sampler: class Sampler {
+    constructor(_options: object) {}
+
+    toDestination() {
+      mockSamplerToDestination()
+      return {
+        triggerAttackRelease: mockSamplerTriggerAttackRelease,
+      }
+    }
+  },
+  Transport: {
+    cancel: mockTransportCancel,
+    loop: false,
+    loopEnd: 0,
+    loopStart: 0,
+    position: 0,
+    swing: 0,
+  },
+  loaded: mockToneLoaded,
 }))
 
 vi.mock('../renderer/Renderer', () => ({
@@ -75,6 +94,14 @@ vi.mock('../camera/CameraSystem', () => ({
 vi.mock('../effects/EffectsLayer', () => ({
   effectsLayer: {
     seek: mockEffectsSeek,
+  },
+}))
+
+vi.mock('../playback/PlaybackEngine', () => ({
+  playbackEngine: {
+    pause: mockPlaybackPause,
+    play: mockPlaybackPlay,
+    seek: mockPlaybackSeek,
   },
 }))
 
@@ -106,31 +133,6 @@ beforeEach(() => {
       mockVideoEncoderClose()
     }
   })
-  vi.stubGlobal('AudioEncoder', class AudioEncoder {
-    readonly encodeQueueSize = 0
-    private readonly output: (chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) => void
-
-    constructor(init: AudioEncoderInit) {
-      this.output = init.output
-    }
-
-    configure(config: AudioEncoderConfig) {
-      mockAudioEncoderConfigure(config)
-    }
-
-    encode(data: AudioData) {
-      mockAudioEncoderEncode(data)
-      this.output({ timestamp: data.timestamp, type: 'key' } as EncodedAudioChunk)
-    }
-
-    flush() {
-      return mockAudioEncoderFlush()
-    }
-
-    close() {
-      mockAudioEncoderClose()
-    }
-  })
   vi.stubGlobal('VideoFrame', class VideoFrame {
     readonly timestamp: number
     readonly duration: number
@@ -142,17 +144,6 @@ beforeEach(() => {
 
     close() {
       mockVideoFrameClose()
-    }
-  })
-  vi.stubGlobal('AudioData', class AudioData {
-    readonly timestamp: number
-
-    constructor(init: AudioDataInit) {
-      this.timestamp = init.timestamp
-    }
-
-    close() {
-      mockAudioDataClose()
     }
   })
   window.electronAPI = {
@@ -176,6 +167,12 @@ beforeEach(() => {
       maximize: vi.fn(),
       minimize: vi.fn(),
     },
+  }
+  window.electronFS = {
+    mkdir: vi.fn(),
+    readFile: vi.fn(),
+    rm: vi.fn(),
+    writeFile: mockFsWriteFile,
   }
 })
 
@@ -309,16 +306,14 @@ describe('ExportEngine', () => {
     await engine.export(createSettings({ includeAudio: false }))
 
     expect(mockToneOffline).not.toHaveBeenCalled()
-    expect(mockAudioEncoderEncode).not.toHaveBeenCalled()
     expect(mockFfmpegRun).toHaveBeenCalled()
     const ffmpegArgs = mockFfmpegRun.mock.calls[0]?.[0] as string[]
     expect(ffmpegArgs).toContain('-c:v')
     expect(ffmpegArgs).toContain('copy')
-    expect(ffmpegArgs).toContain('-c:a')
-    expect(ffmpegArgs).toContain('aac')
+    expect(ffmpegArgs).not.toContain('-c:a')
   })
 
-  it('excludes muted tracks from offline audio rendering', async () => {
+  it('renders audio through Tone.Offline when includeAudio is enabled', async () => {
     loadProject(480, createTempoMap(), [
       {
         channel: 0,
@@ -339,7 +334,12 @@ describe('ExportEngine', () => {
     const engine = new ExportEngine()
     await engine.export(createSettings())
 
-    expect(mockToneOffline).toHaveBeenCalled()
+    expect(mockTransportCancel).toHaveBeenCalled()
+    expect(mockToneOffline).toHaveBeenCalledTimes(1)
+    expect(mockToneLoaded).toHaveBeenCalledTimes(1)
+    expect(mockSamplerToDestination).toHaveBeenCalledTimes(1)
+    expect(mockSamplerTriggerAttackRelease).toHaveBeenCalledTimes(1)
+    expect(mockFsWriteFile).toHaveBeenCalledTimes(1)
   })
 
   it('throws FFMPEG_FAILED when ffmpeg exits with a non-zero code', async () => {
@@ -419,18 +419,21 @@ function createTempoMap(): PrecomputedTempoMap {
   }
 }
 
-function createMockAudioBuffer(): AudioBuffer {
-  return {
-    length: 4,
-    numberOfChannels: 2,
-    sampleRate: 48_000,
-    getChannelData: () => new Float32Array([0, 0.25, -0.25, 0.5]),
-  } as AudioBuffer
-}
-
 function createMockCanvas(): HTMLCanvasElement {
   return {
     height: 1080,
     width: 1920,
   } as HTMLCanvasElement
+}
+
+function createMockAudioBuffer(): AudioBuffer {
+  const channelData = new Float32Array([0.1, -0.1, 0.05, -0.05])
+
+  return {
+    duration: channelData.length / 48_000,
+    getChannelData: vi.fn(() => channelData),
+    length: channelData.length,
+    numberOfChannels: 2,
+    sampleRate: 48_000,
+  } as AudioBuffer
 }

@@ -1,12 +1,11 @@
 import React from 'react'
 import cx from 'classnames'
-import { useAppStore, useProjectData, useTrackColors } from '../../store/store'
+import { useAppStore, useProjectData } from '../../store/store'
 import type { Track } from '../../midi/types'
 import styles from './TrackList.module.css'
 
 export function TrackList() {
   const { projectData } = useProjectData()
-  const trackColors = useTrackColors()
 
   if (!projectData) {
     return (
@@ -29,7 +28,6 @@ export function TrackList() {
           <TrackRow
             key={track.id}
             track={track}
-            color={trackColors[track.id]}
             index={i}
           />
         ))}
@@ -38,18 +36,21 @@ export function TrackList() {
   )
 }
 
-function TrackRow({ track, color, index }: { track: Track; color: string; index: number }) {
+function TrackRow({ track, index }: { track: Track; index: number }) {
+  const color = useAppStore((state) => state.trackColors[track.id] ?? '#4f8ef7')
   const muted = useAppStore(s => s.trackMuted[track.id])
   const soloed = useAppStore(s => s.trackSoloed[track.id])
 
   return (
     <div className={styles.trackRow}>
-      <input
-        type="color"
-        value={color}
-        onChange={e => useAppStore.getState().setTrackColor(track.id, e.target.value)}
-        className={styles.swatch}
-      />
+      <label className={styles.colorSwatch} style={{ backgroundColor: color }}>
+        <input
+          type="color"
+          value={color}
+          onChange={e => useAppStore.getState().setTrackColor(track.id, e.target.value)}
+          className={styles.hiddenColorInput}
+        />
+      </label>
       <span className={styles.trackName}>{track.name || `Track ${index + 1}`}</span>
       <div className={styles.controls}>
         <button

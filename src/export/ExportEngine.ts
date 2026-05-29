@@ -1,11 +1,13 @@
 import { ArrayBufferTarget, Muxer } from 'webm-muxer'
 
 import { mkdirExportDir, rmExportDir } from './exportFileSystem'
+import { writeAudioBufferToWav } from './wavWriter'
 
 import * as Tone from 'tone'
 
 import { cameraSystem } from '../camera/CameraSystem'
 import { effectsLayer } from '../effects/EffectsLayer'
+import { playbackEngine } from '../playback/PlaybackEngine'
 import { renderer } from '../renderer/Renderer'
 import type { AppState } from '../store/store'
 import { getAppState } from '../store/store'
@@ -14,16 +16,18 @@ import { ExportError } from './errors'
 import type { ExportProgress, ExportResolution, ExportSettings } from './types'
 import { RESOLUTIONS } from './types'
 
-const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/'
-const EXPORT_AUDIO_CHANNELS = 2
-const EXPORT_AUDIO_SAMPLE_RATE = 48_000
-const EXPORT_AUDIO_BITRATE = 192_000
-const OPUS_FRAME_DURATION_SECONDS = 0.02
 const AUDIO_PROGRESS_START = 0.85
 const COMBINING_PROGRESS = 0.95
 const KEYFRAME_INTERVAL_SECONDS = 2
 const STANDARD_VIDEO_BITRATE = 8_000_000
 const UHD_VIDEO_BITRATE = 40_000_000
+const AUDIO_PROGRESS_STEPS_PER_SECOND = 10
+const OFFLINE_AUDIO_ATTACK_SECONDS = 0.01
+const OFFLINE_AUDIO_RELEASE_SECONDS = 0.5
+const OFFLINE_AUDIO_LEAD_IN_SECONDS = 0.1
+const OFFLINE_AUDIO_TAIL_SECONDS = 0.1
+const OFFLINE_AUDIO_MIN_SCHEDULE_OFFSET_SECONDS = 0.001
+const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/'
 
 const SALAMANDER_SAMPLE_URLS = {
   A0: 'A0.mp3',
@@ -112,6 +116,10 @@ export class ExportEngine {
     const resolution = validateSettings(settings)
     const totalFrames = getTotalFrames(settings.fps, state.projectData.totalTicks, state.precomputedTempoMap)
     const store = getAppState()
+    const previousPlayback = {
+      currentTick: store.currentTick,
+      isPlaying: store.isPlaying,
+    }
     const previousViewport = {
       height: store.viewportHeight,
       width: store.viewportWidth,
@@ -121,6 +129,9 @@ export class ExportEngine {
     this.shouldCancel = false
     store.setIsExporting(true)
     this.tempDir = await getTempDir()
+    if (previousPlayback.isPlaying) {
+      playbackEngine.pause()
+    }
 
     try {
       await mkdirExportDir(this.tempDir)
@@ -142,16 +153,25 @@ export class ExportEngine {
             totalFrames: total,
           })
         },
-        (chunksEncoded, totalChunks, remaining) => {
-          this.emitProgress({
-            estimatedSecondsRemaining: remaining,
-            framesRendered: totalFrames,
-            phase: 'audio',
-            progress: AUDIO_PROGRESS_START + ((chunksEncoded / totalChunks) * (COMBINING_PROGRESS - AUDIO_PROGRESS_START)),
-            totalFrames,
-          })
-        },
       )
+
+      const tempWebmPath = joinExportPath(this.tempDir, 'export.webm')
+      await saveEncodedVideoFile(webmBuffer, tempWebmPath)
+      const audioPath = settings.includeAudio
+        ? await this.renderOfflineAudio(
+          joinExportPath(this.tempDir, 'export-audio.wav'),
+          state,
+          (stepsCompleted, totalSteps, remaining) => {
+            this.emitProgress({
+              estimatedSecondsRemaining: remaining,
+              framesRendered: totalFrames,
+              phase: 'audio',
+              progress: AUDIO_PROGRESS_START + ((stepsCompleted / totalSteps) * (COMBINING_PROGRESS - AUDIO_PROGRESS_START)),
+              totalFrames,
+            })
+          },
+        )
+        : null
 
       this.emitProgress({
         estimatedSecondsRemaining: 0,
@@ -161,9 +181,7 @@ export class ExportEngine {
         totalFrames,
       })
 
-      const tempWebmPath = joinExportPath(this.tempDir, 'export.webm')
-      await saveEncodedVideoFile(webmBuffer, tempWebmPath)
-      await this.combineWithFFmpeg(tempWebmPath, settings.outputPath)
+      await this.combineWithFFmpeg(tempWebmPath, audioPath, settings.outputPath)
 
       this.emitProgress({
         estimatedSecondsRemaining: 0,
@@ -188,6 +206,12 @@ export class ExportEngine {
       this.errorListener?.(exportError.message)
       throw exportError
     } finally {
+      playbackEngine.pause()
+      playbackEngine.seek(previousPlayback.currentTick)
+      if (previousPlayback.isPlaying) {
+        playbackEngine.play()
+      }
+
       renderer.resize(previousViewport.width, previousViewport.height)
       cameraSystem.setViewportSize(previousViewport.width, previousViewport.height)
       effectsLayer.seek(getAppState().currentTick)
@@ -212,7 +236,6 @@ export class ExportEngine {
     resolution: ExportResolution,
     totalFrames: number,
     onVideoProgress: ProgressCallback,
-    onAudioProgress: ProgressCallback,
   ): Promise<ArrayBuffer> {
     const state = getAppState()
     const projectData = state.projectData
@@ -223,21 +246,9 @@ export class ExportEngine {
     }
 
     const ticksPerFrame = Math.max(1, secondsToTick(1 / settings.fps, tempoMap))
-    let audioBuffer: AudioBuffer | null = null
-    if (settings.includeAudio) {
-      console.log('[Export] Starting audio render...')
-      audioBuffer = await this.renderAudioBuffer()
-    }
     const target = new ArrayBufferTarget()
     const canvas = renderer.getCanvas()
     const muxer = new Muxer({
-      audio: audioBuffer != null
-        ? {
-          codec: 'A_OPUS',
-          numberOfChannels: EXPORT_AUDIO_CHANNELS,
-          sampleRate: audioBuffer.sampleRate,
-        }
-        : undefined,
       firstTimestampBehavior: 'offset',
       target,
       video: {
@@ -309,115 +320,47 @@ export class ExportEngine {
       videoEncoder.close()
     }
 
-    if (audioBuffer != null) {
-      console.log('[Export] Audio buffer duration:', audioBuffer.duration, 'seconds')
-      console.log('[Export] Audio buffer length:', audioBuffer.length, 'samples')
-      console.log('[Export] Audio channels:', audioBuffer.numberOfChannels)
-      console.log('[Audio] Buffer sampleRate:', audioBuffer.sampleRate)
-      console.log('[Audio] Buffer duration:', audioBuffer.duration)
-      console.log('[Audio] Buffer length:', audioBuffer.length)
-      const totalSamples = audioBuffer.length
-      const sampleRate = audioBuffer.sampleRate
-      console.log('[Audio] Encoder configured sampleRate:', sampleRate)
-      const opusFrameSize = Math.max(1, Math.round(sampleRate * OPUS_FRAME_DURATION_SECONDS))
-      const totalChunks = Math.max(1, Math.ceil(totalSamples / opusFrameSize))
-      const leftChannel = audioBuffer.getChannelData(0)
-      const rightChannel = audioBuffer.numberOfChannels > 1
-        ? audioBuffer.getChannelData(1)
-        : leftChannel
-      const audioStartTime = performance.now()
-      let audioEncoderError: unknown = null
-
-      const audioEncoder = new AudioEncoder({
-        error: (error) => {
-          console.error('[Export] AudioEncoder error:', error)
-          audioEncoderError = error
-        },
-        output: (chunk, meta) => {
-          console.log('[Export] Audio chunk added, size:', chunk.byteLength)
-          muxer.addAudioChunk(chunk, meta)
-        },
-      })
-
-      audioEncoder.configure({
-        bitrate: EXPORT_AUDIO_BITRATE,
-        codec: 'opus',
-        numberOfChannels: EXPORT_AUDIO_CHANNELS,
-        sampleRate,
-      })
-
-      try {
-        for (let offset = 0, chunkIndex = 0; offset < totalSamples; offset += opusFrameSize, chunkIndex += 1) {
-          this.assertNotCancelled()
-          throwIfEncoderErrored(audioEncoderError, 'AUDIO_RENDER_FAILED')
-
-          const frameSize = Math.min(opusFrameSize, totalSamples - offset)
-          const left = new Float32Array(opusFrameSize)
-          const right = new Float32Array(opusFrameSize)
-
-          left.set(leftChannel.slice(offset, offset + frameSize))
-          if (audioBuffer.numberOfChannels > 1) {
-            right.set(rightChannel.slice(offset, offset + frameSize))
-          } else {
-            right.set(left)
-          }
-
-          const interleaved = new Float32Array(opusFrameSize * EXPORT_AUDIO_CHANNELS)
-          for (let index = 0; index < opusFrameSize; index += 1) {
-            interleaved[index * 2] = left[index]
-            interleaved[(index * 2) + 1] = right[index]
-          }
-
-          const audioData = new AudioData({
-            data: interleaved,
-            format: 'f32',
-            numberOfChannels: EXPORT_AUDIO_CHANNELS,
-            numberOfFrames: opusFrameSize,
-            sampleRate,
-            timestamp: Math.round(offset * (1_000_000 / sampleRate)),
-          })
-
-          audioEncoder.encode(audioData)
-          audioData.close()
-
-          if (audioEncoder.encodeQueueSize > 32) {
-            await audioEncoder.flush()
-          }
-
-          const elapsed = (performance.now() - audioStartTime) / 1000
-          const chunksPerSecond = elapsed > 0 ? (chunkIndex + 1) / elapsed : 0
-          const remaining = chunksPerSecond > 0 ? (totalChunks - chunkIndex - 1) / chunksPerSecond : 0
-          onAudioProgress(chunkIndex + 1, totalChunks, remaining)
-        }
-
-        console.log('[Export] Audio chunks encoded, flushing...')
-        await audioEncoder.flush()
-        console.log('[Export] Audio encoder flushed')
-        throwIfEncoderErrored(audioEncoderError, 'AUDIO_RENDER_FAILED')
-      } finally {
-        audioEncoder.close()
-      }
-    }
-
     muxer.finalize()
     return target.buffer
   }
 
-  private async renderAudioBuffer(): Promise<AudioBuffer> {
-    const state = getAppState()
+  private async renderOfflineAudio(
+    outputPath: string,
+    state: AppState,
+    onAudioProgress: ProgressCallback,
+  ): Promise<string> {
     const projectData = state.projectData
     const tempoMap = state.precomputedTempoMap
-
     if (projectData == null || tempoMap == null) {
       throw new ExportError('No project is loaded.', 'NO_PROJECT')
     }
 
-    const durationSeconds = tickToSeconds(projectData.totalTicks, tempoMap) + 2
+    const songDurationSeconds = tickToSeconds(projectData.totalTicks, tempoMap)
+    const totalDurationSeconds = songDurationSeconds + OFFLINE_AUDIO_LEAD_IN_SECONDS + OFFLINE_AUDIO_TAIL_SECONDS
+    const totalSteps = Math.max(1, Math.ceil(totalDurationSeconds * AUDIO_PROGRESS_STEPS_PER_SECOND))
+    const scheduledNotes = countScheduledNotes(projectData, state)
+    console.log('[Export] Total scheduled notes:', scheduledNotes)
+    Tone.Transport.cancel()
+    Tone.Transport.swing = 0
+    Tone.Transport.loop = false
+    Tone.Transport.loopStart = 0
+    Tone.Transport.loopEnd = 0
+    Tone.Transport.position = 0
+
+    const renderStartedAt = performance.now()
+    const progressTimer = setInterval(() => {
+      const elapsedSeconds = (performance.now() - renderStartedAt) / 1000
+      const completedSteps = Math.min(totalSteps - 1, Math.floor(elapsedSeconds * AUDIO_PROGRESS_STEPS_PER_SECOND))
+      const remaining = Math.max(0, totalDurationSeconds - elapsedSeconds)
+      onAudioProgress(completedSteps, totalSteps, remaining)
+    }, 100)
 
     try {
-      const buffer = await Tone.Offline(async () => {
+      const audioBuffer = await Tone.Offline(async () => {
         const sampler = new Tone.Sampler({
+          attack: OFFLINE_AUDIO_ATTACK_SECONDS,
           baseUrl: SALAMANDER_BASE_URL,
+          release: OFFLINE_AUDIO_RELEASE_SECONDS,
           urls: SALAMANDER_SAMPLE_URLS,
         }).toDestination()
 
@@ -429,46 +372,26 @@ export class ExportEngine {
           }
 
           for (const note of track.notes) {
-            const startSec = tickToSeconds(note.startTick, tempoMap)
-            const endSec = tickToSeconds(note.endTick, tempoMap)
-            const duration = Math.max(0, endSec - startSec)
+            const noteStartSeconds = OFFLINE_AUDIO_LEAD_IN_SECONDS + tickToSeconds(note.startTick, tempoMap)
+            const noteEndSeconds = OFFLINE_AUDIO_LEAD_IN_SECONDS + tickToSeconds(note.endTick, tempoMap)
+            const durationSeconds = Math.max(0, noteEndSeconds - noteStartSeconds)
+            const scheduleTime = Math.max(noteStartSeconds, OFFLINE_AUDIO_MIN_SCHEDULE_OFFSET_SECONDS)
+            const pitch = Tone.Frequency(note.pitch, 'midi').toNote()
 
             sampler.triggerAttackRelease(
-              Tone.Frequency(note.pitch, 'midi').toNote(),
-              duration,
-              startSec,
+              pitch,
+              durationSeconds,
+              scheduleTime,
               note.velocity / 127,
             )
           }
         }
-      }, durationSeconds, EXPORT_AUDIO_CHANNELS, EXPORT_AUDIO_SAMPLE_RATE)
+      }, totalDurationSeconds)
 
-      let maxSample = 0
-      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-        const channelData = buffer.getChannelData(channel)
-        for (let index = 0; index < channelData.length; index += 1) {
-          const magnitude = Math.abs(channelData[index] ?? 0)
-          if (magnitude > maxSample) {
-            maxSample = magnitude
-          }
-        }
-      }
-
-      console.log('[Audio] Max sample value:', maxSample)
-
-      if (maxSample > 1) {
-        const scale = 0.95 / maxSample
-        console.log('[Audio] Normalizing clipped audio with scale:', scale)
-
-        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-          const channelData = buffer.getChannelData(channel)
-          for (let index = 0; index < channelData.length; index += 1) {
-            channelData[index] *= scale
-          }
-        }
-      }
-
-      return buffer as unknown as AudioBuffer
+      this.assertNotCancelled()
+      await writeAudioBufferToWav(audioBuffer, outputPath)
+      onAudioProgress(totalSteps, totalSteps, 0)
+      return outputPath
     } catch (error: unknown) {
       console.error('[Export] Inner error caught:', error)
 
@@ -481,24 +404,46 @@ export class ExportEngine {
         'AUDIO_RENDER_FAILED',
         error,
       )
+    } finally {
+      clearInterval(progressTimer)
     }
   }
 
-  private async combineWithFFmpeg(inputWebmPath: string, outputPath: string): Promise<void> {
-    await runFFmpeg([
-      '-i',
-      inputWebmPath,
-      '-c:v',
-      'copy',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '192k',
-      '-movflags',
-      '+faststart',
-      '-y',
-      outputPath,
-    ])
+  private async combineWithFFmpeg(inputWebmPath: string, audioPath: string | null, outputPath: string): Promise<void> {
+    const args = audioPath == null
+      ? [
+        '-i',
+        inputWebmPath,
+        '-c:v',
+        'copy',
+        '-movflags',
+        '+faststart',
+        '-y',
+        outputPath,
+      ]
+      : [
+        '-i',
+        inputWebmPath,
+        '-i',
+        audioPath,
+        '-map',
+        '0:v:0',
+        '-map',
+        '1:a:0',
+        '-c:v',
+        'copy',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        '-movflags',
+        '+faststart',
+        '-shortest',
+        '-y',
+        outputPath,
+      ]
+
+    await runFFmpeg(args)
   }
 
   private async cleanup(tempDir: string): Promise<void> {
@@ -572,6 +517,23 @@ function shouldPlayTrack(trackId: string, state: AppState): boolean {
   return state.trackMuted[trackId] !== true
 }
 
+function countScheduledNotes(
+  projectData: NonNullable<AppState['projectData']>,
+  state: AppState,
+): number {
+  let count = 0
+
+  for (const track of projectData.tracks) {
+    if (!shouldPlayTrack(track.id, state)) {
+      continue
+    }
+
+    count += track.notes.length
+  }
+
+  return count
+}
+
 function getTotalFrames(
   fps: ExportSettings['fps'],
   totalTicks: number,
@@ -605,9 +567,7 @@ function throwIfEncoderErrored(error: unknown, code: 'FRAME_RENDER_FAILED' | 'AU
 function assertWebCodecsAvailable(): void {
   if (
     typeof VideoEncoder === 'undefined' ||
-    typeof VideoFrame === 'undefined' ||
-    typeof AudioEncoder === 'undefined' ||
-    typeof AudioData === 'undefined'
+    typeof VideoFrame === 'undefined'
   ) {
     throw new ExportError('WebCodecs is unavailable in this environment.', 'FRAME_RENDER_FAILED')
   }

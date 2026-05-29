@@ -69,6 +69,10 @@
   background: linear-gradient(to top, rgb(79 142 247 / 100%), rgb(79 142 247 / 28%));
 }
 
+.previewGradient[data-direction='horizontal'] {
+  background: linear-gradient(to right, rgb(79 142 247 / 100%), rgb(79 142 247 / 28%));
+}
+
 .previewSaber {
   background: #4f8ef7;
   box-shadow:
@@ -79,4 +83,91 @@
 .label {
   font-size: 11px;
   font-weight: 700;
+}
+
+.directionSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gradientSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.directionLabel {
+  color: #6b7a8d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.directionTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.directionTab,
+.directionTabActive {
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.directionTab {
+  border: 1px solid #ffffff10;
+  background: #13131a;
+  color: #6b7a8d;
+}
+
+.directionTabActive {
+  border: 1px solid #4f8ef7;
+  background: #1a2535;
+  color: #ffffff;
+}
+
+.colorGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #ffffff10;
+  border-radius: 6px;
+  background: #0d0d18;
+}
+
+.groupTitle {
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.colorLabel {
+  color: #8899aa;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.colorInput {
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #ffffff15;
+  border-radius: 4px;
+  background: #13131a;
+  cursor: pointer;
 }

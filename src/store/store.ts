@@ -97,6 +97,12 @@ interface VisualizerSettingsSlice {
   velocityLowColor: string
   velocityHighColor: string
   noteStyle: 'solid' | 'gradient' | 'saber'
+  noteGradientDirection: 'vertical' | 'horizontal'
+  gradientTopColor: string
+  gradientBottomColorRight: string
+  gradientBottomColorLeft: string
+  gradientBottomColorRightBlack: string
+  gradientBottomColorLeftBlack: string
   bloomEnabled: boolean
   bloomStrength: number
   bloomRadius: number
@@ -107,6 +113,11 @@ interface VisualizerSettingsSlice {
   keyGlowIntensity: number
   backgroundColor: string
   laneOpacity: number
+  noteLabelsOnNotes: boolean
+  noteLabelsOnKeys: boolean
+  noteLabelFormat: 'name' | 'nameOctave'
+  noteLabelColor: string
+  noteLabelSize: number
 }
 
 export type AppState =
@@ -154,6 +165,12 @@ export interface AppActions {
   setRightHandColor(color: string): void
   setVelocityColors(low: string, high: string): void
   setNoteStyle(style: VisualizerSettingsSlice['noteStyle']): void
+  setNoteGradientDirection(direction: VisualizerSettingsSlice['noteGradientDirection']): void
+  setGradientTopColor(color: string): void
+  setGradientBottomColorRight(color: string): void
+  setGradientBottomColorLeft(color: string): void
+  setGradientBottomColorRightBlack(color: string): void
+  setGradientBottomColorLeftBlack(color: string): void
   setBloomEnabled(enabled: boolean): void
   setBloomStrength(value: number): void
   setBloomRadius(value: number): void
@@ -164,6 +181,11 @@ export interface AppActions {
   setKeyGlowIntensity(value: number): void
   setBackgroundColor(color: string): void
   setLaneOpacity(value: number): void
+  setNoteLabelsOnNotes(value: boolean): void
+  setNoteLabelsOnKeys(value: boolean): void
+  setNoteLabelFormat(format: VisualizerSettingsSlice['noteLabelFormat']): void
+  setNoteLabelColor(color: string): void
+  setNoteLabelSize(size: number): void
   setErrorMessage(message: string | null): void
   batchUpdate(fn: (state: AppState) => void): void
   resetStore(): void
@@ -223,11 +245,22 @@ const visualizerSelector = (state: AppState) => ({
   bloomRadius: state.bloomRadius,
   bloomStrength: state.bloomStrength,
   colorMode: state.colorMode,
+  gradientBottomColorLeft: state.gradientBottomColorLeft,
+  gradientBottomColorLeftBlack: state.gradientBottomColorLeftBlack,
+  gradientBottomColorRight: state.gradientBottomColorRight,
+  gradientBottomColorRightBlack: state.gradientBottomColorRightBlack,
+  gradientTopColor: state.gradientTopColor,
   keyGlowEnabled: state.keyGlowEnabled,
   keyGlowIntensity: state.keyGlowIntensity,
   laneOpacity: state.laneOpacity,
   leftHandColor: state.leftHandColor,
+  noteGradientDirection: state.noteGradientDirection,
   noteStyle: state.noteStyle,
+  noteLabelFormat: state.noteLabelFormat,
+  noteLabelColor: state.noteLabelColor,
+  noteLabelSize: state.noteLabelSize,
+  noteLabelsOnKeys: state.noteLabelsOnKeys,
+  noteLabelsOnNotes: state.noteLabelsOnNotes,
   particleCount: state.particleCount,
   particleSize: state.particleSize,
   particlesEnabled: state.particlesEnabled,
@@ -275,21 +308,32 @@ function createInitialState(): AppState {
 
 function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   return {
-    backgroundColor: '#0a0a0f',
+    backgroundColor: '#303030',
     bloomEnabled: true,
     bloomRadius: 50,
     bloomStrength: 75,
-    colorMode: 'track',
+    colorMode: 'split',
+    gradientBottomColorLeft: '#77a3ca',
+    gradientBottomColorLeftBlack: '#4b75af',
+    gradientBottomColorRight: '#9ee65a',
+    gradientBottomColorRightBlack: '#86c04c',
+    gradientTopColor: '#ffffff',
     keyGlowEnabled: true,
     keyGlowIntensity: 60,
-    laneOpacity: 15,
-    leftHandColor: '#4f8ef7',
-    noteStyle: 'solid',
+    laneOpacity: 40,
+    leftHandColor: '#77a3ca',
+    noteLabelFormat: 'name',
+    noteLabelColor: '#ffffff',
+    noteLabelSize: 11,
+    noteLabelsOnKeys: false,
+    noteLabelsOnNotes: false,
+    noteGradientDirection: 'vertical',
+    noteStyle: 'gradient',
     particleCount: 10,
     particleSize: 50,
     particlesEnabled: true,
     pitchClassColors: { ...DEFAULT_PITCH_CLASS_COLORS },
-    rightHandColor: '#f7674f',
+    rightHandColor: '#9ee65a',
     splitPitch: 60,
     velocityHighColor: '#f7674f',
     velocityLowColor: '#4f8ef7',
@@ -652,6 +696,54 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    setNoteGradientDirection: (direction) => {
+      validateNoteGradientDirection(direction)
+
+      set((state) => {
+        state.noteGradientDirection = direction
+      })
+    },
+
+    setGradientTopColor: (color) => {
+      validateHexColor(color)
+
+      set((state) => {
+        state.gradientTopColor = color
+      })
+    },
+
+    setGradientBottomColorRight: (color) => {
+      validateHexColor(color)
+
+      set((state) => {
+        state.gradientBottomColorRight = color
+      })
+    },
+
+    setGradientBottomColorLeft: (color) => {
+      validateHexColor(color)
+
+      set((state) => {
+        state.gradientBottomColorLeft = color
+      })
+    },
+
+    setGradientBottomColorRightBlack: (color) => {
+      validateHexColor(color)
+
+      set((state) => {
+        state.gradientBottomColorRightBlack = color
+      })
+    },
+
+    setGradientBottomColorLeftBlack: (color) => {
+      validateHexColor(color)
+
+      set((state) => {
+        state.gradientBottomColorLeftBlack = color
+      })
+    },
+
     setBloomEnabled: (enabled) => {
       set((state) => {
         state.bloomEnabled = Boolean(enabled)
@@ -725,6 +817,42 @@ export const useAppStore = create<AppStore>()(
 
       set((state) => {
         state.laneOpacity = clamp(Math.round(value), 0, 100)
+      })
+    },
+
+    setNoteLabelsOnNotes: (value) => {
+      set((state) => {
+        state.noteLabelsOnNotes = Boolean(value)
+      })
+    },
+
+    setNoteLabelsOnKeys: (value) => {
+      set((state) => {
+        state.noteLabelsOnKeys = Boolean(value)
+      })
+    },
+
+    setNoteLabelFormat: (format) => {
+      validateNoteLabelFormat(format)
+
+      set((state) => {
+        state.noteLabelFormat = format
+      })
+    },
+
+    setNoteLabelColor: (color) => {
+      validateHexColor(color)
+
+      set((state) => {
+        state.noteLabelColor = color
+      })
+    },
+
+    setNoteLabelSize: (size) => {
+      validateFiniteStateNumber(size, 'noteLabelSize')
+
+      set((state) => {
+        state.noteLabelSize = clamp(Math.round(size), 8, 16)
       })
     },
 
@@ -867,6 +995,24 @@ function validateNoteStyle(style: VisualizerSettingsSlice['noteStyle']): void {
   }
 
   throw new StoreError('Note style is invalid.', 'INVALID_STATE', style)
+}
+
+function validateNoteGradientDirection(
+  direction: VisualizerSettingsSlice['noteGradientDirection'],
+): void {
+  if (direction === 'vertical' || direction === 'horizontal') {
+    return
+  }
+
+  throw new StoreError('Note gradient direction is invalid.', 'INVALID_STATE', direction)
+}
+
+function validateNoteLabelFormat(format: VisualizerSettingsSlice['noteLabelFormat']): void {
+  if (format === 'name' || format === 'nameOctave') {
+    return
+  }
+
+  throw new StoreError('Note label format is invalid.', 'INVALID_STATE', format)
 }
 
 function validatePitchClass(pitchClass: number): void {

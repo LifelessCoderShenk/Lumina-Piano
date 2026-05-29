@@ -186,7 +186,16 @@ export class CameraSystem {
   setViewportSize(width: number, height: number): void {
     this.assertInitialized()
     this.assertValidViewport(width, height)
-    getAppState().setViewportSize(width, height)
+
+    const state = getAppState()
+    const nextWidth = Math.round(width)
+    const nextHeight = Math.round(height)
+
+    if (state.viewportWidth === nextWidth && state.viewportHeight === nextHeight) {
+      return
+    }
+
+    state.setViewportSize(nextWidth, nextHeight)
   }
 
   getRenderScale(): number {

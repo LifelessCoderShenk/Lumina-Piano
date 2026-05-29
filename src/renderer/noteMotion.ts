@@ -1,7 +1,7 @@
 import type { Note } from '../midi/types'
 import { secondsToTick, tickToSeconds } from '../tempo/tempoMap'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
-import { KEYBOARD_HEIGHT } from './layoutConstants'
+import { NOTE_MIN_HEIGHT, getKeyboardLayoutMetrics } from './layoutConstants'
 import {
   getBlackKeyWidth,
   getWhiteKeyWidth,
@@ -13,7 +13,6 @@ const WHITE_NOTE_WIDTH_RATIO = 0.72
 const BLACK_NOTE_WIDTH_RATIO = 0.88
 
 export const DEFAULT_PIXELS_PER_SECOND = 200
-export const NOTE_MIN_HEIGHT = 6
 export const RECENT_NOTE_BUFFER_SECONDS = 0.25
 export const FUTURE_NOTE_BUFFER_SECONDS = 0.5
 export const MIN_CONSECUTIVE_NOTE_GAP_PX = 3
@@ -122,7 +121,7 @@ function getBaseNoteScreenRect(
     tempoMap,
     worldZoom,
   } = options
-  const keyboardY = canvasHeight - KEYBOARD_HEIGHT
+  const { keyboardY } = getKeyboardLayoutMetrics(canvasHeight)
   const pixelsPerSecond = getEffectivePixelsPerSecond(worldZoom)
   const startSeconds = tickToSeconds(note.startTick, tempoMap)
   const endSeconds = tickToSeconds(effectiveVisualEndTick, tempoMap)
