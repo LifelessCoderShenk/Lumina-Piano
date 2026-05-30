@@ -109,6 +109,7 @@ interface VisualizerSettingsSlice {
   particlesEnabled: boolean
   particleCount: number
   particleSize: number
+  particleTrails: boolean
   keyGlowEnabled: boolean
   keyGlowIntensity: number
   backgroundColor: string
@@ -118,6 +119,10 @@ interface VisualizerSettingsSlice {
   noteLabelFormat: 'name' | 'nameOctave'
   noteLabelColor: string
   noteLabelSize: number
+  effectsEnabled: {
+    innerGlow: boolean
+    layeredGlow: boolean
+  }
 }
 
 export type AppState =
@@ -177,6 +182,7 @@ export interface AppActions {
   setParticlesEnabled(enabled: boolean): void
   setParticleCount(value: number): void
   setParticleSize(value: number): void
+  setParticleTrails(value: boolean): void
   setKeyGlowEnabled(enabled: boolean): void
   setKeyGlowIntensity(value: number): void
   setBackgroundColor(color: string): void
@@ -186,6 +192,8 @@ export interface AppActions {
   setNoteLabelFormat(format: VisualizerSettingsSlice['noteLabelFormat']): void
   setNoteLabelColor(color: string): void
   setNoteLabelSize(size: number): void
+  setInnerGlowEnabled(enabled: boolean): void
+  setLayeredGlowEnabled(enabled: boolean): void
   setErrorMessage(message: string | null): void
   batchUpdate(fn: (state: AppState) => void): void
   resetStore(): void
@@ -245,6 +253,7 @@ const visualizerSelector = (state: AppState) => ({
   bloomRadius: state.bloomRadius,
   bloomStrength: state.bloomStrength,
   colorMode: state.colorMode,
+  effectsEnabled: state.effectsEnabled,
   gradientBottomColorLeft: state.gradientBottomColorLeft,
   gradientBottomColorLeftBlack: state.gradientBottomColorLeftBlack,
   gradientBottomColorRight: state.gradientBottomColorRight,
@@ -263,6 +272,7 @@ const visualizerSelector = (state: AppState) => ({
   noteLabelsOnNotes: state.noteLabelsOnNotes,
   particleCount: state.particleCount,
   particleSize: state.particleSize,
+  particleTrails: state.particleTrails,
   particlesEnabled: state.particlesEnabled,
   pitchClassColors: state.pitchClassColors,
   rightHandColor: state.rightHandColor,
@@ -310,9 +320,13 @@ function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   return {
     backgroundColor: '#303030',
     bloomEnabled: true,
-    bloomRadius: 50,
-    bloomStrength: 75,
+    bloomRadius: 2,
+    bloomStrength: 20,
     colorMode: 'split',
+    effectsEnabled: {
+      innerGlow: false,
+      layeredGlow: false,
+    },
     gradientBottomColorLeft: '#77a3ca',
     gradientBottomColorLeftBlack: '#4b75af',
     gradientBottomColorRight: '#9ee65a',
@@ -323,14 +337,15 @@ function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
     laneOpacity: 40,
     leftHandColor: '#77a3ca',
     noteLabelFormat: 'name',
-    noteLabelColor: '#ffffff',
-    noteLabelSize: 11,
-    noteLabelsOnKeys: false,
+    noteLabelColor: '#000000',
+    noteLabelSize: 16,
+    noteLabelsOnKeys: true,
     noteLabelsOnNotes: false,
-    noteGradientDirection: 'vertical',
+    noteGradientDirection: 'horizontal',
     noteStyle: 'gradient',
     particleCount: 10,
     particleSize: 50,
+    particleTrails: true,
     particlesEnabled: true,
     pitchClassColors: { ...DEFAULT_PITCH_CLASS_COLORS },
     rightHandColor: '#9ee65a',
@@ -790,6 +805,12 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    setParticleTrails: (value) => {
+      set((state) => {
+        state.particleTrails = Boolean(value)
+      })
+    },
+
     setKeyGlowEnabled: (enabled) => {
       set((state) => {
         state.keyGlowEnabled = Boolean(enabled)
@@ -853,6 +874,18 @@ export const useAppStore = create<AppStore>()(
 
       set((state) => {
         state.noteLabelSize = clamp(Math.round(size), 8, 16)
+      })
+    },
+
+    setInnerGlowEnabled: (enabled) => {
+      set((state) => {
+        state.effectsEnabled.innerGlow = Boolean(enabled)
+      })
+    },
+
+    setLayeredGlowEnabled: (enabled) => {
+      set((state) => {
+        state.effectsEnabled.layeredGlow = Boolean(enabled)
       })
     },
 

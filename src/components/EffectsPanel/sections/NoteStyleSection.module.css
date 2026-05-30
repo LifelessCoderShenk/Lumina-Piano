@@ -16,6 +16,13 @@
   text-transform: uppercase;
 }
 
+.sectionContent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

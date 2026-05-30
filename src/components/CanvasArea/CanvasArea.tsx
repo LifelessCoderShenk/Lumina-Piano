@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { getAppState } from '../../store/store'
 import { renderer } from '../../renderer/Renderer'
 import { cameraSystem } from '../../camera/CameraSystem'
 import styles from './CanvasArea.module.css'
@@ -75,15 +76,60 @@ export function CanvasArea() {
       scheduleResize()
     }
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
+
+      scheduleResize()
+
+      const state = getAppState()
+      if (renderer.isReady() && state.projectData != null && state.isProjectLoaded) {
+        renderer.renderFrame(state.currentTick)
+      }
+    }
+
+    const handleContextLost = (event: Event) => {
+      event.preventDefault()
+      console.warn('[Renderer] WebGL context lost')
+    }
+
+    const handleContextRestored = () => {
+      console.log('[Renderer] WebGL context restored — reinitializing')
+
+      if (canvasRef.current == null) {
+        return
+      }
+
+      void renderer.init(canvasRef.current).then(() => {
+        scheduleResize()
+        const state = getAppState()
+        if (state.projectData != null && state.isProjectLoaded) {
+          renderer.renderFrame(state.currentTick)
+        }
+      })
+    }
+
+    const handleBeforeUnload = () => {
+      renderer.destroy()
+    }
+
     window.addEventListener('resize', handleWindowResize)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    canvasRef.current.addEventListener('webglcontextlost', handleContextLost)
+    canvasRef.current.addEventListener('webglcontextrestored', handleContextRestored)
+    window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => {
       disposed = true
       window.removeEventListener('resize', handleWindowResize)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      canvasRef.current?.removeEventListener('webglcontextlost', handleContextLost)
+      canvasRef.current?.removeEventListener('webglcontextrestored', handleContextRestored)
       if (resizeFrameId != null) {
         cancelAnimationFrame(resizeFrameId)
       }
-      renderer.destroy()
     }
   }, [])
 

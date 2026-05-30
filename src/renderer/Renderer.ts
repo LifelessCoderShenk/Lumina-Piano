@@ -69,8 +69,9 @@ const BLACK_KEY_NOTE_ALPHA = 0.85
 export interface RenderLayers {
   background: PIXI.Container
   laneLines: PIXI.Container
-  notes: PIXI.Container
   keyboard: PIXI.Container
+  keyboardGlow: PIXI.Container
+  notes: PIXI.Container
   hitLine: PIXI.Container
   overlay: PIXI.Container
 }
@@ -157,8 +158,9 @@ export class Renderer {
     this.app.stage.addChild(
       this.layers.background,
       this.layers.laneLines,
-      this.layers.notes,
       this.layers.keyboard,
+      this.layers.keyboardGlow,
+      this.layers.notes,
       this.layers.hitLine,
       this.layers.overlay,
     )
@@ -179,7 +181,7 @@ export class Renderer {
 
     if (state.projectData != null) {
       const projectNoteCount = getProjectNoteCount(state.projectData.tracks)
-      this.notePool.prewarm(projectNoteCount)
+      this.notePool.prewarm(projectNoteCount * 2)
       this.gradientSpritePool.prewarm(projectNoteCount)
     }
 
@@ -196,7 +198,7 @@ export class Renderer {
       if (nextState.projectData !== previousState.projectData) {
         if (nextState.projectData != null) {
           const projectNoteCount = getProjectNoteCount(nextState.projectData.tracks)
-          this.notePool.prewarm(projectNoteCount)
+          this.notePool.prewarm(projectNoteCount * 2)
           this.gradientSpritePool.prewarm(projectNoteCount)
         } else {
           this.notePool.releaseAll()
@@ -558,6 +560,20 @@ export class Renderer {
       sprite.height = adjustedRect.h
       sprite.alpha = noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA
       layers.notes.addChild(sprite)
+
+      if (state.effectsEnabled.layeredGlow) {
+        const glowGraphic = this.notePool.acquire()
+        glowGraphic.clear()
+        this.drawNoteInnerGlow(
+          glowGraphic,
+          adjustedRect.x,
+          adjustedRect.y,
+          adjustedRect.w,
+          adjustedRect.h,
+          noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA,
+        )
+        layers.notes.addChild(glowGraphic)
+      }
     } else {
       const graphic = this.notePool.acquire()
       graphic.clear()
@@ -570,6 +586,7 @@ export class Renderer {
         fillColor,
         noteStyle,
         noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA,
+        state.effectsEnabled.layeredGlow,
       )
       layers.notes.addChild(graphic)
     }
@@ -744,28 +761,84 @@ export class Renderer {
     color: number,
     noteStyle: ReturnType<typeof getAppState>['noteStyle'],
     alpha: number,
+    layeredGlowEnabled: boolean,
   ): void {
     if (noteStyle === 'gradient') {
       return
     }
 
     if (noteStyle === 'saber') {
-      graphic.beginFill(color, 0.3 * alpha)
-      drawTopRoundedRect(graphic, x - 2, y, width + 4, height, NOTE_CORNER_RADIUS)
+      if (width >= 6) {
+        const outerGlowWidth = width * 1.4
+        const outerGlowX = x - ((outerGlowWidth - width) / 2)
+
+        graphic.beginFill(color, 0.15 * alpha)
+        graphic.drawRect(outerGlowX, y, outerGlowWidth, height)
+        graphic.endFill()
+      }
+
+      graphic.beginFill(color, alpha)
+      graphic.drawRect(x, y, width, height)
       graphic.endFill()
 
-      graphic.beginFill(color, 0.7 * alpha)
-      drawTopRoundedRect(graphic, x, y, width, height, NOTE_CORNER_RADIUS)
+      const innerGlowWidth = Math.min(width, 8)
+      const innerGlowX = x + ((width - innerGlowWidth) / 2)
+      graphic.beginFill(0xffffff, 0.35 * alpha)
+      graphic.drawRect(innerGlowX, y, innerGlowWidth, height)
       graphic.endFill()
 
+      const coreWidth = Math.min(width, 2)
+      const coreX = x + ((width - coreWidth) / 2)
       graphic.beginFill(0xffffff, 0.9 * alpha)
-      drawTopRoundedRect(graphic, x + 1, y, Math.max(1, width - 2), height, NOTE_CORNER_RADIUS)
+      graphic.drawRect(coreX, y, coreWidth, height)
       graphic.endFill()
       return
     }
 
     graphic.beginFill(color, alpha)
     drawTopRoundedRect(graphic, x, y, width, height, NOTE_CORNER_RADIUS)
+    graphic.endFill()
+
+    if (layeredGlowEnabled) {
+      this.drawNoteInnerGlow(graphic, x, y, width, height, alpha)
+    }
+  }
+
+  private drawNoteInnerGlow(
+    graphic: PIXI.Graphics,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    alpha: number,
+  ): void {
+    if (width < 8) {
+      return
+    }
+
+    const coreWidth = Math.min(width, Math.max(2, Math.min(4, width * 0.2)))
+    const midWidth = Math.min(width, 6)
+    const outerWidth = Math.min(width, 12)
+
+    this.drawCenteredInnerGlowBand(graphic, x, y, width, height, outerWidth, 0.05 * alpha)
+    this.drawCenteredInnerGlowBand(graphic, x, y, width, height, midWidth, 0.15 * alpha)
+    this.drawCenteredInnerGlowBand(graphic, x, y, width, height, coreWidth, 0.3 * alpha)
+  }
+
+  private drawCenteredInnerGlowBand(
+    graphic: PIXI.Graphics,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    bandWidth: number,
+    alpha: number,
+  ): void {
+    const glowX = x + ((width - bandWidth) / 2)
+    const radius = Math.min(NOTE_CORNER_RADIUS, bandWidth / 2, height / 2)
+
+    graphic.beginFill(0xffffff, alpha)
+    drawTopRoundedRect(graphic, glowX, y, bandWidth, height, radius)
     graphic.endFill()
   }
 
@@ -856,6 +929,7 @@ export class Renderer {
       background: new PIXI.Container(),
       hitLine: new PIXI.Container(),
       keyboard: new PIXI.Container(),
+      keyboardGlow: new PIXI.Container(),
       laneLines: new PIXI.Container(),
       notes: new PIXI.Container(),
       overlay: new PIXI.Container(),
@@ -973,6 +1047,7 @@ function haveVisualizerSettingsChanged(
     nextState.bloomRadius !== previousState.bloomRadius ||
     nextState.bloomStrength !== previousState.bloomStrength ||
     nextState.colorMode !== previousState.colorMode ||
+    nextState.effectsEnabled.layeredGlow !== previousState.effectsEnabled.layeredGlow ||
     nextState.gradientBottomColorLeft !== previousState.gradientBottomColorLeft ||
     nextState.gradientBottomColorLeftBlack !== previousState.gradientBottomColorLeftBlack ||
     nextState.gradientBottomColorRight !== previousState.gradientBottomColorRight ||

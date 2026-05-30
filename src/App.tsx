@@ -12,7 +12,7 @@ import styles from './App.module.css'
 
 export function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false)
-  const [showEffects, setShowEffects] = useState(false)
+  const [showEffects, setShowEffects] = useState(true)
 
   // Use stub in dev (non-Electron), real API in production
   useEffect(() => {

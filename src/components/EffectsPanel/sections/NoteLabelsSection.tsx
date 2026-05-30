@@ -1,5 +1,6 @@
 import React from 'react'
 import { useAppStore, useVisualizerSettings } from '../../../store/store'
+import { CollapsibleSection } from './CollapsibleSection'
 import styles from './NoteLabelsSection.module.css'
 
 const LABEL_FORMAT_OPTIONS = [
@@ -12,8 +13,12 @@ export function NoteLabelsSection() {
   const store = useAppStore()
 
   return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>Note Labels</div>
+    <CollapsibleSection
+      className={styles.section}
+      contentClassName={styles.sectionContent}
+      title="Note Labels"
+      titleClassName={styles.sectionHeader}
+    >
 
       <div className={styles.row}>
         <span className={styles.label}>Labels on notes</span>
@@ -80,6 +85,6 @@ export function NoteLabelsSection() {
           onChange={(event) => store.setNoteLabelSize(Number(event.target.value))}
         />
       </div>
-    </section>
+    </CollapsibleSection>
   )
 }

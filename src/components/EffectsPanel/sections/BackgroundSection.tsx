@@ -1,5 +1,6 @@
 import React from 'react'
 import { useAppStore, useVisualizerSettings } from '../../../store/store'
+import { CollapsibleSection } from './CollapsibleSection'
 import styles from './BackgroundSection.module.css'
 
 export function BackgroundSection() {
@@ -8,8 +9,12 @@ export function BackgroundSection() {
   const setLaneOpacity = useAppStore((state) => state.setLaneOpacity)
 
   return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>Background</div>
+    <CollapsibleSection
+      className={styles.section}
+      contentClassName={styles.sectionContent}
+      title="Background"
+      titleClassName={styles.sectionHeader}
+    >
       <div className={styles.field}>
         <label className={styles.label}>BG Color</label>
         <input className={styles.colorInput} type="color" value={backgroundColor} onChange={(event) => setBackgroundColor(event.target.value)} />
@@ -28,6 +33,6 @@ export function BackgroundSection() {
           onChange={(event) => setLaneOpacity(Number(event.target.value))}
         />
       </div>
-    </section>
+    </CollapsibleSection>
   )
 }

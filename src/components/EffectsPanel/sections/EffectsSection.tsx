@@ -1,5 +1,7 @@
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+
 import { useAppStore, useVisualizerSettings } from '../../../store/store'
+import { CollapsibleSection } from './CollapsibleSection'
 import styles from './EffectsSection.module.css'
 
 export function EffectsSection() {
@@ -7,9 +9,12 @@ export function EffectsSection() {
   const store = useAppStore()
 
   return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>Effects</div>
-
+    <CollapsibleSection
+      className={styles.section}
+      contentClassName={styles.sectionContent}
+      title="Effects"
+      titleClassName={styles.sectionHeader}
+    >
       <EffectRow
         label="Bloom"
         enabled={settings.bloomEnabled}
@@ -28,6 +33,7 @@ export function EffectsSection() {
       >
         <SliderRow label="CNT" max={20} value={settings.particleCount} onChange={store.setParticleCount} />
         <SliderRow label="SIZ" value={settings.particleSize} onChange={store.setParticleSize} />
+        <ToggleRow label="Trails" enabled={settings.particleTrails} onToggle={store.setParticleTrails} />
       </EffectRow>
 
       <EffectRow
@@ -38,7 +44,74 @@ export function EffectsSection() {
       >
         <SliderRow label="INT" value={settings.keyGlowIntensity} onChange={store.setKeyGlowIntensity} />
       </EffectRow>
-    </section>
+
+      <CollapsibleToggleRow
+        label="Inner Glow"
+        enabled={settings.effectsEnabled.innerGlow}
+        onToggle={store.setInnerGlowEnabled}
+      />
+
+      <CollapsibleToggleRow
+        label="Layered Glow"
+        enabled={settings.effectsEnabled.layeredGlow}
+        onToggle={store.setLayeredGlowEnabled}
+      />
+    </CollapsibleSection>
+  )
+}
+
+function CollapsibleToggleRow({
+  label,
+  enabled,
+  onToggle,
+}: {
+  label: string
+  enabled: boolean
+  onToggle(enabled: boolean): void
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [contentHeight, setContentHeight] = useState(0)
+
+  useEffect(() => {
+    if (contentRef.current != null) {
+      setContentHeight(contentRef.current.scrollHeight)
+    }
+  }, [expanded, enabled])
+
+  return (
+    <div className={styles.effectRow}>
+      <button className={styles.collapsibleHeader} type="button" onClick={() => setExpanded((value) => !value)}>
+        <span className={styles.chevron}>{expanded ? '\u2228' : '\u203A'}</span>
+        <span className={styles.effectLabel}>{label}</span>
+      </button>
+      <div className={styles.collapsibleBody} style={{ maxHeight: expanded ? `${contentHeight}px` : '0px' }}>
+        <div ref={contentRef} className={styles.toggleBody}>
+          <ToggleRow label={label} enabled={enabled} onToggle={onToggle} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ToggleRow({
+  label,
+  enabled,
+  onToggle,
+}: {
+  label: string
+  enabled: boolean
+  onToggle(enabled: boolean): void
+}) {
+  return (
+    <div className={styles.toggleRow}>
+      <span className={styles.sliderLabel}>{label}</span>
+      <label className={styles.toggle}>
+        <input type="checkbox" checked={enabled} onChange={(event) => onToggle(event.target.checked)} />
+        <span className={styles.toggleTrack} />
+        <span className={styles.toggleThumb} />
+      </label>
+    </div>
   )
 }
 
@@ -55,18 +128,36 @@ function EffectRow({
   onToggle(enabled: boolean): void
   children: React.ReactNode
 }) {
+  const [expanded, setExpanded] = useState(true)
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [contentHeight, setContentHeight] = useState(0)
+
+  useEffect(() => {
+    if (contentRef.current != null) {
+      setContentHeight(contentRef.current.scrollHeight)
+    }
+  }, [children, enabled, expanded])
+
   return (
     <div className={styles.effectRow}>
-      <div className={styles.effectHeader}>
+      <button className={styles.collapsibleHeader} type="button" onClick={() => setExpanded((current) => !current)}>
+        <span className={styles.chevron}>{expanded ? '\u2228' : '\u203A'}</span>
         <span className={styles.effectLabel}>{label}</span>
         <span className={styles.effectValue}>{value}</span>
-        <label className={styles.toggle}>
+        <label
+          className={styles.toggle}
+          onClick={(event) => event.stopPropagation()}
+        >
           <input type="checkbox" checked={enabled} onChange={(event) => onToggle(event.target.checked)} />
           <span className={styles.toggleTrack} />
           <span className={styles.toggleThumb} />
         </label>
+      </button>
+      <div className={styles.collapsibleBody} style={{ maxHeight: expanded ? `${contentHeight}px` : '0px' }}>
+        <div ref={contentRef} className={styles.sliderGroup}>
+          {enabled ? children : null}
+        </div>
       </div>
-      {enabled ? <div className={styles.sliderGroup}>{children}</div> : null}
     </div>
   )
 }

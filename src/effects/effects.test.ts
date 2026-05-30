@@ -5,12 +5,14 @@ import { KEYBOARD_HEIGHT } from '../renderer/layoutConstants'
 import type { IndexedNote } from '../spatial/SpatialIndex'
 import { resetStore, useAppStore } from '../store/store'
 import {
+  ORB_FADE_START,
   PARTICLE_COUNT,
-  PARTICLE_FADE_START,
-  PARTICLE_LIFETIME_TICKS,
   PARTICLE_POOL_SIZE,
-  PARTICLE_SPEED_MAX,
-  PARTICLE_SPEED_MIN,
+  SPARK_FADE_START,
+  SPARK_LIFETIME_MAX,
+  SPARK_LIFETIME_MIN,
+  SPARK_SPEED_MAX,
+  SPARK_SPEED_MIN,
   ParticlePool,
   computeParticleAlpha,
   computeParticlePosition,
@@ -62,6 +64,9 @@ const { EffectsLayer } = await import('./EffectsLayer')
 
 beforeEach(() => {
   resetStore()
+  useAppStore.getState().batchUpdate((state) => {
+    state.particleTrails = false
+  })
   mockGraphicsInstances.length = 0
   mockContainerInstances.length = 0
   vi.restoreAllMocks()
@@ -92,10 +97,13 @@ describe('ParticlePool', () => {
     expect(particle.birthY).toBe(200)
     expect(particle.color).toBe(0xff0000)
     expect(particle.active).toBe(true)
+    expect(particle.type).toBe('spark')
+    expect(particle.trailX[0]).toBe(particle.birthX)
+    expect(particle.trailY[0]).toBe(particle.birthY)
 
     const speed = Math.hypot(particle.vx, particle.vy)
-    expect(speed).toBeGreaterThanOrEqual(PARTICLE_SPEED_MIN)
-    expect(speed).toBeLessThanOrEqual(PARTICLE_SPEED_MAX)
+    expect(speed).toBeGreaterThanOrEqual(SPARK_SPEED_MIN)
+    expect(speed).toBeLessThanOrEqual(SPARK_SPEED_MAX)
   })
 
   it('spawnBurst() skips silently when the pool is full', () => {
@@ -110,13 +118,13 @@ describe('ParticlePool', () => {
     expect(pool.getActiveCount()).toBe(4)
   })
 
-  it('update() marks particles inactive after PARTICLE_LIFETIME_TICKS', () => {
-    const pool = new ParticlePool(8)
+  it('update() marks particles inactive after their lifetime', () => {
+    const pool = new ParticlePool(6)
     const container = new MockContainer()
 
     vi.spyOn(Math, 'random').mockReturnValue(0.5)
     pool.spawnBurst(0, 0, 0xffffff, 0)
-    pool.update(PARTICLE_LIFETIME_TICKS, container as never)
+    pool.update(SPARK_LIFETIME_MAX + 1, container as never)
 
     expect(pool.getActiveCount()).toBe(0)
   })
@@ -132,8 +140,10 @@ describe('ParticlePool', () => {
     particle.birthY = 20
     particle.vx = 0
     particle.vy = -2
+    particle.lifetime = 80
     particle.size = 3
     particle.color = 0xabcdef
+    particle.type = 'spark'
 
     pool.update(0, container as never)
     let graphic = mockGraphicsInstances[0]
@@ -143,22 +153,30 @@ describe('ParticlePool', () => {
     graphic = mockGraphicsInstances[0]
     const expected = computeParticlePosition(particle, 24)
     expect(graphic.drawCircle).toHaveBeenCalledWith(expected.x, expected.y, 3)
-    expect(graphic.beginFill).toHaveBeenCalledWith(0xabcdef, 1)
+    expect(graphic.beginFill).toHaveBeenCalledWith(0xabcdef, 0.6)
     expect(graphic.endFill).toHaveBeenCalled()
 
-    pool.update(90, container as never)
+    pool.update(60, container as never)
     graphic = mockGraphicsInstances[0]
-    expect(graphic.beginFill).toHaveBeenCalledWith(0xabcdef, computeParticleAlpha(90))
-    expect(computeParticleAlpha(90)).toBeLessThan(1)
+    expect(graphic.beginFill).toHaveBeenCalledWith(0xabcdef, computeParticleAlpha(particle, 60) * 0.6)
+    expect(computeParticleAlpha(particle, 60)).toBeLessThan(1)
   })
 
-  it('update() keeps alpha at 1.0 before PARTICLE_FADE_START ratio', () => {
-    const fadeStartTick = Math.floor(PARTICLE_LIFETIME_TICKS * PARTICLE_FADE_START) - 1
-    expect(computeParticleAlpha(fadeStartTick)).toBe(1)
+  it('update() keeps spark alpha at 1.0 before SPARK_FADE_START ratio', () => {
+    const particle = poolTestParticle('spark', 80)
+    const fadeStartTick = Math.floor(particle.lifetime * SPARK_FADE_START) - 1
+    expect(computeParticleAlpha(particle, fadeStartTick)).toBe(1)
   })
 
-  it('update() fades alpha to 0 at PARTICLE_LIFETIME_TICKS', () => {
-    expect(computeParticleAlpha(PARTICLE_LIFETIME_TICKS)).toBe(0)
+  it('update() keeps orb alpha at 1.0 before ORB_FADE_START ratio', () => {
+    const particle = poolTestParticle('orb', 140)
+    const fadeStartTick = Math.floor(particle.lifetime * ORB_FADE_START) - 1
+    expect(computeParticleAlpha(particle, fadeStartTick)).toBe(1)
+  })
+
+  it('update() fades alpha to 0 at particle lifetime', () => {
+    const particle = poolTestParticle('spark', 80)
+    expect(computeParticleAlpha(particle, particle.lifetime)).toBe(0)
   })
 
   it('clear() sets all particles inactive', () => {
@@ -183,8 +201,10 @@ describe('ParticlePool', () => {
     particle.birthY = 8
     particle.vx = 1
     particle.vy = -1.5
+    particle.lifetime = SPARK_LIFETIME_MIN
     particle.size = 2
     particle.color = 0xffffff
+    particle.type = 'spark'
 
     pool.update(20, container as never)
     const firstCall = mockGraphicsInstances[0].drawCircle.mock.calls.at(-1)
@@ -202,12 +222,17 @@ describe('ParticlePool', () => {
       birthX: 0,
       birthY: 100,
       color: 0xffffff,
+      lifetime: SPARK_LIFETIME_MIN,
       size: 2,
+      trailAlpha: new Float32Array([0.5, 0.3, 0.15, 0.05]),
+      trailX: new Float32Array(4),
+      trailY: new Float32Array(4),
+      type: 'spark' as const,
       vx: 0,
       vy: -2,
     }
 
-    const position = computeParticlePosition(particle, PARTICLE_LIFETIME_TICKS / 2)
+    const position = computeParticlePosition(particle, particle.lifetime / 2)
     expect(position.y).toBeLessThan(100)
   })
 })
@@ -219,7 +244,7 @@ describe('EffectsLayer', () => {
     const noteLayer = layers.notes
 
     layer.init(layers)
-    const particleContainer = mockContainerInstances.at(-1)
+    const particleContainer = mockContainerInstances[0]
 
     useAppStore.getState().batchUpdate((state) => {
       state.showBloom = true
@@ -261,6 +286,7 @@ describe('EffectsLayer', () => {
       1080 - KEYBOARD_HEIGHT,
       expect.any(Number),
       120,
+      100,
     )
 
     layer.update(121, [note], 1920, 1080)
@@ -345,6 +371,7 @@ function createMockRenderLayers() {
     background: new MockContainer(),
     hitLine: new MockContainer(),
     keyboard: new MockContainer(),
+    keyboardGlow: new MockContainer(),
     laneLines: new MockContainer(),
     notes,
     overlay,
@@ -360,6 +387,24 @@ interface MockGraphics {
   drawRect: ReturnType<typeof vi.fn>
   endFill: ReturnType<typeof vi.fn>
   destroy: ReturnType<typeof vi.fn>
+}
+
+function poolTestParticle(type: 'spark' | 'orb', lifetime: number) {
+  return {
+    active: true,
+    birthTick: 0,
+    birthX: 0,
+    birthY: 0,
+    color: 0xffffff,
+    lifetime,
+    size: 2,
+    trailAlpha: new Float32Array([0.5, 0.3, 0.15, 0.05]),
+    trailX: new Float32Array(4),
+    trailY: new Float32Array(4),
+    type,
+    vx: 0,
+    vy: -2,
+  }
 }
 
 class MockContainer {

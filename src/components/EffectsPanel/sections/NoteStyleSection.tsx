@@ -1,5 +1,6 @@
 import React from 'react'
 import { useAppStore, useVisualizerSettings } from '../../../store/store'
+import { CollapsibleSection } from './CollapsibleSection'
 import styles from './NoteStyleSection.module.css'
 
 const NOTE_STYLES = ['solid', 'gradient', 'saber'] as const
@@ -23,8 +24,12 @@ export function NoteStyleSection() {
   const setGradientBottomColorLeftBlack = useAppStore((state) => state.setGradientBottomColorLeftBlack)
 
   return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>Note Style</div>
+    <CollapsibleSection
+      className={styles.section}
+      contentClassName={styles.sectionContent}
+      title="Note Style"
+      titleClassName={styles.sectionHeader}
+    >
       <div className={styles.cards}>
         {NOTE_STYLES.map((style) => (
           <button
@@ -123,7 +128,7 @@ export function NoteStyleSection() {
           </div>
         </>
       ) : null}
-    </section>
+    </CollapsibleSection>
   )
 }
 

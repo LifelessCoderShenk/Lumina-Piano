@@ -54,6 +54,75 @@
   gap: 12px;
 }
 
+.presetsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: #13131a;
+  border: 1px solid #ffffff10;
+  border-radius: 8px;
+}
+
+.presetsTitle {
+  color: #6b7a8d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.presetSelect,
+.presetInput {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #ffffff10;
+  border-radius: 6px;
+  background: #0d0d18;
+  color: #ffffff;
+  padding: 6px 10px;
+}
+
+.presetActions,
+.inlinePresetActions {
+  display: flex;
+  gap: 8px;
+}
+
+.presetButton,
+.presetButtonSecondary {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.presetButton {
+  border: 1px solid #4f8ef7;
+  background: #1a2535;
+  color: #ffffff;
+}
+
+.presetButtonSecondary {
+  border: 1px solid #ffffff10;
+  background: #13131a;
+  color: #8899aa;
+}
+
+.presetButton:disabled,
+.presetButtonSecondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.savePresetRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .resizeHandle {
   position: absolute;
   top: 0;

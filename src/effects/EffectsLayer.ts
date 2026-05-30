@@ -3,15 +3,8 @@ import * as PIXI from 'pixi.js'
 
 import type { IndexedNote } from '../spatial/SpatialIndex'
 import { getAppState, subscribeToStore } from '../store/store'
+import { secondsToTick } from '../tempo/tempoMap'
 import {
-  BLACK_KEY_ACTIVE_ALPHA,
-  KEY_GLOW_ALPHA_END,
-  KEY_GLOW_ALPHA_START,
-  KEY_GLOW_HEIGHT,
-  KEY_GLOW_STEPS,
-  KEY_GLOW_WIDTH_STEP,
-  KEY_GLOW_X_STEP,
-  WHITE_KEY_ACTIVE_ALPHA,
   getKeyboardLayoutMetrics,
 } from '../renderer/layoutConstants'
 import { resolveNoteColor } from '../renderer/colorUtils'
@@ -23,6 +16,7 @@ import {
   pitchToKeyX,
 } from '../renderer/pianoMath'
 import { EffectsLayerError } from './errors'
+import { HitBurstPool } from './HitBurstPool'
 import { ParticlePool } from './ParticlePool'
 
 const BLOOM_STRENGTH = 10
@@ -43,8 +37,11 @@ type RuntimeBloomFilter = BloomFilter & {
 
 export class EffectsLayer {
   private particlePool = new ParticlePool()
+  private hitBurstPool = new HitBurstPool()
   private particleContainer: PIXI.Container | null = null
-  private keyGlowGraphic: PIXI.Graphics | null = null
+  private hitBurstContainer: PIXI.Container | null = null
+  private keyboardGlowContainer: PIXI.Container | null = null
+  private ambientGlowGraphic: PIXI.Graphics | null = null
   private bloomFilter: BloomFilter | null = null
   private noteLayer: PIXI.Container | null = null
   private spawnedNoteIds = new Set<string>()
@@ -59,8 +56,11 @@ export class EffectsLayer {
 
     this.noteLayer = layers.notes
     this.particleContainer = new PIXI.Container()
-    this.keyGlowGraphic = new PIXI.Graphics()
-    layers.laneLines.addChild(this.keyGlowGraphic)
+    this.hitBurstContainer = new PIXI.Container()
+    this.keyboardGlowContainer = layers.keyboardGlow
+    this.ambientGlowGraphic = new PIXI.Graphics()
+    this.keyboardGlowContainer.addChild(this.ambientGlowGraphic)
+    this.keyboardGlowContainer.addChild(this.hitBurstContainer)
     layers.overlay.addChild(this.particleContainer)
 
     this.bloomFilter = new BloomFilter({
@@ -79,6 +79,7 @@ export class EffectsLayer {
         state.bloomStrength !== previousState.bloomStrength ||
         state.particleCount !== previousState.particleCount ||
         state.particleSize !== previousState.particleSize ||
+        state.particleTrails !== previousState.particleTrails ||
         state.particlesEnabled !== previousState.particlesEnabled ||
         state.keyGlowEnabled !== previousState.keyGlowEnabled ||
         state.keyGlowIntensity !== previousState.keyGlowIntensity ||
@@ -101,6 +102,7 @@ export class EffectsLayer {
     this.unsubscribeStore = null
 
     this.particlePool.clear()
+    this.hitBurstPool.clear()
     this.spawnedNoteIds.clear()
 
     if (this.particleContainer?.parent != null) {
@@ -110,12 +112,18 @@ export class EffectsLayer {
     this.particleContainer?.destroy({ children: true })
     this.particleContainer = null
 
-    if (this.keyGlowGraphic?.parent != null) {
-      this.keyGlowGraphic.parent.removeChild(this.keyGlowGraphic)
+    if (this.hitBurstContainer?.parent != null) {
+      this.hitBurstContainer.parent.removeChild(this.hitBurstContainer)
     }
+    this.hitBurstContainer?.destroy({ children: true })
+    this.hitBurstContainer = null
 
-    this.keyGlowGraphic?.destroy()
-    this.keyGlowGraphic = null
+    if (this.ambientGlowGraphic?.parent != null) {
+      this.ambientGlowGraphic.parent.removeChild(this.ambientGlowGraphic)
+    }
+    this.ambientGlowGraphic?.destroy()
+    this.ambientGlowGraphic = null
+    this.keyboardGlowContainer = null
 
     if (this.noteLayer != null) {
       this.noteLayer.filters = []
@@ -136,11 +144,15 @@ export class EffectsLayer {
     this.assertInitialized()
 
     this.applyEffectToggles()
-    this.drawKeyGlows(currentTick, visibleNotes, canvasWidth, canvasHeight)
+    this.drawAmbientKeyboardGlows(currentTick, visibleNotes, canvasWidth, canvasHeight)
     this.detectNoteHits(currentTick, visibleNotes, canvasWidth, canvasHeight)
 
     if (this.particleContainer != null) {
       this.particlePool.update(currentTick, this.particleContainer)
+    }
+
+    if (this.hitBurstContainer != null) {
+      this.hitBurstPool.update(currentTick, this.hitBurstContainer)
     }
 
     this.lastTick = currentTick
@@ -149,6 +161,7 @@ export class EffectsLayer {
   seek(tick: number): void {
     this.spawnedNoteIds.clear()
     this.particlePool.clear()
+    this.hitBurstPool.clear()
     this.lastTick = Math.max(0, Math.floor(tick))
   }
 
@@ -159,7 +172,10 @@ export class EffectsLayer {
     canvasHeight: number,
   ): void {
     const state = getAppState()
-    if (!state.showParticles || !state.particlesEnabled) {
+    const layeredGlowEnabled = state.effectsEnabled.layeredGlow
+    const particlesEnabled = state.showParticles && state.particlesEnabled
+
+    if (!particlesEnabled && !layeredGlowEnabled) {
       return
     }
 
@@ -187,19 +203,33 @@ export class EffectsLayer {
       )
       const keyX = Math.round(pitchToKeyX(note.pitch, canvasWidth)) + (keyWidth / 2)
       const color = resolveNoteColor(note, indexedNote.trackId, state)
-      this.particlePool.setBurstConfig(state.particleCount, state.particleSize / 50)
-      this.particlePool.spawnBurst(keyX, keyboardTopY, color, currentTick)
+
+      if (particlesEnabled) {
+        this.particlePool.setBurstConfig(state.particleCount, state.particleSize / 50)
+        this.particlePool.spawnBurst(keyX, keyboardTopY, color, currentTick, note.velocity)
+      }
+
+      if (layeredGlowEnabled) {
+        this.hitBurstPool.spawn(
+          keyX,
+          keyboardTopY,
+          color,
+          currentTick,
+          this.getHitBurstLifetimeTicks(),
+          note.velocity,
+        )
+      }
       this.spawnedNoteIds.add(note.id)
     }
   }
 
-  private drawKeyGlows(
+  private drawAmbientKeyboardGlows(
     currentTick: number,
     visibleNotes: IndexedNote[],
     canvasWidth: number,
     canvasHeight: number,
   ): void {
-    const glowGraphic = this.keyGlowGraphic
+    const glowGraphic = this.ambientGlowGraphic
     if (glowGraphic == null) {
       return
     }
@@ -208,10 +238,15 @@ export class EffectsLayer {
 
     const state = getAppState()
     const { keyboardY: keyTopY } = getKeyboardLayoutMetrics(canvasHeight)
+    const layeredGlowEnabled = state.effectsEnabled.layeredGlow
 
-    if (!state.keyGlowEnabled) {
+    if (!state.keyGlowEnabled || !layeredGlowEnabled) {
       return
     }
+
+    const glowHeight = 120
+    const glowSteps = 10
+    const stepHeight = glowHeight / glowSteps
 
     for (const indexedNote of visibleNotes) {
       const { note } = indexedNote
@@ -230,17 +265,14 @@ export class EffectsLayer {
         ),
       )
       const intensity = state.keyGlowIntensity / 100
-      const baseGlowAlpha = isBlackKey(note.pitch)
-        ? BLACK_KEY_ACTIVE_ALPHA * KEY_GLOW_ALPHA_START * intensity
-        : WHITE_KEY_ACTIVE_ALPHA * KEY_GLOW_ALPHA_START * intensity
+      const baseGlowAlpha = (note.velocity / 127) * 0.35 * intensity
       const keyX = Math.round(pitchToKeyX(note.pitch, canvasWidth))
-      const stepHeight = KEY_GLOW_HEIGHT / KEY_GLOW_STEPS
 
-      for (let index = 0; index < KEY_GLOW_STEPS; index += 1) {
-        const mix = KEY_GLOW_STEPS === 1 ? 1 : index / (KEY_GLOW_STEPS - 1)
-        const alpha = baseGlowAlpha + ((KEY_GLOW_ALPHA_END - baseGlowAlpha) * mix)
-        const glowWidth = Math.round(keyWidth + (index * KEY_GLOW_WIDTH_STEP))
-        const glowX = Math.round(keyX - (index * KEY_GLOW_X_STEP))
+      for (let index = 0; index < glowSteps; index += 1) {
+        const mix = glowSteps === 1 ? 1 : index / (glowSteps - 1)
+        const alpha = baseGlowAlpha * (1 - mix)
+        const glowWidth = Math.round(keyWidth + (index * 2))
+        const glowX = Math.round(keyX - index)
         const glowY = Math.round(keyTopY - ((index + 1) * stepHeight))
 
         glowGraphic.beginFill(color, Math.max(0, alpha))
@@ -277,6 +309,14 @@ export class EffectsLayer {
     if (this.particleContainer != null) {
       this.particleContainer.visible = state.showParticles && state.particlesEnabled
     }
+
+    if (this.hitBurstContainer != null) {
+      this.hitBurstContainer.visible = state.effectsEnabled.layeredGlow
+    }
+
+    if (this.keyboardGlowContainer != null) {
+      this.keyboardGlowContainer.visible = state.effectsEnabled.layeredGlow
+    }
   }
 
   private assertInitialized(): void {
@@ -284,10 +324,21 @@ export class EffectsLayer {
       !this.isInitialized ||
       this.noteLayer == null ||
       this.particleContainer == null ||
-      this.keyGlowGraphic == null
+      this.hitBurstContainer == null ||
+      this.keyboardGlowContainer == null ||
+      this.ambientGlowGraphic == null
     ) {
       throw new EffectsLayerError('EffectsLayer has not been initialized.', 'NOT_INITIALIZED')
     }
+  }
+
+  private getHitBurstLifetimeTicks(): number {
+    const tempoMap = getAppState().precomputedTempoMap
+    if (tempoMap == null) {
+      return 120
+    }
+
+    return Math.max(1, secondsToTick(0.2, tempoMap))
   }
 }
 

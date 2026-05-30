@@ -16,6 +16,13 @@
   text-transform: uppercase;
 }
 
+.sectionContent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+
 .effectRow {
   display: flex;
   flex-direction: column;
@@ -28,6 +35,30 @@
   grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 8px;
+}
+
+.collapsibleHeader {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chevron {
+  color: #6b7a8d;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.collapsibleBody {
+  overflow: hidden;
+  transition: max-height 200ms ease;
 }
 
 .effectLabel {
@@ -112,4 +143,15 @@
   color: #8899aa;
   font-size: 11px;
   text-align: right;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.toggleBody {
+  padding-top: 8px;
 }

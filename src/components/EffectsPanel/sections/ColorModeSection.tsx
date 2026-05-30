@@ -1,24 +1,33 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useAppStore, useVisualizerSettings } from '../../../store/store'
+import { CollapsibleSection } from './CollapsibleSection'
 import styles from './ColorModeSection.module.css'
 import { HandSplitControls } from './HandSplitControls'
 import { PitchClassGrid } from './PitchClassGrid'
-import { VelocityControls } from './VelocityControls'
 
 const TABS = [
   { id: 'track', label: 'Track' },
   { id: 'pitch', label: 'Pitch' },
   { id: 'split', label: 'Split' },
-  { id: 'velocity', label: 'Vel' },
 ] as const
 
 export function ColorModeSection() {
   const { colorMode } = useVisualizerSettings()
   const setColorMode = useAppStore((state) => state.setColorMode)
 
+  useEffect(() => {
+    if (colorMode === 'velocity') {
+      setColorMode('track')
+    }
+  }, [colorMode, setColorMode])
+
   return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>Color Mode</div>
+    <CollapsibleSection
+      className={styles.section}
+      contentClassName={styles.sectionContent}
+      title="Color Mode"
+      titleClassName={styles.sectionHeader}
+    >
       <div className={styles.tabRow}>
         {TABS.map((tab) => (
           <button
@@ -34,7 +43,6 @@ export function ColorModeSection() {
       {colorMode === 'track' ? <div className={styles.helperText}>Track colors come from the track list swatches.</div> : null}
       {colorMode === 'pitch' ? <PitchClassGrid /> : null}
       {colorMode === 'split' ? <HandSplitControls /> : null}
-      {colorMode === 'velocity' ? <VelocityControls /> : null}
-    </section>
+    </CollapsibleSection>
   )
 }
