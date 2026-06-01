@@ -147,6 +147,7 @@ beforeEach(() => {
     }
   })
   window.electronAPI = {
+    deleteSong: vi.fn(),
     dialog: {
       getDefaultExportPath: vi.fn(),
       openMidiFile: vi.fn(),
@@ -159,9 +160,16 @@ beforeEach(() => {
     ffmpeg: {
       run: mockFfmpegRun,
     },
+    getSongs: vi.fn(async () => []),
+    library: {
+      deleteUserSong: vi.fn(),
+      getUserSongs: vi.fn(async () => []),
+      saveUserSong: vi.fn(),
+    },
     shell: {
       openPath: vi.fn(),
     },
+    uploadSong: vi.fn(),
     window: {
       close: vi.fn(),
       maximize: vi.fn(),

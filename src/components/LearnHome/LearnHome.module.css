@@ -1,0 +1,168 @@
+.screen {
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.backButton {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #000000;
+  color: #ffffff;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.uploadButton {
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: #000000;
+  color: #ffffff;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.errorMessage {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #000000;
+  color: #ffffff;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+}
+
+.loadingState,
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 240px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #000000;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
+  padding: 24px;
+}
+
+.songGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.songCard {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #000000;
+  color: #ffffff;
+  text-align: left;
+  padding: 18px 18px 20px;
+  min-height: 150px;
+  cursor: pointer;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-right: 32px;
+}
+
+.songTitle {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.songComposer {
+  margin-top: 14px;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 15px;
+}
+
+.deleteButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #000000;
+  color: #ffffff;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.difficultyBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.beginnerBadge {
+  background: #0c7a2a;
+  color: #ffffff;
+}
+
+.intermediateBadge {
+  background: #a38a00;
+  color: #000000;
+}
+
+.advancedBadge {
+  background: #8b1010;
+  color: #ffffff;
+}
+
+@media (max-width: 768px) {
+  .screen {
+    padding: 16px;
+  }
+
+  .title {
+    font-size: 26px;
+  }
+
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .uploadButton {
+    margin-left: 0;
+  }
+}

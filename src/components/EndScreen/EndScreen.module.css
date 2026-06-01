@@ -1,0 +1,172 @@
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.backButton {
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  z-index: 2;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: #ffffff;
+  width: 48px;
+  height: 48px;
+  font: inherit;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.backButton:hover {
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: min(940px, calc(100% - 48px));
+  background: #111111;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 44px 40px 36px;
+  box-sizing: border-box;
+  color: #ffffff;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(32px, 4vw, 46px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.modeLabel {
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+}
+
+.divider {
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 28px 0;
+}
+
+.accuracySection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.accuracyValue {
+  font-size: clamp(54px, 7vw, 88px);
+  line-height: 1;
+  font-weight: 700;
+}
+
+.accuracyLabel {
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.statValue {
+  font-size: 30px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.statLabel {
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.buttonRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 54px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.primaryButton {
+  background: #ffffff;
+  color: #000000;
+}
+
+.secondaryButton {
+  background: transparent;
+  color: #ffffff;
+}
+
+.primaryButton:hover,
+.secondaryButton:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+@media (max-width: 900px) {
+  .card {
+    width: min(100%, calc(100% - 24px));
+    padding: 32px 20px 24px;
+  }
+
+  .backButton {
+    top: 16px;
+    left: 16px;
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .buttonRow {
+    grid-template-columns: 1fr;
+  }
+}

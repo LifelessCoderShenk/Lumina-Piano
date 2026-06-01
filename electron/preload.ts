@@ -2,6 +2,16 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ElectronAPI, ElectronFS } from '../src/preload/api'
 
 const electronApi: ElectronAPI = {
+  getSongs: () => ipcRenderer.invoke('library:getUserSongs'),
+  uploadSong: async () => {
+    const sourcePath = await ipcRenderer.invoke('dialog:openMidiFile')
+    if (sourcePath == null) {
+      return null
+    }
+
+    return ipcRenderer.invoke('library:saveUserSong', { sourcePath })
+  },
+  deleteSong: (songId) => ipcRenderer.invoke('library:deleteUserSong', songId),
   dialog: {
     openMidiFile: () => ipcRenderer.invoke('dialog:openMidiFile'),
     showSaveDialog: (options) => ipcRenderer.invoke('dialog:showSaveDialog', options),
@@ -13,6 +23,11 @@ const electronApi: ElectronAPI = {
   },
   ffmpeg: {
     run: (args) => ipcRenderer.invoke('ffmpeg:run', args),
+  },
+  library: {
+    getUserSongs: () => ipcRenderer.invoke('library:getUserSongs'),
+    saveUserSong: (payload) => ipcRenderer.invoke('library:saveUserSong', payload),
+    deleteUserSong: (songId) => ipcRenderer.invoke('library:deleteUserSong', songId),
   },
   shell: {
     openPath: (filePath: string) => ipcRenderer.invoke('shell:openPath', filePath),

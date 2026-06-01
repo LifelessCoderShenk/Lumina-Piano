@@ -20,6 +20,7 @@ export class PlaybackEngine {
   private playStartTick = 0
   private animFrameId: number | null = null
   private tempoMap: PrecomputedTempoMap | null = null
+  private tempoMultiplier = 1
   private unsubscribeStore: (() => void) | null = null
   private initialized = false
   private listeners: PlaybackListenerRegistry = {
@@ -54,14 +55,50 @@ export class PlaybackEngine {
     this.unsubscribeStore = null
     this.stopLoop()
     this.tempoMap = null
+    this.tempoMultiplier = 1
     this.playStartRealTime = 0
     this.playStartTick = 0
     this.initialized = false
   }
 
+  getCurrentTick(): number {
+    return getAppState().currentTick
+  }
+
+  isPlaying(): boolean {
+    return getAppState().isPlaying
+  }
+
+  async setTempoMultiplier(multiplier: number): Promise<void> {
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      throw new PlaybackEngineError('Tempo multiplier must be a positive finite number.', 'INVALID_TICK', {
+        multiplier,
+      })
+    }
+
+    const currentTick = this.getCurrentTick()
+    const wasPlaying = this.isPlaying()
+
+    if (wasPlaying) {
+      this.pause()
+    }
+
+    this.tempoMultiplier = multiplier
+
+    this.seek(currentTick)
+
+    if (wasPlaying) {
+      await new Promise<void>((resolve) => {
+        queueMicrotask(() => {
+          this.play()
+          resolve()
+        })
+      })
+    }
+  }
+
   play(): void {
     this.assertInitialized()
-    console.log('[Playback] play() called')
 
     const state = getAppState()
     if (state.isPlaying) {
@@ -137,7 +174,7 @@ export class PlaybackEngine {
     }
 
     const elapsedMs = Math.max(0, realTimestamp - this.playStartRealTime)
-    const elapsedTicks = secondsToTick(elapsedMs / 1000, this.tempoMap)
+    const elapsedTicks = secondsToTick((elapsedMs / 1000) * this.tempoMultiplier, this.tempoMap)
     const newTick = this.playStartTick + elapsedTicks
     const totalTicks = state.projectData?.totalTicks ?? Number.POSITIVE_INFINITY
 

@@ -8,6 +8,8 @@ import { AudioScheduler, AudioSchedulerError } from './AudioScheduler'
 const mockTriggerAttackRelease = vi.hoisted(() => vi.fn())
 const mockReleaseAll = vi.hoisted(() => vi.fn())
 const mockTransportCancel = vi.hoisted(() => vi.fn())
+const mockTransportStart = vi.hoisted(() => vi.fn())
+const mockTransportStop = vi.hoisted(() => vi.fn())
 const mockToneNow = vi.hoisted(() => vi.fn(() => 0))
 const mockToneLoaded = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const mockToneStart = vi.hoisted(() => vi.fn(() => Promise.resolve()))
@@ -60,6 +62,9 @@ vi.mock('tone', () => ({
   Sampler: MockSampler,
   Transport: {
     cancel: mockTransportCancel,
+    position: 0,
+    start: mockTransportStart,
+    stop: mockTransportStop,
   },
   context: mockToneContext,
   loaded: mockToneLoaded,
@@ -71,6 +76,11 @@ beforeEach(() => {
   resetStore()
   vi.clearAllMocks()
   vi.useFakeTimers()
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    return globalThis.setTimeout(() => {
+      callback(16)
+    }, 0) as unknown as number
+  })
   mockToneNow.mockReturnValue(0)
   mockFrequencyToNote.mockReturnValue('C4')
   mockToneContext.state = 'running'
@@ -78,6 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
   resetStore()
 })
 
@@ -305,6 +316,66 @@ describe('scheduleAhead()', () => {
 
     scheduler.destroy()
   })
+
+  it('hand left skips scheduling notes with pitch 60 and above', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('left-note', 0, 480, 59, 100),
+      createNote('right-note', 0, 480, 60, 100),
+    ])
+
+    useAppStore.getState().setSessionConfig({ hand: 'left', mode: 'listen' })
+    useAppStore.getState().startSession()
+    useAppStore.getState().setCurrentTick(0)
+    useAppStore.getState().setIsPlaying(true)
+    scheduler.start()
+
+    vi.advanceTimersByTime(25)
+
+    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(1)
+
+    scheduler.destroy()
+  })
+
+  it('hand right skips scheduling notes with pitch below 60', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('left-note', 0, 480, 59, 100),
+      createNote('right-note', 0, 480, 60, 100),
+    ])
+
+    useAppStore.getState().setSessionConfig({ hand: 'right', mode: 'listen' })
+    useAppStore.getState().startSession()
+    useAppStore.getState().setCurrentTick(0)
+    useAppStore.getState().setIsPlaying(true)
+    scheduler.start()
+
+    vi.advanceTimersByTime(25)
+
+    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(1)
+
+    scheduler.destroy()
+  })
+
+  it('hand both schedules all notes', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('left-note', 0, 480, 59, 100),
+      createNote('right-note', 0, 480, 60, 100),
+    ])
+
+    useAppStore.getState().setSessionConfig({ hand: 'both', mode: 'listen' })
+    useAppStore.getState().startSession()
+    useAppStore.getState().setCurrentTick(0)
+    useAppStore.getState().setIsPlaying(true)
+    scheduler.start()
+
+    vi.advanceTimersByTime(25)
+
+    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(2)
+
+    scheduler.destroy()
+  })
 })
 
 describe('seek()', () => {
@@ -330,6 +401,71 @@ describe('seek()', () => {
     expect(mockReleaseAll).toHaveBeenCalled()
     expect(mockTransportCancel).toHaveBeenCalled()
     expect(mockTriggerAttackRelease).toHaveBeenCalled()
+
+    scheduler.destroy()
+  })
+
+  it('wraps seek in try/catch, warns, and attempts recovery when cancel throws', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('note-1', 960, 1_440, 60, 100),
+    ])
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    useAppStore.getState().setCurrentTick(0)
+    useAppStore.getState().setIsPlaying(true)
+    scheduler.start()
+
+    mockTransportCancel.mockImplementationOnce(() => {
+      throw new Error('transport failure')
+    })
+
+    expect(() => scheduler.seek(960)).not.toThrow()
+    expect(warnSpy).toHaveBeenCalled()
+    expect(mockReleaseAll).toHaveBeenCalled()
+    expect(mockTransportStop).toHaveBeenCalled()
+    expect(mockTransportStart).toHaveBeenCalled()
+
+    scheduler.destroy()
+  })
+
+  it('does not reschedule notes on seek when playback is not active', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('note-1', 960, 1_440, 60, 100),
+    ])
+
+    useAppStore.getState().setCurrentTick(960)
+    useAppStore.getState().setIsPlaying(false)
+    scheduler.seek(960)
+    vi.advanceTimersByTime(25)
+
+    expect(mockTriggerAttackRelease).not.toHaveBeenCalled()
+
+    scheduler.destroy()
+  })
+
+  it('applies the hand filter after a seek reschedule', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('left-note', 960, 1_440, 59, 100),
+      createNote('right-note', 960, 1_440, 60, 100),
+    ])
+
+    useAppStore.getState().setSessionConfig({ hand: 'left', mode: 'listen' })
+    useAppStore.getState().startSession()
+    useAppStore.getState().setCurrentTick(0)
+    useAppStore.getState().setIsPlaying(true)
+    scheduler.start()
+    vi.advanceTimersByTime(25)
+
+    mockTriggerAttackRelease.mockClear()
+
+    useAppStore.getState().setCurrentTick(960)
+    scheduler.seek(960)
+    vi.advanceTimersByTime(25)
+
+    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(1)
 
     scheduler.destroy()
   })

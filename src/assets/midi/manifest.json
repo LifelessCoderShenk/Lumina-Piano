@@ -1,0 +1,12 @@
+[
+  { "id": "ode-to-joy", "title": "Ode to Joy", "composer": "Beethoven", "difficulty": "beginner", "source": "built-in", "file": "ode-to-joy.mid" },
+  { "id": "mary-lamb", "title": "Mary Had a Little Lamb", "composer": "Traditional", "difficulty": "beginner", "source": "built-in", "file": "mary-lamb.mid" },
+  { "id": "twinkle", "title": "Twinkle Twinkle Little Star", "composer": "Traditional", "difficulty": "beginner", "source": "built-in", "file": "twinkle.mid" },
+  { "id": "happy-birthday", "title": "Happy Birthday", "composer": "Traditional", "difficulty": "beginner", "source": "built-in", "file": "happy-birthday.mid" },
+  { "id": "fur-elise", "title": "Für Elise", "composer": "Beethoven", "difficulty": "intermediate", "source": "built-in", "file": "fur-elise.mid" },
+  { "id": "minuet-g", "title": "Minuet in G", "composer": "Bach", "difficulty": "intermediate", "source": "built-in", "file": "minuet-g.mid" },
+  { "id": "arabesque", "title": "Arabesque No. 1", "composer": "Burgmüller", "difficulty": "intermediate", "source": "built-in", "file": "arabesque.mid" },
+  { "id": "moonlight", "title": "Moonlight Sonata", "composer": "Beethoven", "difficulty": "advanced", "source": "built-in", "file": "moonlight.mid" },
+  { "id": "clair-de-lune", "title": "Clair de Lune", "composer": "Debussy", "difficulty": "advanced", "source": "built-in", "file": "clair-de-lune.mid" },
+  { "id": "nocturne", "title": "Nocturne Op. 9 No. 2", "composer": "Chopin", "difficulty": "advanced", "source": "built-in", "file": "nocturne.mid" }
+]

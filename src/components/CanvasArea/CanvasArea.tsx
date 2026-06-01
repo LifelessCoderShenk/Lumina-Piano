@@ -60,7 +60,8 @@ export function CanvasArea() {
         return
       }
 
-      // 1. Renderer
+      renderer.destroy()
+
       await renderer.init(canvasRef.current)
 
       if (disposed) {
@@ -92,6 +93,8 @@ export function CanvasArea() {
     const handleContextLost = (event: Event) => {
       event.preventDefault()
       console.warn('[Renderer] WebGL context lost')
+
+      renderer.destroy()
     }
 
     const handleContextRestored = () => {
@@ -100,6 +103,8 @@ export function CanvasArea() {
       if (canvasRef.current == null) {
         return
       }
+
+      renderer.destroy()
 
       void renderer.init(canvasRef.current).then(() => {
         scheduleResize()

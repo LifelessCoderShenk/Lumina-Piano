@@ -11,13 +11,12 @@ import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 export async function openAndLoadMidiFile(): Promise<boolean> {
   try {
     const electronApi = getElectronApi()
-    const electronFs = getElectronFs()
 
     if (
       electronApi == null ||
       typeof electronApi.dialog.openMidiFile !== 'function' ||
-      electronFs == null ||
-      typeof electronFs.readFile !== 'function'
+      getElectronFs() == null ||
+      typeof getElectronFs()?.readFile !== 'function'
     ) {
       throw new Error('Open MIDI file bridge is unavailable.')
     }
@@ -27,25 +26,38 @@ export async function openAndLoadMidiFile(): Promise<boolean> {
       return false
     }
 
-    const bytes = await electronFs.readFile(filePath)
-    const parsedProject = parseMidi(bytes)
-    const tempoMap = buildTempoMap(parsedProject.tempoMap, parsedProject.ticksPerQuarter)
-
-    await ensureAudioSchedulerReady()
-    ensurePlaybackEngineReady(tempoMap)
-    spatialIndex.build(parsedProject)
-    useAppStore.getState().loadProject(parsedProject, tempoMap)
-    playbackEngine.seek(0)
-
-    if (renderer.isReady()) {
-      renderer.renderFrame(getAppState().currentTick)
-    }
-
-    return true
+    return loadMidiFileFromPath(filePath)
   } catch (error: unknown) {
     console.error('MIDI load error:', error)
     throw error
   }
+}
+
+export async function loadMidiFileFromPath(filePath: string): Promise<boolean> {
+  const electronFs = getElectronFs()
+  if (electronFs == null || typeof electronFs.readFile !== 'function') {
+    throw new Error('Read MIDI file bridge is unavailable.')
+  }
+
+  const bytes = await electronFs.readFile(filePath)
+  return loadMidiBytes(bytes)
+}
+
+export async function loadMidiBytes(bytes: Uint8Array): Promise<boolean> {
+  const parsedProject = parseMidi(bytes)
+  const tempoMap = buildTempoMap(parsedProject.tempoMap, parsedProject.ticksPerQuarter)
+
+  await ensureAudioSchedulerReady()
+  ensurePlaybackEngineReady(tempoMap)
+  spatialIndex.build(parsedProject)
+  useAppStore.getState().loadProject(parsedProject, tempoMap)
+  playbackEngine.seek(0)
+
+  if (renderer.isReady()) {
+    renderer.renderFrame(getAppState().currentTick)
+  }
+
+  return true
 }
 
 async function ensureAudioSchedulerReady(): Promise<void> {

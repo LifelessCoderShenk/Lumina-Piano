@@ -1,0 +1,78 @@
+.overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.errorMessage {
+  width: min(760px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #000000;
+  color: #ffffff;
+  padding: 10px 14px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  pointer-events: auto;
+}
+
+.sessionBar {
+  width: min(1120px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #000000;
+  color: #ffffff;
+  padding: 14px 18px;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.backButton {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #000000;
+  color: #ffffff;
+  min-width: 48px;
+  min-height: 40px;
+  font: inherit;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.backButton:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.scrubber {
+  width: 100%;
+  accent-color: #ffffff;
+  background: transparent;
+}
+
+.metric {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .overlay {
+    bottom: 12px;
+    padding: 0 12px;
+  }
+
+  .sessionBar {
+    grid-template-columns: 1fr;
+  }
+}

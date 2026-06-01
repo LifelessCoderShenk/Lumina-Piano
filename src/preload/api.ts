@@ -1,4 +1,5 @@
 import type { SaveDialogOptions } from 'electron'
+import type { SongMetadata } from '../learn/types'
 
 export interface ElectronFS {
   mkdir(path: string): Promise<void>
@@ -16,6 +17,9 @@ export interface ElectronExportBridge {
 }
 
 export interface ElectronAPI {
+  getSongs(): Promise<SongMetadata[]>
+  uploadSong(): Promise<SongMetadata | null>
+  deleteSong(songId: string): Promise<void>
   dialog: {
     openMidiFile(): Promise<string | null>
     showSaveDialog(options: SaveDialogOptions): Promise<string | null>
@@ -24,6 +28,11 @@ export interface ElectronAPI {
   export: ElectronExportBridge
   ffmpeg: {
     run(args: string[]): Promise<void>
+  }
+  library: {
+    getUserSongs(): Promise<SongMetadata[]>
+    saveUserSong(payload: { sourcePath: string }): Promise<SongMetadata>
+    deleteUserSong(songId: string): Promise<void>
   }
   shell: {
     openPath(path: string): Promise<void>

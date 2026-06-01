@@ -77,8 +77,6 @@ export function TransportBar() {
       return
     }
 
-    console.log('[Transport] Play clicked')
-
     if (isPlaying) {
       playbackEngine.pause()
       return
@@ -114,7 +112,6 @@ export function TransportBar() {
     const centerY = viewportHeight / 2
 
     try {
-      console.log('[Transport] Camera initialized:', cameraSystem.isInitialized())
       cameraSystem.zoom(factor, centerX, centerY)
     } catch (error: unknown) {
       if (error instanceof CameraError && error.code === 'NOT_INITIALIZED') {

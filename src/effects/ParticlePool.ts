@@ -53,14 +53,14 @@ const ORB_BIRTH_X_SPREAD = 4
 
 export class ParticlePool {
   private readonly pool: Particle[]
-  private readonly graphics: PIXI.Graphics[]
+  private readonly graphics: Array<PIXI.Graphics | null>
   private configuredCount = PARTICLE_COUNT
   private configuredSizeMultiplier = 1
 
   constructor(size: number = PARTICLE_POOL_SIZE) {
     const poolSize = Math.max(0, Math.floor(size))
     this.pool = Array.from({ length: poolSize }, () => createInactiveParticle())
-    this.graphics = this.pool.map(() => new PIXI.Graphics())
+    this.graphics = this.pool.map(() => createGraphics())
   }
 
   spawnBurst(
@@ -137,6 +137,12 @@ export class ParticlePool {
       const particle = this.pool[index]
       const graphic = this.graphics[index]
 
+      if (!isValidGraphic(graphic)) {
+        particle.active = false
+        this.graphics[index] = null
+        continue
+      }
+
       if (!particle.active) {
         graphic.visible = false
         continue
@@ -172,8 +178,27 @@ export class ParticlePool {
   clear(): void {
     for (let index = 0; index < this.pool.length; index += 1) {
       this.pool[index].active = false
-      this.graphics[index].visible = false
-      this.graphics[index].clear()
+      const graphic = this.graphics[index]
+      if (!isValidGraphic(graphic)) {
+        this.graphics[index] = null
+        continue
+      }
+
+      graphic.visible = false
+      graphic.clear()
+    }
+  }
+
+  forceReset(): void {
+    for (let index = 0; index < this.pool.length; index += 1) {
+      this.pool[index].active = false
+      this.graphics[index] = null
+    }
+  }
+
+  recreateGraphics(): void {
+    for (let index = 0; index < this.graphics.length; index += 1) {
+      this.graphics[index] = createGraphics()
     }
   }
 
@@ -203,6 +228,16 @@ export class ParticlePool {
 
     return null
   }
+}
+
+function isValidGraphic(graphic: PIXI.Graphics | null | undefined): graphic is PIXI.Graphics {
+  return graphic != null && !graphic.destroyed
+}
+
+function createGraphics(): PIXI.Graphics {
+  const graphic = new PIXI.Graphics()
+  graphic.visible = false
+  return graphic
 }
 
 export function computeParticleAlpha(particle: Particle, ticksAlive: number): number {

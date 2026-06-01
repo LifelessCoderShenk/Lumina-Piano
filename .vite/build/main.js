@@ -86,6 +86,48 @@ electron.app.on("ready", () => {
     const bytes = await promises.readFile(filePath);
     return new Uint8Array(bytes);
   });
+  electron.ipcMain.handle("library:getUserSongs", async () => {
+    return readUserSongs();
+  });
+  electron.ipcMain.handle("library:saveUserSong", async (_event, payload) => {
+    const { sourcePath } = payload;
+    if (typeof sourcePath !== "string" || sourcePath.length === 0) {
+      throw new Error("Source path must be a non-empty string.");
+    }
+    const userSongs = await readUserSongs();
+    const songsDirectory = getUserSongsDirectory();
+    await promises.mkdir(songsDirectory, { recursive: true });
+    const extension = path.extname(sourcePath) || ".mid";
+    const title = path.basename(sourcePath, extension);
+    const id = globalThis.crypto.randomUUID();
+    const destinationFileName = `${id}${extension}`;
+    const destinationPath = path.join(songsDirectory, destinationFileName);
+    const bytes = await promises.readFile(sourcePath);
+    await promises.writeFile(destinationPath, bytes);
+    const savedSong = {
+      composer: "User Upload",
+      difficulty: "intermediate",
+      file: destinationFileName,
+      filePath: destinationPath,
+      id,
+      source: "user",
+      title
+    };
+    const nextSongs = [savedSong, ...userSongs];
+    await writeUserSongs(nextSongs);
+    return savedSong;
+  });
+  electron.ipcMain.handle("library:deleteUserSong", async (_event, songId) => {
+    if (typeof songId !== "string" || songId.length === 0) {
+      throw new Error("Song id must be a non-empty string.");
+    }
+    const userSongs = await readUserSongs();
+    const songToDelete = userSongs.find((song) => song.id === songId);
+    if (songToDelete == null ? void 0 : songToDelete.filePath) {
+      await promises.rm(songToDelete.filePath, { force: true });
+    }
+    await writeUserSongs(userSongs.filter((song) => song.id !== songId));
+  });
   electron.ipcMain.handle(
     "export:getTempDir",
     async () => path.join(electron.app.getPath("temp"), `lumina-export-${Date.now()}`)
@@ -152,4 +194,28 @@ async function runFFmpeg(ffmpegBinaryPath, args) {
       reject(new Error(`FFmpeg exited with code ${code ?? "unknown"}.`));
     });
   });
+}
+function getUserSongsDirectory() {
+  return path.join(electron.app.getPath("userData"), "song-library");
+}
+function getUserSongsManifestPath() {
+  return path.join(getUserSongsDirectory(), "user-songs.json");
+}
+async function readUserSongs() {
+  const manifestPath = getUserSongsManifestPath();
+  try {
+    const content = await promises.readFile(manifestPath, "utf8");
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+async function writeUserSongs(songs) {
+  const songsDirectory = getUserSongsDirectory();
+  await promises.mkdir(songsDirectory, { recursive: true });
+  await promises.writeFile(getUserSongsManifestPath(), JSON.stringify(songs, null, 2), "utf8");
 }

@@ -49,12 +49,15 @@ vi.mock('pixi.js', () => ({
   Graphics: vi.fn().mockImplementation(function (this: MockGraphics) {
     this.visible = true
     this.parent = null
+    this.destroyed = false
     this.clear = vi.fn().mockReturnThis()
     this.beginFill = vi.fn().mockReturnThis()
     this.drawCircle = vi.fn().mockReturnThis()
     this.drawRect = vi.fn().mockReturnThis()
     this.endFill = vi.fn().mockReturnThis()
-    this.destroy = vi.fn()
+    this.destroy = vi.fn(() => {
+      this.destroyed = true
+    })
     mockGraphicsInstances.push(this)
     return this
   }),
@@ -188,6 +191,27 @@ describe('ParticlePool', () => {
 
     expect(pool.getActiveCount()).toBe(0)
     expect(mockGraphicsInstances.every((graphic) => graphic.visible === false)).toBe(true)
+  })
+
+  it('update() skips destroyed graphics objects without throwing', () => {
+    const pool = new ParticlePool(2)
+    const container = new MockContainer()
+    const particle = pool.getParticle(0)
+
+    particle.active = true
+    particle.birthTick = 0
+    particle.birthX = 10
+    particle.birthY = 20
+    particle.vx = 0
+    particle.vy = -1
+    particle.lifetime = 80
+    particle.size = 2
+    particle.color = 0xffffff
+    particle.type = 'spark'
+    mockGraphicsInstances[0].destroyed = true
+
+    expect(() => pool.update(10, container as never)).not.toThrow()
+    expect(pool.getActiveCount()).toBe(0)
   })
 
   it('two update() calls with the same currentTick produce identical positions', () => {
@@ -340,6 +364,31 @@ describe('EffectsLayer', () => {
     spawnSpy.mockRestore()
   })
 
+  it('reset() clears particle pool state safely and recreates graphics', () => {
+    const layer = new EffectsLayer()
+
+    layer.init(createMockRenderLayers())
+    useAppStore.getState().batchUpdate((state) => {
+      state.showParticles = true
+    })
+
+    const note = createIndexedNote('note-1', 10, 60)
+    layer.update(10, [note], 1920, 1080)
+
+    const particlePool = (layer as unknown as { particlePool: ParticlePool }).particlePool
+    const previousGraphics = [...(particlePool as unknown as { graphics: Array<MockGraphics | null> }).graphics]
+    expect(particlePool.getActiveCount()).toBeGreaterThan(0)
+
+    expect(() => layer.reset()).not.toThrow()
+    expect(particlePool.getActiveCount()).toBe(0)
+
+    const nextGraphics = (particlePool as unknown as { graphics: Array<MockGraphics | null> }).graphics
+    expect(nextGraphics.every((graphic) => graphic != null && graphic.destroyed === false)).toBe(true)
+    expect(nextGraphics[0]).not.toBe(previousGraphics[0])
+
+    layer.destroy()
+  })
+
   it('throws NOT_INITIALIZED when update() is called before init()', () => {
     const layer = new EffectsLayer()
     expect(() => layer.update(0, [], 1920, 1080)).toThrowError(/not been initialized/i)
@@ -373,6 +422,7 @@ function createMockRenderLayers() {
     keyboard: new MockContainer(),
     keyboardGlow: new MockContainer(),
     laneLines: new MockContainer(),
+    noteByNote: new MockContainer(),
     notes,
     overlay,
   }
@@ -381,6 +431,7 @@ function createMockRenderLayers() {
 interface MockGraphics {
   visible: boolean
   parent: unknown
+  destroyed: boolean
   clear: ReturnType<typeof vi.fn>
   beginFill: ReturnType<typeof vi.fn>
   drawCircle: ReturnType<typeof vi.fn>

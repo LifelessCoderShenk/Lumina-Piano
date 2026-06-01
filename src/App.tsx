@@ -7,12 +7,24 @@ import { CanvasArea } from './components/CanvasArea/CanvasArea'
 import { TransportBar } from './components/TransportBar/TransportBar'
 import { StatusBar } from './components/StatusBar/StatusBar'
 import { ExportModal } from './components/ExportModal/ExportModal'
+import { EndScreen } from './components/EndScreen/EndScreen'
+import { LearnHome } from './components/LearnHome/LearnHome'
+import { ListenSession } from './components/LearnSession/ListenSession'
+import { NoteByNoteSession } from './components/LearnSession/NoteByNoteSession'
+import { PlayAlongSession } from './components/LearnSession/PlayAlongSession'
+import { ModeSelector } from './components/ModeSelector'
+import { SongPage } from './components/SongPage/SongPage'
 import { useCommandShortcuts } from './commands/useCommandShortcuts'
+import { useAppStore } from './store/store'
 import styles from './App.module.css'
 
 export function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false)
-  const [showEffects, setShowEffects] = useState(true)
+  const appMode = useAppStore((state) => state.appMode)
+  const learnSessionMode = useAppStore((state) => state.learnV3.sessionConfig.mode)
+  const setAppMode = useAppStore((state) => state.setAppMode)
+  const showEffects = useAppStore((state) => state.showEffects)
+  const setShowEffects = useAppStore((state) => state.setShowEffects)
 
   // Use stub in dev (non-Electron), real API in production
   useEffect(() => {
@@ -25,6 +37,10 @@ export function App() {
   // Wire command shortcuts globally
   useCommandShortcuts()
 
+  const handleModeSelect = (mode: 'create' | 'learn') => {
+    setAppMode(mode)
+  }
+
   return (
     <div className={styles.app}>
       <TitleBar />
@@ -34,14 +50,45 @@ export function App() {
         <TrackList />
         <div className={styles.centerColumn}>
           <div className={styles.canvasWrapper}>
-            <CanvasArea />
-            {showEffects ? (
+            {appMode === 'select' ? (
+              <ModeSelector onSelect={handleModeSelect} />
+            ) : appMode === 'learn' ? (
+              <LearnHome />
+            ) : appMode === 'learnSong' ? (
+              <SongPage />
+            ) : appMode === 'learnSession' ? (
+              learnSessionMode === 'listen' ? (
+                <div className={styles.listenSessionLayout}>
+                  <ListenSession />
+                  <CanvasArea />
+                </div>
+              ) : learnSessionMode === 'noteByNote' ? (
+                <>
+                  <CanvasArea />
+                  <NoteByNoteSession />
+                </>
+              ) : learnSessionMode === 'playAlong' ? (
+                <>
+                  <CanvasArea />
+                  <PlayAlongSession />
+                </>
+              ) : (
+                <div className={styles.learnMode}>
+                  <div className={styles.learnMessage}>Learn Session Coming Soon</div>
+                </div>
+              )
+            ) : appMode === 'learnEnd' ? (
+              <EndScreen />
+            ) : (
+              <CanvasArea />
+            )}
+            {appMode === 'create' && showEffects ? (
               <div className={styles.effectsOverlay}>
                 <EffectsPanel onClose={() => setShowEffects(false)} />
               </div>
             ) : null}
           </div>
-          <TransportBar />
+          {appMode === 'create' ? <TransportBar /> : null}
         </div>
         <Inspector onOpenEffects={() => setShowEffects(true)} />
       </div>

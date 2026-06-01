@@ -2,6 +2,11 @@ import type { ElectronAPI } from './api'
 
 export function installStub() {
   window.electronAPI = {
+    getSongs: async () => [],
+    uploadSong: async () => null,
+    deleteSong: async (songId) => {
+      console.log('[Stub] deleteSong', songId)
+    },
     dialog: {
       openMidiFile: async () => null,
       showSaveDialog: async () => 'stub_export.mp4',
@@ -15,6 +20,19 @@ export function installStub() {
     },
     ffmpeg: {
       run: async (args) => console.log('[Stub] ffmpeg:run', args),
+    },
+    library: {
+      getUserSongs: async () => [],
+      saveUserSong: async ({ sourcePath }) => ({
+        composer: 'User Upload',
+        difficulty: 'intermediate',
+        file: sourcePath.split(/[\\/]/).pop() ?? 'user-song.mid',
+        filePath: sourcePath,
+        id: globalThis.crypto.randomUUID(),
+        source: 'user',
+        title: sourcePath.split(/[\\/]/).pop()?.replace(/\.midi?$/i, '') ?? 'Uploaded MIDI',
+      }),
+      deleteUserSong: async (songId) => console.log('[Stub] library:deleteUserSong', songId),
     },
     shell: {
       openPath: async (path) => console.log('[Stub] shell:openPath', path),

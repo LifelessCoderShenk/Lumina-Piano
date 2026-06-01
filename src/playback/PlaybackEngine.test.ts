@@ -187,6 +187,65 @@ describe('PlaybackEngine', () => {
     engine.destroy()
   })
 
+  it('applies the tempo multiplier to playback speed', async () => {
+    const engine = setupInitializedEngine()
+
+    await engine.setTempoMultiplier(0.5)
+    engine.play()
+    runFrame(1_000)
+
+    expect(useAppStore.getState().currentTick).toBe(240)
+
+    engine.destroy()
+  })
+
+  it('re-anchors playback when the tempo multiplier changes during playback', async () => {
+    const engine = setupInitializedEngine()
+
+    engine.play()
+    runFrame(500)
+    expect(useAppStore.getState().currentTick).toBe(240)
+
+    await engine.setTempoMultiplier(0.5)
+    runFrame(1_500)
+
+    expect(useAppStore.getState().currentTick).toBe(480)
+
+    engine.destroy()
+  })
+
+  it('setTempoMultiplier while playing seeks to the current tick and resumes playback after a microtask', async () => {
+    const engine = setupInitializedEngine()
+    const onPause = vi.fn()
+    const onPlay = vi.fn()
+    const onSeek = vi.fn()
+
+    engine.on('onPause', onPause)
+    engine.on('onPlay', onPlay)
+    engine.on('onSeek', onSeek)
+
+    engine.play()
+    runFrame(500)
+    expect(useAppStore.getState().currentTick).toBe(240)
+
+    onPlay.mockClear()
+
+    const resumePromise = engine.setTempoMultiplier(0.5)
+
+    expect(onPause).toHaveBeenCalledTimes(1)
+    expect(onSeek).toHaveBeenCalledWith(240)
+    expect(onPlay).not.toHaveBeenCalled()
+    expect(useAppStore.getState().isPlaying).toBe(false)
+
+    await resumePromise
+
+    expect(onPlay).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().currentTick).toBe(240)
+    expect(useAppStore.getState().isPlaying).toBe(true)
+
+    engine.destroy()
+  })
+
   it('loops exactly at the boundary and resets anchors correctly', () => {
     const engine = setupInitializedEngine(2_000)
     useAppStore.getState().setLoop(true, 240, 480)

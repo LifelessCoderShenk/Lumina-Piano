@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import ffmpegPath from 'ffmpeg-static'
 
 import { spawnProcess } from './spawnProcess'
+import type { SongMetadata } from '../src/learn/types'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -107,6 +108,58 @@ app.on('ready', () => {
     return new Uint8Array(bytes)
   })
 
+  ipcMain.handle('library:getUserSongs', async () => {
+    return readUserSongs()
+  })
+
+  ipcMain.handle('library:saveUserSong', async (_event, payload: { sourcePath: string }) => {
+    const { sourcePath } = payload
+    if (typeof sourcePath !== 'string' || sourcePath.length === 0) {
+      throw new Error('Source path must be a non-empty string.')
+    }
+
+    const userSongs = await readUserSongs()
+    const songsDirectory = getUserSongsDirectory()
+    await mkdir(songsDirectory, { recursive: true })
+
+    const extension = path.extname(sourcePath) || '.mid'
+    const title = path.basename(sourcePath, extension)
+    const id = globalThis.crypto.randomUUID()
+    const destinationFileName = `${id}${extension}`
+    const destinationPath = path.join(songsDirectory, destinationFileName)
+    const bytes = await readFile(sourcePath)
+
+    await writeFile(destinationPath, bytes)
+
+    const savedSong: SongMetadata = {
+      composer: 'User Upload',
+      difficulty: 'intermediate',
+      file: destinationFileName,
+      filePath: destinationPath,
+      id,
+      source: 'user',
+      title,
+    }
+
+    const nextSongs = [savedSong, ...userSongs]
+    await writeUserSongs(nextSongs)
+    return savedSong
+  })
+
+  ipcMain.handle('library:deleteUserSong', async (_event, songId: string) => {
+    if (typeof songId !== 'string' || songId.length === 0) {
+      throw new Error('Song id must be a non-empty string.')
+    }
+
+    const userSongs = await readUserSongs()
+    const songToDelete = userSongs.find((song) => song.id === songId)
+    if (songToDelete?.filePath) {
+      await rm(songToDelete.filePath, { force: true })
+    }
+
+    await writeUserSongs(userSongs.filter((song) => song.id !== songId))
+  })
+
   ipcMain.handle(
     'export:getTempDir',
     async () => path.join(app.getPath('temp'), `lumina-export-${Date.now()}`),
@@ -199,4 +252,34 @@ async function runFFmpeg(ffmpegBinaryPath: string, args: string[]): Promise<void
       reject(new Error(`FFmpeg exited with code ${code ?? 'unknown'}.`))
     })
   })
+}
+
+function getUserSongsDirectory(): string {
+  return path.join(app.getPath('userData'), 'song-library')
+}
+
+function getUserSongsManifestPath(): string {
+  return path.join(getUserSongsDirectory(), 'user-songs.json')
+}
+
+async function readUserSongs(): Promise<SongMetadata[]> {
+  const manifestPath = getUserSongsManifestPath()
+
+  try {
+    const content = await readFile(manifestPath, 'utf8')
+    const parsed = JSON.parse(content) as SongMetadata[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return []
+    }
+
+    throw error
+  }
+}
+
+async function writeUserSongs(songs: SongMetadata[]): Promise<void> {
+  const songsDirectory = getUserSongsDirectory()
+  await mkdir(songsDirectory, { recursive: true })
+  await writeFile(getUserSongsManifestPath(), JSON.stringify(songs, null, 2), 'utf8')
 }

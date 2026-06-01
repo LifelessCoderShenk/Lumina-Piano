@@ -1,6 +1,7 @@
 import * as Tone from 'tone'
 
 import type { Note, Track } from '../midi/types'
+import { playbackEngine } from '../playback/PlaybackEngine'
 import { type AppState, getAppState, subscribeToStore } from '../store/store'
 import { secondsToTick, tickToSeconds } from '../tempo/tempoMap'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
@@ -62,10 +63,6 @@ export class AudioScheduler {
   private volumeBeforeMute = 0
   private unsubscribeStore: (() => void) | null = null
   private lastKnownTick = 0
-
-  constructor() {
-    console.log('[Audio] AudioScheduler instantiated')
-  }
 
   isReady(): boolean {
     return this.isInitialized
@@ -171,12 +168,10 @@ export class AudioScheduler {
   }
 
   private async handlePlaybackStart(): Promise<void> {
-    console.log('[Audio] Tone.js context state:', Tone.context.state)
     if (Tone.context.state === 'suspended') {
       await Tone.start()
     }
 
-    console.log('[Audio] Sampler loaded:', this.getSamplerLoadedState())
     this.start()
   }
 
@@ -192,13 +187,19 @@ export class AudioScheduler {
 
   seek(tick: number): void {
     this.assertValidTick(tick)
+    const normalizedTick = normalizeTick(tick)
 
-    this.cancelScheduledEvents()
-    this.lastScheduledTick = normalizeTick(tick)
-    this.lastKnownTick = this.lastScheduledTick
+    try {
+      this.cancelScheduledEvents()
+      this.lastScheduledTick = normalizedTick
+      this.lastKnownTick = normalizedTick
 
-    if (this.intervalId != null) {
-      this.scheduleAhead()
+      if (playbackEngine.isPlaying() && this.intervalId != null) {
+        this.scheduleAheadAfterSeek()
+      }
+    } catch (error) {
+      console.warn('AudioScheduler seek failed. Attempting recovery.', error)
+      this.recoverFromSeekFailure(normalizedTick)
     }
   }
 
@@ -288,7 +289,6 @@ export class AudioScheduler {
     }
 
     const pitch = Tone.Frequency(note.pitch, 'midi').toNote()
-    console.log('[Audio] Scheduling note', note.pitch, 'at', scheduleTime)
     this.sampler.triggerAttackRelease(
       pitch,
       duration,
@@ -310,7 +310,11 @@ export class AudioScheduler {
 
     for (const track of projectData.tracks) {
       for (const note of track.notes) {
-        if (note.startTick >= normalizedFromTick && note.startTick < normalizedToTick) {
+        if (
+          note.startTick >= normalizedFromTick &&
+          note.startTick < normalizedToTick &&
+          this.shouldScheduleNoteForLearnHand(note, state)
+        ) {
           result.push({ note, track })
         }
       }
@@ -328,10 +332,66 @@ export class AudioScheduler {
     return state.trackMuted[trackId] !== true
   }
 
+  private shouldScheduleNoteForLearnHand(note: Note, state: AppState): boolean {
+    if (!state.learnV3.isActive || state.learnV3.sessionConfig.mode !== 'listen') {
+      return true
+    }
+
+    return isNoteIncludedForHand(note.pitch, state.learnV3.sessionConfig.hand)
+  }
+
   private cancelScheduledEvents(): void {
-    Tone.Transport.cancel()
-    this.sampler?.releaseAll()
-    this.activeNotes.clear()
+    try {
+      Tone.Transport.cancel()
+    } finally {
+      this.sampler?.releaseAll()
+      this.activeNotes.clear()
+    }
+  }
+
+  private scheduleAheadAfterSeek(): void {
+    const schedule = () => {
+      if (playbackEngine.isPlaying() && this.intervalId != null) {
+        this.scheduleAhead()
+      }
+    }
+
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      globalThis.requestAnimationFrame(() => {
+        schedule()
+      })
+      return
+    }
+
+    globalThis.setTimeout(schedule, 0)
+  }
+
+  private recoverFromSeekFailure(tick: number): void {
+    const normalizedTick = normalizeTick(tick)
+    const state = getAppState()
+    const transportWithRecovery = Tone.Transport as typeof Tone.Transport & {
+      position?: number | string
+      start?: (time?: number, offset?: number) => void
+      stop?: (time?: number) => void
+    }
+    const positionSeconds = state.precomputedTempoMap == null
+      ? 0
+      : tickToSeconds(normalizedTick, state.precomputedTempoMap)
+
+    try {
+      this.stop()
+      transportWithRecovery.stop?.()
+      this.lastScheduledTick = normalizedTick
+      this.lastKnownTick = normalizedTick
+      transportWithRecovery.position = positionSeconds
+
+      if (playbackEngine.isPlaying()) {
+        transportWithRecovery.start?.(undefined, positionSeconds)
+        this.start()
+      }
+    } catch (recoveryError) {
+      console.warn('AudioScheduler seek recovery failed.', recoveryError)
+    }
   }
 
   private getSamplerLoadedState(): boolean {
@@ -367,3 +427,15 @@ function clamp(value: number, min: number, max: number): number {
 export const audioScheduler = new AudioScheduler()
 
 export { AudioSchedulerError }
+
+function isNoteIncludedForHand(pitch: number, hand: AppState['learnV3']['sessionConfig']['hand']): boolean {
+  if (hand === 'left') {
+    return pitch < 60
+  }
+
+  if (hand === 'right') {
+    return pitch >= 60
+  }
+
+  return true
+}

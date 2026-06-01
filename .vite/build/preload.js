@@ -1,6 +1,15 @@
 "use strict";
 const electron = require("electron");
 const electronApi = {
+  getSongs: () => electron.ipcRenderer.invoke("library:getUserSongs"),
+  uploadSong: async () => {
+    const sourcePath = await electron.ipcRenderer.invoke("dialog:openMidiFile");
+    if (sourcePath == null) {
+      return null;
+    }
+    return electron.ipcRenderer.invoke("library:saveUserSong", { sourcePath });
+  },
+  deleteSong: (songId) => electron.ipcRenderer.invoke("library:deleteUserSong", songId),
   dialog: {
     openMidiFile: () => electron.ipcRenderer.invoke("dialog:openMidiFile"),
     showSaveDialog: (options) => electron.ipcRenderer.invoke("dialog:showSaveDialog", options),
@@ -12,6 +21,11 @@ const electronApi = {
   },
   ffmpeg: {
     run: (args) => electron.ipcRenderer.invoke("ffmpeg:run", args)
+  },
+  library: {
+    getUserSongs: () => electron.ipcRenderer.invoke("library:getUserSongs"),
+    saveUserSong: (payload) => electron.ipcRenderer.invoke("library:saveUserSong", payload),
+    deleteUserSong: (songId) => electron.ipcRenderer.invoke("library:deleteUserSong", songId)
   },
   shell: {
     openPath: (filePath) => electron.ipcRenderer.invoke("shell:openPath", filePath)

@@ -101,7 +101,7 @@ export class EffectsLayer {
     this.unsubscribeStore?.()
     this.unsubscribeStore = null
 
-    this.particlePool.clear()
+    this.particlePool.forceReset()
     this.hitBurstPool.clear()
     this.spawnedNoteIds.clear()
 
@@ -133,6 +133,13 @@ export class EffectsLayer {
     this.bloomFilter = null
     this.lastTick = 0
     this.isInitialized = false
+  }
+
+  reset(): void {
+    this.spawnedNoteIds.clear()
+    this.particlePool.forceReset()
+    this.particlePool.recreateGraphics()
+    this.lastTick = getAppState().currentTick
   }
 
   update(

@@ -41,6 +41,46 @@ export const DEFAULT_PITCH_CLASS_COLORS: Record<number, string> = {
   11: '#f74ff0',
 }
 
+type LearnMode = 'listen' | 'noteByNote' | 'playAlong'
+type LearnHand = 'left' | 'right' | 'both'
+type MidiConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'failed'
+type AppMode = 'select' | 'create' | 'learn' | 'learnSong' | 'learnSession' | 'learnEnd'
+
+interface LearnSessionConfig {
+  mode: LearnMode | null
+  hand: LearnHand
+  tempoMultiplier: number
+}
+
+interface LearnStats {
+  correct: number
+  wrong: number
+  missed: number
+  streak: number
+  bestStreak: number
+}
+
+interface MidiDeviceInfo {
+  id: string
+  name: string
+}
+
+interface LearnV3State {
+  selectedSongId: string | null
+  sessionConfig: LearnSessionConfig
+  isActive: boolean
+  sessionState: 'idle' | 'playing' | 'ended'
+  currentChordIndex: number
+  stats: LearnStats
+  fingerNumbers: Record<string, number>
+  midi: {
+    available: boolean
+    devices: MidiDeviceInfo[]
+    connectedDeviceId: string | null
+    connectionStatus: MidiConnectionStatus
+  }
+}
+
 interface ProjectSlice {
   projectData: ProjectData | null
   precomputedTempoMap: PrecomputedTempoMap | null
@@ -76,6 +116,7 @@ interface TrackSlice {
 }
 
 interface UISlice {
+  appMode: AppMode
   activePanel: 'notes' | 'effects' | 'export' | null
   isExporting: boolean
   exportProgress: number
@@ -132,6 +173,7 @@ export type AppState =
   & SelectionSlice
   & TrackSlice
   & UISlice
+  & { learnV3: LearnV3State }
   & VisualizerSettingsSlice
 
 export interface AppActions {
@@ -153,6 +195,7 @@ export interface AppActions {
   setTrackSoloed(trackId: string, soloed: boolean): void
   initTrackDefaults(tracks: Track[]): void
   setActivePanel(panel: UISlice['activePanel']): void
+  setAppMode(mode: AppMode): void
   setExportProgress(
     progress: number,
     framesRendered: number,
@@ -195,6 +238,23 @@ export interface AppActions {
   setInnerGlowEnabled(enabled: boolean): void
   setLayeredGlowEnabled(enabled: boolean): void
   setErrorMessage(message: string | null): void
+  setSelectedSong(id: string | null): void
+  setSessionConfig(config: Partial<LearnSessionConfig>): void
+  resetSessionConfig(): void
+  startSession(): void
+  endSession(): void
+  exitSession(): void
+  advanceChord(): void
+  setCurrentChordIndex(index: number): void
+  setLearnActive(active: boolean): void
+  recordCorrect(): void
+  recordWrong(): void
+  recordMissed(): void
+  setFingerNumbers(map: Record<string, number>): void
+  setMidiAvailable(available: boolean): void
+  setMidiDevices(devices: MidiDeviceInfo[]): void
+  setConnectedDevice(id: string | null): void
+  setConnectionStatus(status: MidiConnectionStatus): void
   batchUpdate(fn: (state: AppState) => void): void
   resetStore(): void
 }
@@ -281,8 +341,35 @@ const visualizerSelector = (state: AppState) => ({
   velocityLowColor: state.velocityLowColor,
 })
 
+const learnV3Initial: LearnV3State = {
+  currentChordIndex: 0,
+  fingerNumbers: {},
+  isActive: false,
+  midi: {
+    available: false,
+    connectedDeviceId: null,
+    connectionStatus: 'disconnected',
+    devices: [],
+  },
+  selectedSongId: null,
+  sessionConfig: {
+    hand: 'both',
+    mode: null,
+    tempoMultiplier: 1.0,
+  },
+  sessionState: 'idle',
+  stats: {
+    bestStreak: 0,
+    correct: 0,
+    missed: 0,
+    streak: 0,
+    wrong: 0,
+  },
+}
+
 function createInitialState(): AppState {
   return {
+    appMode: 'select',
     activePanel: null,
     currentTick: 0,
     errorMessage: null,
@@ -294,6 +381,7 @@ function createInitialState(): AppState {
     isExporting: false,
     isPlaying: false,
     isProjectLoaded: false,
+    learnV3: structuredClone(learnV3Initial),
     loopEnabled: false,
     loopEndTick: 0,
     loopStartTick: 0,
@@ -609,6 +697,14 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    setAppMode: (mode) => {
+      validateAppMode(mode)
+
+      set((state) => {
+        state.appMode = mode
+      })
+    },
+
     setExportProgress: (progress, framesRendered, totalFrames, estimatedSeconds) => {
       validateFiniteStateNumber(progress, 'exportProgress')
       validateFiniteStateNumber(framesRendered, 'exportFramesRendered')
@@ -897,6 +993,126 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    setSelectedSong: (id) => {
+      validateOptionalString(id, 'selectedSongId')
+
+      set((state) => {
+        state.learnV3.selectedSongId = id
+      })
+    },
+
+    setSessionConfig: (config) => {
+      set((state) => {
+        Object.assign(state.learnV3.sessionConfig, config)
+      })
+    },
+
+    resetSessionConfig: () => {
+      set((state) => {
+        state.learnV3.sessionConfig = { ...learnV3Initial.sessionConfig }
+      })
+    },
+
+    startSession: () => {
+      set((state) => {
+        state.learnV3.isActive = true
+        state.learnV3.sessionState = 'playing'
+        state.learnV3.currentChordIndex = 0
+        state.learnV3.stats = { ...learnV3Initial.stats }
+      })
+    },
+
+    endSession: () => {
+      set((state) => {
+        state.learnV3.sessionState = 'ended'
+      })
+    },
+
+    exitSession: () => {
+      set((state) => {
+        state.learnV3.isActive = false
+        state.learnV3.sessionState = 'idle'
+        state.learnV3.currentChordIndex = 0
+      })
+    },
+
+    advanceChord: () => {
+      set((state) => {
+        state.learnV3.currentChordIndex += 1
+      })
+    },
+
+    setCurrentChordIndex: (index) => {
+      validateFiniteStateNumber(index, 'currentChordIndex')
+
+      set((state) => {
+        state.learnV3.currentChordIndex = Math.max(0, Math.floor(index))
+      })
+    },
+
+    setLearnActive: (active) => {
+      set((state) => {
+        state.learnV3.isActive = Boolean(active)
+      })
+    },
+
+    recordCorrect: () => {
+      set((state) => {
+        const stats = state.learnV3.stats
+        stats.correct += 1
+        stats.streak += 1
+        if (stats.streak > stats.bestStreak) {
+          stats.bestStreak = stats.streak
+        }
+      })
+    },
+
+    recordWrong: () => {
+      set((state) => {
+        state.learnV3.stats.wrong += 1
+        state.learnV3.stats.streak = 0
+      })
+    },
+
+    recordMissed: () => {
+      set((state) => {
+        state.learnV3.stats.missed += 1
+        state.learnV3.stats.streak = 0
+      })
+    },
+
+    setFingerNumbers: (map) => {
+      set((state) => {
+        state.learnV3.fingerNumbers = map
+      })
+    },
+
+    setMidiAvailable: (available) => {
+      set((state) => {
+        state.learnV3.midi.available = available
+      })
+    },
+
+    setMidiDevices: (devices) => {
+      set((state) => {
+        state.learnV3.midi.devices = devices
+      })
+    },
+
+    setConnectedDevice: (id) => {
+      validateOptionalString(id, 'connectedDeviceId')
+
+      set((state) => {
+        state.learnV3.midi.connectedDeviceId = id
+      })
+    },
+
+    setConnectionStatus: (status) => {
+      set((state) => {
+        state.learnV3.midi.connectionStatus = status
+      })
+    },
+
     batchUpdate: (fn) => {
       if (typeof fn !== 'function') {
         throw new StoreError('batchUpdate requires a function.', 'INVALID_STATE', fn)
@@ -1014,6 +1230,21 @@ function validateActivePanel(panel: UISlice['activePanel']): void {
   throw new StoreError('Active panel is invalid.', 'INVALID_STATE', panel)
 }
 
+function validateAppMode(mode: AppMode): void {
+  if (
+    mode === 'select' ||
+    mode === 'create' ||
+    mode === 'learn' ||
+    mode === 'learnSong' ||
+    mode === 'learnSession' ||
+    mode === 'learnEnd'
+  ) {
+    return
+  }
+
+  throw new StoreError('App mode is invalid.', 'INVALID_STATE', mode)
+}
+
 function validateColorMode(mode: VisualizerSettingsSlice['colorMode']): void {
   if (mode === 'track' || mode === 'pitch' || mode === 'split' || mode === 'velocity') {
     return
@@ -1085,3 +1316,4 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export { StoreError }
+export type { AppMode, LearnMode, LearnHand, MidiConnectionStatus, LearnSessionConfig, LearnStats, MidiDeviceInfo, LearnV3State }

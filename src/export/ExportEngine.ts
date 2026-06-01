@@ -92,12 +92,6 @@ export class ExportEngine {
   }
 
   async export(settings: ExportSettings): Promise<void> {
-    console.log('[Export] Starting export with settings:', settings)
-    console.log('[Export] Project loaded:', !!getAppState().projectData)
-    console.log('[Export] TempoMap loaded:', !!getAppState().precomputedTempoMap)
-    console.log('[Export] Total ticks:', getAppState().projectData?.totalTicks)
-    console.log('[Export] Output path:', settings.outputPath)
-
     if (this.isRunning) {
       throw new ExportError('An export is already in progress.', 'ALREADY_RUNNING')
     }
@@ -338,8 +332,6 @@ export class ExportEngine {
     const songDurationSeconds = tickToSeconds(projectData.totalTicks, tempoMap)
     const totalDurationSeconds = songDurationSeconds + OFFLINE_AUDIO_LEAD_IN_SECONDS + OFFLINE_AUDIO_TAIL_SECONDS
     const totalSteps = Math.max(1, Math.ceil(totalDurationSeconds * AUDIO_PROGRESS_STEPS_PER_SECOND))
-    const scheduledNotes = countScheduledNotes(projectData, state)
-    console.log('[Export] Total scheduled notes:', scheduledNotes)
     Tone.Transport.cancel()
     Tone.Transport.swing = 0
     Tone.Transport.loop = false
