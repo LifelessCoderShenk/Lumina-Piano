@@ -11,3 +11,8 @@ Create Mode:
   Learn songs note by note
   Play along with falling note and track accuracy
   
+
+Usage Instructions:
+Download repo
+Run npm install in the project directory
+Run npm run dev in the project directory
