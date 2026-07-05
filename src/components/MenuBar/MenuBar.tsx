@@ -16,7 +16,6 @@ export function MenuBar({ onExportClick }: MenuBarProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const { projectData } = useProjectData()
   const { selectedNoteIds } = useSelection()
-  const { showEffects } = getAppState()
 
   // Click outside to close menu
   useEffect(() => {
@@ -74,10 +73,6 @@ export function MenuBar({ onExportClick }: MenuBarProps) {
       { label: 'Zoom In', action: () => cameraSystem.zoom(1.25, getCenterX(), getCenterY()) },
       { label: 'Zoom Out', action: () => cameraSystem.zoom(0.8, getCenterX(), getCenterY()) },
       { label: 'Reset Zoom', action: () => useAppStore.getState().setZoom(1) },
-      { divider: true },
-      { label: showEffects ? 'Hide Effects' : 'Show Effects', action: () => {
-        useAppStore.getState().setShowEffects(!getAppState().showEffects)
-      } },
     ],
     WINDOW: [
       { label: 'Minimize', action: () => window.electronAPI?.window.minimize() },

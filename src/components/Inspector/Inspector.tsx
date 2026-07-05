@@ -1,10 +1,9 @@
 import React, { useState } from 'react'
 import cx from 'classnames'
 import { NoteProperties } from './NoteProperties'
-import { EffectsPanel } from './EffectsPanel'
 import styles from './Inspector.module.css'
 
-type Tab = 'props' | 'fx' | 'hist'
+type Tab = 'props' | 'hist'
 
 export function Inspector() {
   const [activeTab, setActiveTab] = useState<Tab>('props')
@@ -15,7 +14,6 @@ export function Inspector() {
         <div className={styles.title}>INSPECTOR</div>
         <div className={styles.subtitle}>
           {activeTab === 'props' && 'Note Properties'}
-          {activeTab === 'fx' && 'Global Effects'}
           {activeTab === 'hist' && 'History'}
         </div>
       </div>
@@ -28,12 +26,6 @@ export function Inspector() {
           Props
         </button>
         <button
-          className={cx(styles.tab, { [styles.active]: activeTab === 'fx' })}
-          onClick={() => setActiveTab('fx')}
-        >
-          FX
-        </button>
-        <button
           className={cx(styles.tab, { [styles.active]: activeTab === 'hist' })}
           onClick={() => setActiveTab('hist')}
         >
@@ -43,7 +35,6 @@ export function Inspector() {
 
       <div className={styles.content}>
         {activeTab === 'props' && <NoteProperties />}
-        {activeTab === 'fx' && <EffectsPanel />}
         {activeTab === 'hist' && <div className={styles.empty}>History coming soon</div>}
       </div>
     </div>

@@ -1,5 +1,8 @@
-export const KEYBOARD_HEIGHT = 180
+import { getAppState } from '../store/store'
+
+export const KEYBOARD_HEIGHT = 270
 export const HIT_LINE_HEIGHT = 8
+export const CREATE_MODE_FULLSCREEN_KEYBOARD_SCALE = 1.5
 
 export const KEYBOARD_BACKING_COLOR = 0x1a1a1a
 
@@ -31,9 +34,17 @@ export interface KeyboardLayoutMetrics {
   keyboardY: number
 }
 
+export function getKeyboardScaleMultiplier(): number {
+  if (typeof document === 'undefined' || document.fullscreenElement == null) {
+    return 1
+  }
+
+  return getAppState().learnV3.isActive ? 1 : CREATE_MODE_FULLSCREEN_KEYBOARD_SCALE
+}
+
 export function getKeyboardLayoutMetrics(canvasHeight: number): KeyboardLayoutMetrics {
   const safeCanvasHeight = Number.isFinite(canvasHeight) ? Math.max(0, Math.round(canvasHeight)) : 0
-  const keyboardHeight = Math.min(KEYBOARD_HEIGHT, safeCanvasHeight)
+  const keyboardHeight = Math.min(KEYBOARD_HEIGHT * getKeyboardScaleMultiplier(), safeCanvasHeight)
   const keyboardY = Math.max(0, safeCanvasHeight - keyboardHeight)
 
   return {

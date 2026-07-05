@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import midiDeviceManager from '../../learn/MidiDeviceManager'
 import type { LearnHand } from '../../store/store'
 import type { SongMetadata as SongMeta } from '../../learn/types'
+import { playbackEngine } from '../../playback/PlaybackEngine'
 import { useAppStore } from '../../store/store'
 import styles from './SongPage.module.css'
 
@@ -19,9 +20,9 @@ type CardState = {
 
 const MODE_CARDS: ModeCardConfig[] = [
   {
-    description: 'Play the song at a custom tempo, no input required',
-    mode: 'listen',
-    title: 'Listen',
+    description: 'Falling notes, play along in real time',
+    mode: 'playAlong',
+    title: 'Play Along',
   },
   {
     description: 'Stationary chords, play each to advance',
@@ -29,9 +30,9 @@ const MODE_CARDS: ModeCardConfig[] = [
     title: 'Note by Note',
   },
   {
-    description: 'Falling notes, play along in real time',
-    mode: 'playAlong',
-    title: 'Play Along',
+    description: 'Play the song at a custom tempo, no input required',
+    mode: 'listen',
+    title: 'Listen',
   },
 ]
 
@@ -123,6 +124,8 @@ export function SongPage() {
     mode: ModeCardConfig['mode'],
     tempoMultiplier: number,
   ) => {
+    void playbackEngine.setTempoMultiplier(tempoMultiplier)
+
     setCardStates((current) => ({
       ...current,
       [mode]: {
@@ -146,7 +149,12 @@ export function SongPage() {
   }
 
   const handleStart = (mode: ModeCardConfig['mode']) => {
+    if (requiresMidiForMode(mode) && midiState.connectionStatus !== 'connected') {
+      return
+    }
+
     const config = cardStates[mode]
+    void playbackEngine.setTempoMultiplier(config.tempoMultiplier)
     setSessionConfig({
       hand: config.hand,
       mode,
@@ -210,6 +218,7 @@ export function SongPage() {
               <ModeCard
                 key={card.mode}
                 card={card}
+                isStartDisabled={requiresMidiForMode(card.mode) && midiState.connectionStatus !== 'connected'}
                 state={cardStates[card.mode]}
                 onHandChange={handleCardHandChange}
                 onStart={handleStart}
@@ -261,6 +270,11 @@ export function SongPage() {
                   </div>
                 ) : null}
               </div>
+              {midiState.connectionStatus !== 'connected' ? (
+                <div className={styles.midiWarning}>
+                  Connect and test a MIDI device to start.
+                </div>
+              ) : null}
             </div>
           </footer>
         </>
@@ -271,12 +285,14 @@ export function SongPage() {
 
 function ModeCard({
   card,
+  isStartDisabled,
   state,
   onTempoChange,
   onHandChange,
   onStart,
 }: {
   card: ModeCardConfig
+  isStartDisabled: boolean
   onHandChange: (mode: ModeCardConfig['mode'], hand: LearnHand) => void
   onStart: (mode: ModeCardConfig['mode']) => void
   onTempoChange: (mode: ModeCardConfig['mode'], tempoMultiplier: number) => void
@@ -335,9 +351,11 @@ function ModeCard({
       <button
         type="button"
         className={styles.startButton}
+        disabled={isStartDisabled}
         onClick={() => {
           onStart(card.mode)
         }}
+        title={isStartDisabled ? 'Connect and test a MIDI device to start.' : undefined}
       >
         START
       </button>
@@ -382,4 +400,8 @@ function getDifficultyClassName(
         : classNames.advancedBadge
 
   return `${classNames.difficultyBadge} ${badgeClassName}`
+}
+
+function requiresMidiForMode(mode: ModeCardConfig['mode']): boolean {
+  return mode !== 'listen'
 }

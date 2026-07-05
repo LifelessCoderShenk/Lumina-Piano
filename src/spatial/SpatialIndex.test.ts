@@ -247,12 +247,12 @@ describe('SpatialIndex', () => {
     expect(index.getNotesInRegion(70, 0, 71, 50)).toEqual([])
   })
 
-  it('throws INVALID_REGION for inverted region bounds', () => {
+  it('returns an empty result for inverted region bounds', () => {
     const index = createManualIndex()
     index.build(createProjectData([createTrack('track-1', [createNote('a', 60, 100, 200)])]))
 
-    expect(() => index.getNotesInRegion(10, 0, 5, 100)).toThrowError(SpatialIndexError)
-    expect(() => index.getNotesInRegion(0, 100, 10, 50)).toThrowError(SpatialIndexError)
+    expect(index.getNotesInRegion(10, 0, 5, 100)).toEqual([])
+    expect(index.getNotesInRegion(0, 100, 10, 50)).toEqual([])
   })
 
   it('auto-rebuilds when a new project loads into the store', () => {

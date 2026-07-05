@@ -96,6 +96,26 @@ describe('PlaybackEngine', () => {
     engine.destroy()
   })
 
+  it('playWithPreRoll starts from a negative tick and reaches tick 0 after the pre-roll duration', () => {
+    const engine = setupInitializedEngine()
+
+    engine.playWithPreRoll(1)
+
+    expect(useAppStore.getState().currentTick).toBe(-480)
+    expect(useAppStore.getState().isPlaying).toBe(true)
+
+    runFrame(500)
+    expect(useAppStore.getState().currentTick).toBe(-240)
+
+    runFrame(1_000)
+    expect(useAppStore.getState().currentTick).toBe(0)
+
+    runFrame(1_500)
+    expect(useAppStore.getState().currentTick).toBe(240)
+
+    engine.destroy()
+  })
+
   it('has no drift across pause and resume', () => {
     const engine = setupInitializedEngine()
 

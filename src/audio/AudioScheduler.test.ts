@@ -17,6 +17,7 @@ const mockSamplerDispose = vi.hoisted(() => vi.fn())
 const mockToDestination = vi.hoisted(() => vi.fn(function (this: MockSamplerInstance) {
   return this
 }))
+const mockFrequencyToFrequency = vi.hoisted(() => vi.fn(() => 261.63))
 const mockFrequencyToNote = vi.hoisted(() => vi.fn(() => 'C4'))
 const mockToneContext = vi.hoisted(() => ({
   state: 'running' as 'running' | 'suspended',
@@ -57,6 +58,7 @@ const MockSampler = vi.hoisted(() =>
 
 vi.mock('tone', () => ({
   Frequency: vi.fn(() => ({
+    toFrequency: mockFrequencyToFrequency,
     toNote: mockFrequencyToNote,
   })),
   Sampler: MockSampler,
@@ -82,6 +84,7 @@ beforeEach(() => {
     }, 0) as unknown as number
   })
   mockToneNow.mockReturnValue(0)
+  mockFrequencyToFrequency.mockReturnValue(261.63)
   mockFrequencyToNote.mockReturnValue('C4')
   mockToneContext.state = 'running'
 })
@@ -185,6 +188,89 @@ describe('start() / stop()', () => {
     vi.advanceTimersByTime(25)
 
     expect(mockTriggerAttackRelease.mock.calls.length).toBeGreaterThanOrEqual(firstCallCount)
+
+    scheduler.destroy()
+  })
+})
+
+describe('playNotes()', () => {
+  it('calls triggerAttackRelease for each note with the expected frequency and duration', async () => {
+    const scheduler = await setupScheduler()
+
+    mockFrequencyToFrequency
+      .mockReturnValueOnce(261.63)
+      .mockReturnValueOnce(329.63)
+
+    scheduler.playNotes([
+      { durationMs: 250, pitch: 60 },
+      { durationMs: 500, pitch: 64 },
+    ])
+
+    expect(mockTriggerAttackRelease).toHaveBeenNthCalledWith(1, 261.63, 0.25)
+    expect(mockTriggerAttackRelease).toHaveBeenNthCalledWith(2, 329.63, 0.5)
+
+    scheduler.destroy()
+  })
+})
+
+describe('warmUpAudio()', () => {
+  it('warmUp starts Tone, waits for samples, primes the sampler, and restores volume after the warm-up delay', async () => {
+    const scheduler = await setupScheduler()
+    scheduler.setVolume(-18)
+
+    await scheduler.warmUp()
+
+    expect(mockToneStart).toHaveBeenCalled()
+    expect(mockToneLoaded).toHaveBeenCalled()
+    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('C4', 0.01)
+    expect(getSamplerVolume()).toBe(Number.NEGATIVE_INFINITY)
+
+    vi.advanceTimersByTime(50)
+
+    expect(getSamplerVolume()).toBe(-18)
+
+    scheduler.destroy()
+  })
+
+  it('primeSampler triggers a silent note and restores the previous volume after the warm-up delay', async () => {
+    const scheduler = await setupScheduler()
+    scheduler.setVolume(-20)
+
+    scheduler.primeSampler()
+
+    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('C4', 0.01)
+    expect(getSamplerVolume()).toBe(Number.NEGATIVE_INFINITY)
+
+    vi.advanceTimersByTime(50)
+
+    expect(getSamplerVolume()).toBe(-20)
+
+    scheduler.destroy()
+  })
+})
+
+describe('reset()', () => {
+  it('cancels scheduled transport state, releases notes, and stops future scheduling until restarted', async () => {
+    const scheduler = await setupScheduler()
+    loadProjectWithNotes([
+      createNote('note-1', 0, 480, 60, 100),
+    ])
+
+    useAppStore.getState().setCurrentTick(0)
+    useAppStore.getState().setIsPlaying(true)
+    scheduler.start()
+    vi.advanceTimersByTime(25)
+
+    mockTriggerAttackRelease.mockClear()
+    mockReleaseAll.mockClear()
+    mockTransportCancel.mockClear()
+
+    scheduler.reset()
+    vi.advanceTimersByTime(50)
+
+    expect(mockReleaseAll).toHaveBeenCalled()
+    expect(mockTransportCancel).toHaveBeenCalled()
+    expect(mockTriggerAttackRelease).not.toHaveBeenCalled()
 
     scheduler.destroy()
   })
@@ -529,6 +615,19 @@ describe('volume controls', () => {
 
     scheduler.unmute()
     expect(getSamplerVolume()).toBe(-20)
+
+    scheduler.destroy()
+  })
+
+  it('supports setMuted for camera mode recording and preview playback', async () => {
+    const scheduler = await setupScheduler()
+
+    scheduler.setVolume(-12)
+    scheduler.setMuted(true)
+    expect(getSamplerVolume()).toBe(Number.NEGATIVE_INFINITY)
+
+    scheduler.setMuted(false)
+    expect(getSamplerVolume()).toBe(-12)
 
     scheduler.destroy()
   })

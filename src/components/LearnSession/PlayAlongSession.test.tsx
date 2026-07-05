@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -19,6 +19,14 @@ const mockPause = vi.hoisted(() => vi.fn())
 const mockSeek = vi.hoisted(() => vi.fn())
 const mockSetTempoMultiplier = vi.hoisted(() => vi.fn())
 const mockTriggerKeyFlash = vi.hoisted(() => vi.fn())
+const mockRenderFrame = vi.hoisted(() => vi.fn())
+const mockRendererIsReady = vi.hoisted(() => vi.fn(() => true))
+const mockAudioSchedulerReset = vi.hoisted(() => vi.fn())
+const mockAudioSchedulerWarmUpAudio = vi.hoisted(() => vi.fn(async () => undefined))
+const mockSpatialIndexBuild = vi.hoisted(() => vi.fn())
+const mockToneStart = vi.hoisted(() => vi.fn(async () => undefined))
+const mockTransportStop = vi.hoisted(() => vi.fn())
+const mockTransportCancel = vi.hoisted(() => vi.fn())
 const mockAssignFingerNumbers = vi.hoisted(() => vi.fn(() => ({
   'note-1': 1,
   'note-2': 2,
@@ -49,9 +57,24 @@ vi.mock('../../playback/PlaybackEngine', () => ({
   },
 }))
 
+vi.mock('../../audio/AudioScheduler', () => ({
+  audioScheduler: {
+    reset: mockAudioSchedulerReset,
+    warmUpAudio: mockAudioSchedulerWarmUpAudio,
+  },
+}))
+
 vi.mock('../../renderer/Renderer', () => ({
   renderer: {
+    isReady: mockRendererIsReady,
+    renderFrame: mockRenderFrame,
     triggerKeyFlash: mockTriggerKeyFlash,
+  },
+}))
+
+vi.mock('../../spatial/SpatialIndex', () => ({
+  spatialIndex: {
+    build: mockSpatialIndexBuild,
   },
 }))
 
@@ -63,8 +86,17 @@ vi.mock('../../midi/loadMidiProject', () => ({
   loadMidiFileFromPath: mockLoadMidiFileFromPath,
 }))
 
+vi.mock('tone', () => ({
+  Transport: {
+    cancel: mockTransportCancel,
+    stop: mockTransportStop,
+  },
+  start: mockToneStart,
+}))
+
 describe('PlayAlongSession', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     resetStore()
     playbackListeners.onEnded = null
     mockMidiManager.onNoteOn = null
@@ -74,8 +106,17 @@ describe('PlayAlongSession', () => {
     mockSeek.mockClear()
     mockSetTempoMultiplier.mockClear()
     mockTriggerKeyFlash.mockClear()
+    mockRenderFrame.mockClear()
+    mockRendererIsReady.mockClear()
+    mockAudioSchedulerReset.mockClear()
+    mockAudioSchedulerWarmUpAudio.mockClear()
+    mockSpatialIndexBuild.mockClear()
+    mockToneStart.mockClear()
+    mockTransportStop.mockClear()
+    mockTransportCancel.mockClear()
     mockAssignFingerNumbers.mockClear()
     mockLoadMidiFileFromPath.mockClear()
+    mockRendererIsReady.mockReturnValue(true)
     useAppStore.getState().setSelectedSong('song-1')
     useAppStore.getState().setSessionConfig({
       hand: 'both',
@@ -89,19 +130,62 @@ describe('PlayAlongSession', () => {
   afterEach(() => {
     cleanup()
     resetStore()
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
-  it('on mount sets isActive true, sets tempo multiplier, sets onNoteOn, and calls play', async () => {
+  it('shows the scorecard and countdown before playback starts', async () => {
     loadProjectIntoStore(createTwoNoteProjectData())
+    useAppStore.getState().setCurrentTick(720)
+    useAppStore.getState().setIsPlaying(true)
+    useAppStore.getState().recordCorrect()
+    useAppStore.getState().recordWrong()
+    useAppStore.getState().recordMissed()
 
     render(<PlayAlongSession />)
 
-    await waitFor(() => {
-      expect(useAppStore.getState().learnV3.isActive).toBe(true)
+    await settleSessionEffects()
+
+    expect(mockPause).toHaveBeenCalled()
+    expect(mockSeek).toHaveBeenCalledWith(0)
+    expect(mockTransportStop).toHaveBeenCalled()
+    expect(mockTransportCancel).toHaveBeenCalled()
+    expect(mockToneStart).toHaveBeenCalled()
+    expect(mockAudioSchedulerReset).toHaveBeenCalled()
+    expect(mockSpatialIndexBuild).toHaveBeenCalledWith(createTwoNoteProjectData())
+    expect(mockRenderFrame).toHaveBeenCalledWith(0)
+    expect(useAppStore.getState().currentTick).toBe(0)
+    expect(useAppStore.getState().isPlaying).toBe(false)
+    expect(useAppStore.getState().learnV3.stats).toEqual({
+      bestStreak: 0,
+      correct: 0,
+      missed: 0,
+      streak: 0,
+      wrong: 0,
     })
+    expect(useAppStore.getState().learnV3.isActive).toBe(true)
+    expect(screen.getByText('Play Along Song')).toBeTruthy()
+    expect(screen.getByText('INTERMEDIATE')).toBeTruthy()
+    expect(mockAudioSchedulerWarmUpAudio).not.toHaveBeenCalled()
+    expect(mockPlay).not.toHaveBeenCalled()
+
+    await advanceIntroBy(1_600)
+    expect(screen.getByText('3')).toBeTruthy()
+    expect(mockAudioSchedulerWarmUpAudio).toHaveBeenCalledTimes(1)
+
+    await advanceIntroBy(550)
+    expect(screen.getByText('2')).toBeTruthy()
+
+    await advanceIntroBy(550)
+    expect(screen.getByText('1')).toBeTruthy()
+
+    await advanceIntroBy(550)
+    expect(screen.getByText('GO')).toBeTruthy()
+
+    await advanceIntroBy(400)
 
     expect(mockSetTempoMultiplier).toHaveBeenCalledWith(0.75)
+    expect(mockSetTempoMultiplier).toHaveBeenCalledTimes(2)
     expect(mockPlay).toHaveBeenCalledTimes(1)
     expect(mockMidiManager.onNoteOn).not.toBeNull()
     expect(mockAssignFingerNumbers).toHaveBeenCalledWith(
@@ -115,9 +199,7 @@ describe('PlayAlongSession', () => {
 
     render(<PlayAlongSession />)
 
-    await waitFor(() => {
-      expect(mockMidiManager.onNoteOn).not.toBeNull()
-    })
+    await settleSessionEffects()
 
     act(() => {
       useAppStore.getState().setCurrentTick(0)
@@ -133,9 +215,7 @@ describe('PlayAlongSession', () => {
 
     render(<PlayAlongSession />)
 
-    await waitFor(() => {
-      expect(mockMidiManager.onNoteOn).not.toBeNull()
-    })
+    await settleSessionEffects()
 
     act(() => {
       useAppStore.getState().setCurrentTick(0)
@@ -146,14 +226,28 @@ describe('PlayAlongSession', () => {
     expect(mockTriggerKeyFlash).toHaveBeenCalledWith(61, 0xff3333)
   })
 
+  it('marks notes missed during playback when no matching input arrives', async () => {
+    loadProjectIntoStore(createTwoNoteProjectData())
+
+    render(<PlayAlongSession />)
+
+    await settleSessionEffects()
+
+    act(() => {
+      useAppStore.getState().setIsPlaying(true)
+      useAppStore.getState().setCurrentTick(480)
+    })
+
+    expect(useAppStore.getState().learnV3.stats.missed).toBe(1)
+    expect(screen.getByText('0% ACCURATE')).toBeTruthy()
+  })
+
   it('song end records missed notes, calls endSession, and navigates to learnEnd', async () => {
     loadProjectIntoStore(createTwoNoteProjectData())
 
     render(<PlayAlongSession />)
 
-    await waitFor(() => {
-      expect(playbackListeners.onEnded).not.toBeNull()
-    })
+    await settleSessionEffects()
 
     act(() => {
       useAppStore.getState().setCurrentTick(0)
@@ -169,13 +263,18 @@ describe('PlayAlongSession', () => {
 
   it('accuracy display calculates correctly including missed notes', async () => {
     loadProjectIntoStore(createTwoNoteProjectData())
-    useAppStore.getState().recordCorrect()
-    useAppStore.getState().recordWrong()
-    useAppStore.getState().recordMissed()
 
     render(<PlayAlongSession />)
 
-    expect(await screen.findByText('33% ACCURATE')).toBeTruthy()
+    await settleSessionEffects()
+
+    act(() => {
+      useAppStore.getState().recordCorrect()
+      useAppStore.getState().recordWrong()
+      useAppStore.getState().recordMissed()
+    })
+
+    expect(screen.getByText('33% ACCURATE')).toBeTruthy()
   })
 
   it('play or pause button toggles playback', async () => {
@@ -183,9 +282,8 @@ describe('PlayAlongSession', () => {
 
     render(<PlayAlongSession />)
 
-    await waitFor(() => {
-      expect(mockPlay).toHaveBeenCalledTimes(1)
-    })
+    await settleSessionEffects()
+    await advanceThroughIntro()
 
     mockPlay.mockClear()
 
@@ -196,8 +294,37 @@ describe('PlayAlongSession', () => {
       useAppStore.getState().setIsPlaying(true)
     })
 
+    mockPause.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Pause playback' }))
     expect(mockPause).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for audio warm-up to complete before starting playback after the countdown', async () => {
+    let resolveWarmUp: (() => void) | null = null
+    mockAudioSchedulerWarmUpAudio.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveWarmUp = resolve
+        }),
+    )
+
+    loadProjectIntoStore(createTwoNoteProjectData())
+
+    render(<PlayAlongSession />)
+
+    await settleSessionEffects()
+    await advanceIntroBy(1_600)
+    await advanceIntroBy(550)
+    await advanceIntroBy(550)
+    await advanceIntroBy(550)
+    await advanceIntroBy(400)
+
+    expect(mockPlay).not.toHaveBeenCalled()
+
+    resolveWarmUp?.()
+    await settleSessionEffects()
+
+    expect(mockPlay).toHaveBeenCalledTimes(1)
   })
 
   it('back button pauses, calls exitSession, and navigates to learnSong', async () => {
@@ -206,7 +333,9 @@ describe('PlayAlongSession', () => {
 
     render(<PlayAlongSession />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Back to song page' }))
+    await settleSessionEffects()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to song page' }))
 
     expect(mockPause).toHaveBeenCalled()
     expect(useAppStore.getState().learnV3.isActive).toBe(false)
@@ -219,9 +348,7 @@ describe('PlayAlongSession', () => {
 
     const { unmount } = render(<PlayAlongSession />)
 
-    await waitFor(() => {
-      expect(useAppStore.getState().learnV3.isActive).toBe(true)
-    })
+    await settleSessionEffects()
 
     unmount()
 
@@ -231,6 +358,24 @@ describe('PlayAlongSession', () => {
     expect(mockPause).toHaveBeenCalled()
   })
 })
+
+async function advanceIntroBy(durationMs: number): Promise<void> {
+  await act(async () => {
+    vi.advanceTimersByTime(durationMs)
+    await Promise.resolve()
+  })
+}
+
+async function advanceThroughIntro(): Promise<void> {
+  await advanceIntroBy(3_650)
+}
+
+async function settleSessionEffects(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
 
 function createElectronApiMock() {
   return {
@@ -245,6 +390,9 @@ function createElectronApiMock() {
         title: 'Play Along Song',
       },
     ]),
+    openJsonFile: vi.fn(async () => null),
+    openMidiFile: vi.fn(async () => null),
+    showSaveDialog: vi.fn(),
   } as typeof window.electronAPI
 }
 

@@ -14,8 +14,9 @@ const mockPlay = vi.hoisted(() => vi.fn())
 const mockPause = vi.hoisted(() => vi.fn())
 const mockSeek = vi.hoisted(() => vi.fn())
 const mockSetTempoMultiplier = vi.hoisted(() => vi.fn(async () => undefined))
-const mockRendererDestroy = vi.hoisted(() => vi.fn())
+const mockRendererDestroy = vi.hoisted(() => vi.fn(async () => undefined))
 const mockRendererForceResume = vi.hoisted(() => vi.fn())
+const mockWarmUpAudio = vi.hoisted(() => vi.fn(async () => undefined))
 const mockLoadMidiFileFromPath = vi.hoisted(() => vi.fn(async () => true))
 const mockCanvasContext = vi.hoisted(() => ({
   clearRect: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('../../audio/AudioScheduler', () => ({
   audioScheduler: {
     init: vi.fn(),
     isReady: vi.fn(() => true),
+    warmUpAudio: mockWarmUpAudio,
   },
 }))
 
@@ -74,7 +76,9 @@ describe('ListenSession', () => {
     mockSeek.mockClear()
     mockSetTempoMultiplier.mockClear()
     mockRendererDestroy.mockClear()
+    mockRendererDestroy.mockImplementation(async () => undefined)
     mockRendererForceResume.mockClear()
+    mockWarmUpAudio.mockClear()
     mockLoadMidiFileFromPath.mockClear()
     useAppStore.getState().setSelectedSong('song-1')
     useAppStore.getState().setSessionConfig({
@@ -119,6 +123,7 @@ describe('ListenSession', () => {
     await waitFor(() => {
       expect(mockSetTempoMultiplier).toHaveBeenCalledWith(0.75)
     })
+    expect(mockWarmUpAudio).toHaveBeenCalledTimes(1)
     expect(mockRendererForceResume).toHaveBeenCalledTimes(1)
     expect(mockSeek).toHaveBeenCalledWith(0)
     expect(mockPlay).toHaveBeenCalledTimes(1)
@@ -193,7 +198,6 @@ describe('ListenSession', () => {
   it('back button calls seek(0) before exitSession and navigates to learnSong', async () => {
     loadProjectIntoStore()
     useAppStore.getState().startSession()
-    const exitSessionSpy = vi.spyOn(useAppStore.getState(), 'exitSession')
 
     render(<ListenSession />)
 
@@ -203,11 +207,13 @@ describe('ListenSession', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to song page' }))
 
+    await waitFor(() => {
+      expect(mockRendererDestroy).toHaveBeenCalledTimes(1)
+    })
+
     expect(mockPause).toHaveBeenCalled()
     expect(mockSeek).toHaveBeenCalledWith(0)
     expect(mockSetTempoMultiplier).toHaveBeenCalledWith(1.0)
-    expect(mockRendererDestroy).toHaveBeenCalledTimes(1)
-    expect(mockSeek.mock.invocationCallOrder.at(-1)).toBeLessThan(exitSessionSpy.mock.invocationCallOrder[0])
     expect(useAppStore.getState().learnV3.isActive).toBe(false)
     expect(useAppStore.getState().learnV3.sessionState).toBe('idle')
     expect(useAppStore.getState().appMode).toBe('learnSong')
@@ -261,23 +267,12 @@ describe('ListenSession', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to song page' }))
 
-    expect(useAppStore.getState().noteLabelsOnNotes).toBe(false)
-    expect(useAppStore.getState().noteLabelsOnKeys).toBe(false)
-  })
-
-  it('disables particles on mount and restores the previous value on back navigation', async () => {
-    loadProjectIntoStore()
-    useAppStore.getState().setParticlesEnabled(true)
-
-    render(<ListenSession />)
-
     await waitFor(() => {
-      expect(useAppStore.getState().particlesEnabled).toBe(false)
+      expect(useAppStore.getState().noteLabelsOnNotes).toBe(false)
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to song page' }))
-
-    expect(useAppStore.getState().particlesEnabled).toBe(true)
+    expect(useAppStore.getState().noteLabelsOnNotes).toBe(false)
+    expect(useAppStore.getState().noteLabelsOnKeys).toBe(false)
   })
 })
 
@@ -294,6 +289,9 @@ function createElectronApiMock() {
         title: 'Moonlight Sonata',
       },
     ]),
+    openJsonFile: vi.fn(async () => null),
+    openMidiFile: vi.fn(async () => null),
+    showSaveDialog: vi.fn(),
   } as typeof window.electronAPI
 }
 

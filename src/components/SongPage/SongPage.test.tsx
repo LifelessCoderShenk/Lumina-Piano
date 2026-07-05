@@ -11,6 +11,7 @@ const mockMidiGetDevices = vi.hoisted(() => vi.fn(() => [
 ]))
 const mockMidiConnect = vi.hoisted(() => vi.fn())
 const mockMidiTestConnection = vi.hoisted(() => vi.fn(async () => undefined))
+const mockSetTempoMultiplier = vi.hoisted(() => vi.fn(async () => undefined))
 
 vi.mock('../../learn/MidiDeviceManager', () => ({
   default: {
@@ -18,6 +19,12 @@ vi.mock('../../learn/MidiDeviceManager', () => ({
     getDevices: mockMidiGetDevices,
     init: mockMidiInit,
     testConnection: mockMidiTestConnection,
+  },
+}))
+
+vi.mock('../../playback/PlaybackEngine', () => ({
+  playbackEngine: {
+    setTempoMultiplier: mockSetTempoMultiplier,
   },
 }))
 
@@ -31,6 +38,7 @@ describe('SongPage', () => {
     mockMidiGetDevices.mockClear()
     mockMidiConnect.mockClear()
     mockMidiTestConnection.mockClear()
+    mockSetTempoMultiplier.mockClear()
   })
 
   afterEach(() => {
@@ -62,6 +70,7 @@ describe('SongPage', () => {
   })
 
   it('start on each card sets correct mode in store and navigates', async () => {
+    useAppStore.getState().setConnectionStatus('connected')
     render(<SongPage />)
     await screen.findByText('Moonlight Sonata')
 
@@ -86,6 +95,26 @@ describe('SongPage', () => {
       tempoMultiplier: 0.75,
     })
     expect(getAppState().appMode).toBe('learnSession')
+    expect(mockSetTempoMultiplier).toHaveBeenCalledWith(0.75)
+  })
+
+  it('disables Note by Note and Play Along start buttons when MIDI is not connected', async () => {
+    render(<SongPage />)
+    await screen.findByText('Moonlight Sonata')
+
+    const listenStart = within(screen.getByLabelText('Listen mode')).getByRole('button', { name: 'START' }) as HTMLButtonElement
+    const noteByNoteStart = within(screen.getByLabelText('Note by Note mode')).getByRole('button', { name: 'START' }) as HTMLButtonElement
+    const playAlongStart = within(screen.getByLabelText('Play Along mode')).getByRole('button', { name: 'START' }) as HTMLButtonElement
+
+    expect(listenStart.disabled).toBe(false)
+    expect(noteByNoteStart.disabled).toBe(true)
+    expect(playAlongStart.disabled).toBe(true)
+  })
+
+  it('shows a warning message when no MIDI device is connected', async () => {
+    render(<SongPage />)
+
+    expect(await screen.findByText('Connect and test a MIDI device to start.')).toBeTruthy()
   })
 
   it('device dropdown change calls midiDeviceManager.connect', async () => {
@@ -138,11 +167,26 @@ describe('SongPage', () => {
 
     expect(getAppState().appMode).toBe('learn')
   })
+
+  it('keeps Listen mode start enabled regardless of MIDI status', async () => {
+    render(<SongPage />)
+    await screen.findByText('Moonlight Sonata')
+
+    const listenStart = within(screen.getByLabelText('Listen mode')).getByRole('button', { name: 'START' }) as HTMLButtonElement
+    expect(listenStart.disabled).toBe(false)
+
+    fireEvent.click(listenStart)
+    expect(getAppState().learnV3.sessionConfig.mode).toBe('listen')
+    expect(getAppState().appMode).toBe('learnSession')
+  })
 })
 
 function createElectronApiMock() {
   return {
     deleteSong: vi.fn(async () => undefined),
+    openJsonFile: vi.fn(async () => null),
+    openMidiFile: vi.fn(async () => null),
+    showSaveDialog: vi.fn(),
     dialog: {
       getDefaultExportPath: vi.fn(),
       openMidiFile: vi.fn(),

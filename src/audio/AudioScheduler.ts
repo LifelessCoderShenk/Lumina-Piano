@@ -185,6 +185,54 @@ export class AudioScheduler {
     this.lastScheduledTick = getAppState().currentTick
   }
 
+  playNotes(notes: Array<{ durationMs: number; pitch: number }>): void {
+    if (!this.isInitialized || this.sampler == null) {
+      return
+    }
+
+    for (const note of notes) {
+      const frequency = Tone.Frequency(note.pitch, 'midi').toFrequency()
+      this.sampler.triggerAttackRelease(frequency, note.durationMs / 1000)
+    }
+  }
+
+  async warmUpAudio(): Promise<void> {
+    await Tone.start()
+    await Tone.loaded()
+    this.primeSampler()
+  }
+
+  async warmUp(): Promise<void> {
+    await this.warmUpAudio()
+  }
+
+  primeSampler(): void {
+    if (!this.isInitialized || this.sampler == null || !this.getSamplerLoadedState()) {
+      return
+    }
+
+    const previousVolume = this.sampler.volume.value
+    this.sampler.volume.value = Number.NEGATIVE_INFINITY
+    this.sampler.triggerAttackRelease('C4', 0.01)
+
+    globalThis.setTimeout(() => {
+      if (this.sampler != null) {
+        this.sampler.volume.value = previousVolume
+      }
+    }, 50)
+  }
+
+  reset(): void {
+    if (this.intervalId != null) {
+      clearInterval(this.intervalId)
+      this.intervalId = null
+    }
+
+    this.cancelScheduledEvents()
+    this.lastScheduledTick = 0
+    this.lastKnownTick = 0
+  }
+
   seek(tick: number): void {
     this.assertValidTick(tick)
     const normalizedTick = normalizeTick(tick)
@@ -212,6 +260,25 @@ export class AudioScheduler {
     }
 
     this.sampler!.volume.value = clampedDb
+  }
+
+  setMuted(muted: boolean): void {
+    if (!this.isInitialized || this.sampler == null) {
+      return
+    }
+
+    if (muted) {
+      if (!this.isMuted) {
+        this.volumeBeforeMute = this.sampler.volume.value
+      }
+
+      this.isMuted = true
+      this.sampler.volume.value = Number.NEGATIVE_INFINITY
+      return
+    }
+
+    this.isMuted = false
+    this.sampler.volume.value = clamp(this.volumeBeforeMute, MIN_VOLUME_DB, MAX_VOLUME_DB)
   }
 
   mute(): void {

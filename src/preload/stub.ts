@@ -7,6 +7,9 @@ export function installStub() {
     deleteSong: async (songId) => {
       console.log('[Stub] deleteSong', songId)
     },
+    showSaveDialog: async () => 'C:/tmp/learn-visuals.json',
+    openJsonFile: async () => null,
+    openMidiFile: async () => null,
     dialog: {
       openMidiFile: async () => null,
       showSaveDialog: async () => 'stub_export.mp4',

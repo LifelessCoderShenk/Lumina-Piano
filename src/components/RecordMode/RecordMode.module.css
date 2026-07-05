@@ -1,0 +1,416 @@
+.recordMode {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+  padding: 16px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.backButton {
+  align-self: flex-start;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #111111;
+  color: var(--color-text-body);
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  background: var(--color-bg);
+}
+
+.column {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.divider {
+  width: 1px;
+  background: #1a1a1a;
+  margin: 0 20px;
+}
+
+.header {
+  margin: 0;
+  color: var(--color-text-header);
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label {
+  color: var(--color-text-body);
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+}
+
+.select,
+.numberInput,
+.slider {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.select,
+.numberInput {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #111111;
+  color: var(--color-text-body);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.slider {
+  accent-color: var(--color-icon);
+}
+
+.inlineRow,
+.toggleRow,
+.trackToggleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggleRow {
+  flex-wrap: wrap;
+}
+
+.toggleButton,
+.testButton,
+.placeholderButton,
+.stopButton,
+.controlButton {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #111111;
+  color: var(--color-text-body);
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.toggleActive {
+  background: rgba(46, 101, 162, 0.28);
+  border-color: var(--color-icon);
+}
+
+.testButton {
+  flex: 0 0 auto;
+}
+
+.midiTestStatus {
+  min-height: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+}
+
+.midiTestSuccess {
+  color: #33cc66;
+}
+
+.midiTestFailure {
+  color: #ff4d4f;
+}
+
+.cameraPreview {
+  width: 100%;
+  position: relative;
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  margin-top: 8px;
+}
+
+.previewVideo,
+.liveVideo,
+.reviewVideo {
+  width: 100%;
+  display: block;
+  background: #000000;
+}
+
+.previewVideo {
+  height: auto;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.liveVideo,
+.reviewVideo {
+  height: 100%;
+  object-fit: cover;
+}
+
+.recordButton {
+  margin-top: auto;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #000000;
+  color: var(--color-text-body);
+  font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.recordDot {
+  color: #ff3333;
+  line-height: 1;
+}
+
+.disabledControls {
+  opacity: 0.4;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.enabledControls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cropGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.disabledNote {
+  margin: 0;
+  color: #7b7b7b;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+}
+
+.overlayMessage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-body);
+  background: rgba(0, 0, 0, 0.7);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.liveView {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: #000000;
+  overflow: hidden;
+}
+
+.liveVideo {
+  position: absolute;
+  inset: 0;
+}
+
+.countdown {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 96px;
+  font-family: Arial, sans-serif;
+  color: #ffffff;
+  font-weight: bold;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.recordingIndicator {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+}
+
+.recordingPulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ff3333;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.liveControlBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  z-index: 20;
+}
+
+.stopButton {
+  border-color: #ff3333;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.reviewLayout {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: #000000;
+  overflow: hidden;
+}
+
+.reviewVisualizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60%;
+  z-index: 2;
+  display: flex;
+}
+
+.reviewVideoSlot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40%;
+  z-index: 1;
+  overflow: hidden;
+  background: #000000;
+}
+
+.cropViewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.cropFrame {
+  position: absolute;
+}
+
+.reviewControlsPanel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  max-height: calc(100% - 96px);
+  overflow: auto;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  z-index: 18;
+  box-sizing: border-box;
+}
+
+.alignInstruction {
+  margin: 0;
+  color: #ffffff;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.overlayBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 20;
+  box-sizing: border-box;
+}
+
+.controlButton {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-body);
+  cursor: pointer;
+  padding: 0;
+}
+
+.controlButton[disabled],
+.recordButton:disabled,
+.placeholderButton:disabled,
+.enabledControls input:disabled,
+.disabledControls input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.scrubber {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.timeDisplay {
+  color: var(--color-text-body);
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  100% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+}

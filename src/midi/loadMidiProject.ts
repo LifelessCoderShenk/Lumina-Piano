@@ -8,21 +8,29 @@ import { getAppState, useAppStore } from '../store/store'
 import { buildTempoMap } from '../tempo/tempoMap'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 
+const CREATE_MODE_PLAYBACK_PRE_ROLL_SECONDS = 1
+
 export async function openAndLoadMidiFile(): Promise<boolean> {
   try {
     const electronApi = getElectronApi()
+    const openMidiFile = electronApi?.openMidiFile ?? electronApi?.dialog?.openMidiFile
 
     if (
       electronApi == null ||
-      typeof electronApi.dialog.openMidiFile !== 'function' ||
+      typeof openMidiFile !== 'function' ||
       getElectronFs() == null ||
       typeof getElectronFs()?.readFile !== 'function'
     ) {
       throw new Error('Open MIDI file bridge is unavailable.')
     }
 
-    const filePath = await electronApi.dialog.openMidiFile()
+    const filePath = await openMidiFile()
     if (filePath == null) {
+      return false
+    }
+
+    if (!isMidiFilePath(filePath)) {
+      console.warn(`Ignoring non-MIDI file selected from MIDI loader: ${filePath}`)
       return false
     }
 
@@ -60,6 +68,11 @@ export async function loadMidiBytes(bytes: Uint8Array): Promise<boolean> {
   return true
 }
 
+export async function warmUpAudioAndStartPlayback(): Promise<void> {
+  await audioScheduler.warmUp()
+  playbackEngine.playWithPreRoll(CREATE_MODE_PLAYBACK_PRE_ROLL_SECONDS)
+}
+
 async function ensureAudioSchedulerReady(): Promise<void> {
   if (audioScheduler.isReady()) {
     return
@@ -86,4 +99,9 @@ function getElectronApi() {
 
 function getElectronFs() {
   return typeof window !== 'undefined' ? window.electronFS : undefined
+}
+
+export function isMidiFilePath(filePath: string): boolean {
+  const normalizedPath = filePath.trim().toLowerCase()
+  return normalizedPath.endsWith('.mid') || normalizedPath.endsWith('.midi')
 }

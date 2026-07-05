@@ -1,25 +1,36 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
+import { audioScheduler } from '../../audio/AudioScheduler'
 import midiDeviceManager from '../../learn/MidiDeviceManager'
 import { assignFingerNumbers } from '../../learn/fingeringSystem'
 import { loadMidiFileFromPath } from '../../midi/loadMidiProject'
 import type { Note, ProjectData } from '../../midi/types'
+import { playbackEngine } from '../../playback/PlaybackEngine'
 import { renderer } from '../../renderer/Renderer'
 import { useAppStore } from '../../store/store'
+import { tickToSeconds } from '../../tempo/tempoMap'
 import styles from './NoteByNoteSession.module.css'
 
 const MIDDLE_C_PITCH = 60
 
 type OrderedChord = {
+  notes: Note[]
   noteIds: string[]
   pitches: number[]
   startTick: number
+}
+
+type NoteHoldState = {
+  completed: boolean
+  durationMs: number
+  heldSince: number | null
 }
 
 export function NoteByNoteSession() {
   const selectedSongId = useAppStore((state) => state.learnV3.selectedSongId)
   const hand = useAppStore((state) => state.learnV3.sessionConfig.hand)
   const projectData = useAppStore((state) => state.projectData)
+  const precomputedTempoMap = useAppStore((state) => state.precomputedTempoMap)
   const currentChordIndex = useAppStore((state) => state.learnV3.currentChordIndex)
   const stats = useAppStore((state) => state.learnV3.stats)
   const advanceChord = useAppStore((state) => state.advanceChord)
@@ -28,28 +39,88 @@ export function NoteByNoteSession() {
   const recordCorrect = useAppStore((state) => state.recordCorrect)
   const recordWrong = useAppStore((state) => state.recordWrong)
   const setAppMode = useAppStore((state) => state.setAppMode)
-  const setCurrentChordIndex = useAppStore((state) => state.setCurrentChordIndex)
   const setFingerNumbers = useAppStore((state) => state.setFingerNumbers)
   const setLearnActive = useAppStore((state) => state.setLearnActive)
+  const [audioPreviewEnabled, setAudioPreviewEnabled] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const heldPitchesRef = useRef<Set<number>>(new Set())
+  const [totalChords, setTotalChords] = useState(0)
+  const noteStateRef = useRef<Map<number, NoteHoldState>>(new Map())
   const chordListRef = useRef<OrderedChord[]>([])
+  const durationMapRef = useRef<Map<string, number>>(new Map())
+  const chordListInitializedRef = useRef(false)
   const currentChordIndexRef = useRef(0)
-
-  const orderedChords = useMemo(() => buildOrderedChordList(projectData, hand), [hand, projectData])
-  const totalChords = orderedChords.length
+  const advanceTimeoutRef = useRef<number | null>(null)
+  const heldCheckIntervalRef = useRef<number | null>(null)
   const displayedChordCount = totalChords === 0 ? 0 : Math.min(currentChordIndex + 1, totalChords)
   const attemptedChordCount = stats.correct + stats.wrong
   const accuracy = Math.round((stats.correct / attemptedChordCount) * 100) || 0
 
-  useEffect(() => {
-    chordListRef.current = orderedChords
-  }, [orderedChords])
+  const getCurrentChord = (): OrderedChord | null => {
+    return chordListRef.current[currentChordIndexRef.current] ?? null
+  }
+
+  const playChordAudio = (chord: OrderedChord | null): void => {
+    if (chord == null || !audioPreviewEnabled) {
+      return
+    }
+
+    audioScheduler.playNotes(
+      chord.notes.map((note) => ({
+        durationMs: durationMapRef.current.get(note.id) ?? 100,
+        pitch: note.pitch,
+      })),
+    )
+  }
+
+  const initializeNoteStateForChord = (chord: OrderedChord | null): void => {
+    noteStateRef.current.clear()
+
+    if (chord == null) {
+      return
+    }
+
+    for (const note of chord.notes) {
+      noteStateRef.current.set(note.pitch, {
+        completed: false,
+        durationMs: durationMapRef.current.get(note.id) ?? 100,
+        heldSince: null,
+      })
+    }
+  }
+
+  const resetCurrentChordAttempt = (chord: OrderedChord | null, replayAudio: boolean): void => {
+    stopHeldCheckLoop(heldCheckIntervalRef)
+
+    if (chord != null) {
+      for (const pitch of chord.pitches) {
+        renderer.cancelNoteDrain(pitch)
+      }
+    }
+
+    initializeNoteStateForChord(chord)
+
+    if (replayAudio) {
+      playChordAudio(chord)
+    }
+  }
 
   useEffect(() => {
     currentChordIndexRef.current = currentChordIndex
-    heldPitchesRef.current.clear()
-  }, [currentChordIndex])
+    const currentChord = getCurrentChord()
+    initializeNoteStateForChord(currentChord)
+    console.log(
+      '[NoteByNote] advanced to chord index:',
+      currentChordIndex,
+      'pitches:',
+      currentChord?.pitches ?? [],
+    )
+    playChordAudio(currentChord)
+  }, [currentChordIndex, totalChords])
+
+  useEffect(() => {
+    playbackEngine.pause()
+    playbackEngine.seek(0)
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -92,8 +163,14 @@ export function NoteByNoteSession() {
 
     return () => {
       disposed = true
+      if (advanceTimeoutRef.current != null) {
+        window.clearTimeout(advanceTimeoutRef.current)
+        advanceTimeoutRef.current = null
+      }
+      stopHeldCheckLoop(heldCheckIntervalRef)
       midiDeviceManager.onNoteOn = null
-      heldPitchesRef.current.clear()
+      midiDeviceManager.onNoteOff = null
+      noteStateRef.current.clear()
       setLearnActive(false)
     }
   }, [selectedSongId, setLearnActive])
@@ -107,44 +184,143 @@ export function NoteByNoteSession() {
   }, [hand, projectData, setFingerNumbers])
 
   useEffect(() => {
+    if (projectData == null || precomputedTempoMap == null || chordListInitializedRef.current) {
+      return
+    }
+
+    const chordList = buildOrderedChordList(projectData, hand)
+    chordListRef.current = chordList
+    chordListInitializedRef.current = true
+    durationMapRef.current = buildDurationMap(chordList, precomputedTempoMap)
+    initializeNoteStateForChord(chordList[currentChordIndexRef.current] ?? null)
+    setTotalChords(chordList.length)
+    console.log('[NoteByNote] total chords:', chordList.length)
+  }, [hand, precomputedTempoMap, projectData])
+
+  useEffect(() => {
+    const completeChordIfReady = () => {
+      if (advanceTimeoutRef.current != null) {
+        return
+      }
+
+      const currentChord = getCurrentChord()
+      if (currentChord == null) {
+        stopHeldCheckLoop(heldCheckIntervalRef)
+        return
+      }
+
+      const now = performance.now()
+
+      for (const [, noteState] of noteStateRef.current) {
+        if (noteState.heldSince != null && !noteState.completed) {
+          const heldMs = now - noteState.heldSince
+          if (heldMs >= noteState.durationMs) {
+            noteState.completed = true
+          }
+        }
+      }
+
+      const allNotesComplete =
+        noteStateRef.current.size > 0 &&
+        [...noteStateRef.current.values()].every((noteState) => noteState.completed)
+      if (!allNotesComplete) {
+        return
+      }
+
+      stopHeldCheckLoop(heldCheckIntervalRef)
+      recordCorrect()
+      renderer.triggerChordCorrect(currentChord.noteIds)
+
+      advanceTimeoutRef.current = window.setTimeout(() => {
+        advanceTimeoutRef.current = null
+
+        if (currentChordIndexRef.current >= chordListRef.current.length - 1) {
+          endSession()
+          setAppMode('learnEnd')
+          return
+        }
+
+        advanceChord()
+      }, 150)
+    }
+
     const handleNoteOn = (pitch: number) => {
-      const currentChord = chordListRef.current[currentChordIndexRef.current]
+      if (advanceTimeoutRef.current != null) {
+        return
+      }
+
+      const currentChord = getCurrentChord()
       if (currentChord == null) {
         return
       }
 
-      heldPitchesRef.current.add(pitch)
-
-      if (!currentChord.pitches.includes(pitch)) {
+      const noteState = noteStateRef.current.get(pitch)
+      if (noteState == null) {
         recordWrong()
         renderer.triggerKeyFlash(pitch, 0xff3333)
+        resetCurrentChordAttempt(currentChord, true)
         return
       }
 
-      const isChordComplete = currentChord.pitches.every((requiredPitch) => heldPitchesRef.current.has(requiredPitch))
-      if (!isChordComplete) {
+      if (noteState.completed || noteState.heldSince != null) {
         return
       }
 
-      recordCorrect()
-      renderer.triggerChordCorrect(currentChord.noteIds)
-      heldPitchesRef.current.clear()
+      const heldSince = performance.now()
+      noteState.heldSince = heldSince
+      renderer.startNoteDrain(pitch, noteState.durationMs, heldSince)
 
-      if (currentChordIndexRef.current >= chordListRef.current.length - 1) {
-        endSession()
-        setAppMode('learnEnd')
+      startHeldCheckLoop(heldCheckIntervalRef, completeChordIfReady)
+    }
+
+    const handleNoteOff = (pitch: number) => {
+      const currentChord = getCurrentChord()
+      const noteState = noteStateRef.current.get(pitch)
+
+      if (advanceTimeoutRef.current != null) {
         return
       }
 
-      advanceChord()
+      if (currentChord == null || noteState == null || noteState.heldSince == null) {
+        return
+      }
+
+      if (noteState.completed) {
+        noteState.heldSince = null
+        return
+      }
+
+      const elapsedMs = performance.now() - noteState.heldSince
+
+      if (elapsedMs < noteState.durationMs) {
+        recordWrong()
+        renderer.triggerKeyFlash(pitch, 0xff3333)
+        resetCurrentChordAttempt(currentChord, true)
+        return
+      }
+
+      noteState.completed = true
+      noteState.heldSince = null
+      completeChordIfReady()
     }
 
     midiDeviceManager.onNoteOn = handleNoteOn
+    midiDeviceManager.onNoteOff = handleNoteOff
 
     return () => {
       if (midiDeviceManager.onNoteOn === handleNoteOn) {
         midiDeviceManager.onNoteOn = null
       }
+      if (midiDeviceManager.onNoteOff === handleNoteOff) {
+        midiDeviceManager.onNoteOff = null
+      }
+
+      if (advanceTimeoutRef.current != null) {
+        window.clearTimeout(advanceTimeoutRef.current)
+        advanceTimeoutRef.current = null
+      }
+
+      stopHeldCheckLoop(heldCheckIntervalRef)
     }
   }, [advanceChord, endSession, recordCorrect, recordWrong, setAppMode])
 
@@ -157,38 +333,38 @@ export function NoteByNoteSession() {
       ) : null}
 
       <div className={styles.sessionBar}>
-        <button
-          type="button"
-          className={styles.backButton}
-          onClick={() => {
-            exitSession()
-            setAppMode('learnSong')
-          }}
-          aria-label="Back to song page"
-        >
-          ←
-        </button>
+        <div className={styles.controlsRow}>
+          <button
+            type="button"
+            className={styles.controlButton}
+            onClick={() => {
+              exitSession()
+              setAppMode('learnSong')
+            }}
+            aria-label="Back to song page"
+          >
+            ←
+          </button>
 
-        <input
-          type="range"
-          min="0"
-          max={Math.max(totalChords - 1, 0)}
-          step="1"
-          value={Math.min(currentChordIndex, Math.max(totalChords - 1, 0))}
-          onChange={(event) => {
-            setCurrentChordIndex(Number(event.target.value))
-          }}
-          className={styles.scrubber}
-          aria-label="Chord position"
-          disabled={totalChords <= 1}
-        />
+          <div className={styles.metric}>
+            {`${displayedChordCount} / ${totalChords} CHORDS`}
+          </div>
 
-        <div className={styles.metric}>
-          {`${accuracy}% ACCURATE`}
-        </div>
+          <div className={styles.metric}>
+            {`${accuracy}% ACCURATE`}
+          </div>
 
-        <div className={styles.metric}>
-          {`${displayedChordCount} / ${totalChords} CHORDS`}
+          <button
+            type="button"
+            className={`${styles.controlButton} ${styles.audioToggle}`}
+            onClick={() => {
+              setAudioPreviewEnabled((current) => !current)
+            }}
+            aria-label={audioPreviewEnabled ? 'Disable audio preview' : 'Enable audio preview'}
+            aria-pressed={audioPreviewEnabled}
+          >
+            {audioPreviewEnabled ? '♪ AUDIO ON' : '♪ AUDIO OFF'}
+          </button>
         </div>
       </div>
     </section>
@@ -209,32 +385,24 @@ function buildOrderedChordList(
   }
 
   notes.sort(compareNotes)
-
-  const chords: OrderedChord[] = []
-  let currentChord: Note[] = []
-  let currentStartTick: number | null = null
+  const groups = new Map<number, Note[]>()
 
   for (const note of notes) {
-    if (currentStartTick !== null && note.startTick !== currentStartTick) {
-      chords.push(createChord(currentChord, currentStartTick))
-      currentChord = []
-    }
-
-    currentChord.push(note)
-    currentStartTick = note.startTick
+    const existing = groups.get(note.startTick) ?? []
+    existing.push(note)
+    groups.set(note.startTick, existing)
   }
 
-  if (currentChord.length > 0 && currentStartTick !== null) {
-    chords.push(createChord(currentChord, currentStartTick))
-  }
-
-  return chords
+  return Array.from(groups.values())
+    .sort((left, right) => left[0].startTick - right[0].startTick)
+    .map((group) => createChord(group, group[0].startTick))
 }
 
 function createChord(notes: Note[], startTick: number): OrderedChord {
   const sortedNotes = notes.slice().sort(compareNotes)
 
   return {
+    notes: sortedNotes,
     noteIds: sortedNotes.map((note) => note.id),
     pitches: [...new Set(sortedNotes.map((note) => note.pitch))],
     startTick,
@@ -263,4 +431,40 @@ function compareNotes(left: Note, right: Note): number {
   }
 
   return left.id.localeCompare(right.id)
+}
+
+function buildDurationMap(
+  chordList: OrderedChord[],
+  tempoMap: NonNullable<ReturnType<typeof useAppStore.getState>['precomputedTempoMap']>,
+): Map<string, number> {
+  const durationMap = new Map<string, number>()
+
+  for (const chord of chordList) {
+    for (const note of chord.notes) {
+      const durationMs = (tickToSeconds(note.endTick, tempoMap) - tickToSeconds(note.startTick, tempoMap)) * 1000
+      durationMap.set(note.id, Math.max(durationMs, 100))
+    }
+  }
+
+  return durationMap
+}
+
+function startHeldCheckLoop(
+  intervalRef: React.MutableRefObject<number | null>,
+  callback: () => void,
+): void {
+  if (intervalRef.current != null) {
+    return
+  }
+
+  intervalRef.current = window.setInterval(callback, 16)
+}
+
+function stopHeldCheckLoop(intervalRef: React.MutableRefObject<number | null>): void {
+  if (intervalRef.current == null) {
+    return
+  }
+
+  window.clearInterval(intervalRef.current)
+  intervalRef.current = null
 }

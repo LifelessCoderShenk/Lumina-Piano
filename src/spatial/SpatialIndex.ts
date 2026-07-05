@@ -165,20 +165,11 @@ export class SpatialIndex {
     maxWorldX: number,
     maxWorldY: number,
   ): IndexedNote[] {
-    if (maxWorldX < minWorldX || maxWorldY < minWorldY) {
-      throw new SpatialIndexError('Selection region is invalid.', 'INVALID_REGION', {
-        maxWorldX,
-        maxWorldY,
-        minWorldX,
-        minWorldY,
-      })
-    }
-
-    if (!this.hasBuilt) {
+    if (!this.hasBuilt || this.indexedNotes.length === 0) {
       return []
     }
 
-    if (this.indexedNotes.length === 0) {
+    if (maxWorldX < minWorldX || maxWorldY < minWorldY) {
       return []
     }
 

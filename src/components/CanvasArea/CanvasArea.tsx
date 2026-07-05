@@ -1,79 +1,171 @@
-import React, { useEffect, useRef } from 'react'
-import { getAppState } from '../../store/store'
-import { renderer } from '../../renderer/Renderer'
+import React, { useEffect, useRef, useState } from 'react'
+
 import { cameraSystem } from '../../camera/CameraSystem'
+import { renderer } from '../../renderer/Renderer'
+import { getAppState, useAppStore } from '../../store/store'
 import styles from './CanvasArea.module.css'
+
+type SupportedAspectRatio = 'fit' | '16:9' | '1:1' | '4:3'
+
+interface CanvasDimensions {
+  width: number
+  height: number
+}
+
+export function getConstrainedDimensions(
+  availableWidth: number,
+  availableHeight: number,
+  aspectRatio: SupportedAspectRatio,
+): CanvasDimensions {
+  if (aspectRatio === 'fit') {
+    return {
+      width: availableWidth,
+      height: availableHeight,
+    }
+  }
+
+  const [wRatio, hRatio] = aspectRatio.split(':').map(Number)
+  const targetRatio = wRatio / hRatio
+  const availableRatio = availableWidth / availableHeight
+
+  if (availableRatio > targetRatio) {
+    const height = availableHeight
+    const width = height * targetRatio
+    return { width, height }
+  }
+
+  const width = availableWidth
+  const height = width / targetRatio
+  return { width, height }
+}
 
 export function CanvasArea() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const availableAreaRef = useRef<HTMLDivElement>(null)
+  const aspectRatioRef = useRef<SupportedAspectRatio>('fit')
+  const initializeRendererRef = useRef<(() => void) | null>(null)
+  const isInitializingRef = useRef(false)
+  const [frameSize, setFrameSize] = useState<CanvasDimensions>({ width: 0, height: 0 })
+  const appMode = useAppStore((state) => state.appMode)
+  const aspectRatio = useAppStore((state) => state.visualizerSettings.aspectRatio)
+  const showWindowExpandButton = appMode === 'create'
+
+  aspectRatioRef.current = aspectRatio
 
   useEffect(() => {
-    if (canvasRef.current == null || containerRef.current == null) {
+    if (canvasRef.current == null || availableAreaRef.current == null) {
       return
     }
 
-    let disposed = false
-    let resizeFrameId: number | null = null
+    let cancelled = false
+    let resizeOuterFrameId: number | null = null
+    let resizeInnerFrameId: number | null = null
 
-    const resizeToContainer = () => {
-      if (containerRef.current == null) {
+    const syncCanvasElementSize = (width: number, height: number) => {
+      if (canvasRef.current == null) {
+        return
+      }
+
+      canvasRef.current.style.width = `${width}px`
+      canvasRef.current.style.height = `${height}px`
+    }
+
+    const resizeToAvailableArea = () => {
+      const container = availableAreaRef.current
+      if (container == null) {
         return false
       }
 
-      const width = containerRef.current.clientWidth
-      const height = containerRef.current.clientHeight
-      if (width <= 0 || height <= 0) {
+      const availableWidth = container.clientWidth
+      const availableHeight = container.clientHeight
+      if (availableWidth <= 0 || availableHeight <= 0) {
         return false
       }
+
+      const nextSize = getConstrainedDimensions(availableWidth, availableHeight, aspectRatioRef.current)
+      setFrameSize((currentSize) => {
+        if (currentSize.width === nextSize.width && currentSize.height === nextSize.height) {
+          return currentSize
+        }
+
+        return nextSize
+      })
+
+      syncCanvasElementSize(nextSize.width, nextSize.height)
 
       if (!cameraSystem.isInitialized()) {
-        cameraSystem.init(width, height)
+        cameraSystem.init(nextSize.width, nextSize.height)
       } else {
-        cameraSystem.setViewportSize(width, height)
+        cameraSystem.setViewportSize(nextSize.width, nextSize.height)
       }
 
       if (renderer.isReady()) {
-        renderer.resize(width, height)
+        renderer.resize(nextSize.width, nextSize.height)
+        syncCanvasElementSize(nextSize.width, nextSize.height)
       }
 
       return true
     }
 
     const scheduleResize = () => {
-      if (resizeFrameId != null) {
-        cancelAnimationFrame(resizeFrameId)
+      if (resizeOuterFrameId != null) {
+        cancelAnimationFrame(resizeOuterFrameId)
+      }
+      if (resizeInnerFrameId != null) {
+        cancelAnimationFrame(resizeInnerFrameId)
       }
 
-      resizeFrameId = window.requestAnimationFrame(() => {
-        resizeFrameId = null
-        resizeToContainer()
+      resizeOuterFrameId = window.requestAnimationFrame(() => {
+        resizeOuterFrameId = null
+        resizeInnerFrameId = window.requestAnimationFrame(() => {
+          resizeInnerFrameId = null
+          resizeToAvailableArea()
+        })
       })
     }
 
-    const init = async () => {
-      if (canvasRef.current == null || containerRef.current == null) {
+    const initializeRenderer = () => {
+      if (isInitializingRef.current || cancelled) {
         return
       }
 
-      if (!resizeToContainer()) {
+      if (canvasRef.current == null || availableAreaRef.current == null) {
         return
       }
 
-      renderer.destroy()
-
-      await renderer.init(canvasRef.current)
-
-      if (disposed) {
+      if (!resizeToAvailableArea()) {
         return
       }
 
-      scheduleResize()
+      isInitializingRef.current = true
+
+      void (async () => {
+        try {
+          await renderer.destroy()
+          if (cancelled || canvasRef.current == null) {
+            return
+          }
+
+          await renderer.init(canvasRef.current)
+          if (cancelled) {
+            return
+          }
+
+          resizeToAvailableArea()
+        } finally {
+          isInitializingRef.current = false
+        }
+      })()
     }
 
-    init()
+    initializeRendererRef.current = initializeRenderer
 
     const handleWindowResize = () => {
+      if (!renderer.isReady()) {
+        initializeRenderer()
+        return
+      }
+
       scheduleResize()
     }
 
@@ -85,7 +177,11 @@ export function CanvasArea() {
       scheduleResize()
 
       const state = getAppState()
-      if (renderer.isReady() && state.projectData != null && state.isProjectLoaded) {
+      if (!renderer.isInitialized) {
+        return
+      }
+
+      if (renderer.isReady()) {
         renderer.renderFrame(state.currentTick)
       }
     }
@@ -93,31 +189,42 @@ export function CanvasArea() {
     const handleContextLost = (event: Event) => {
       event.preventDefault()
       console.warn('[Renderer] WebGL context lost')
-
-      renderer.destroy()
+      void renderer.destroy()
     }
 
     const handleContextRestored = () => {
-      console.log('[Renderer] WebGL context restored — reinitializing')
+      void (async () => {
+        if (canvasRef.current == null) {
+          return
+        }
 
-      if (canvasRef.current == null) {
-        return
-      }
+        await renderer.destroy()
+        if (cancelled || canvasRef.current == null) {
+          return
+        }
 
-      renderer.destroy()
+        await renderer.init(canvasRef.current)
+        if (cancelled) {
+          return
+        }
 
-      void renderer.init(canvasRef.current).then(() => {
         scheduleResize()
         const state = getAppState()
-        if (state.projectData != null && state.isProjectLoaded) {
+        if (!renderer.isInitialized) {
+          return
+        }
+
+        if (renderer.isReady()) {
           renderer.renderFrame(state.currentTick)
         }
-      })
+      })()
     }
 
     const handleBeforeUnload = () => {
-      renderer.destroy()
+      void renderer.destroy()
     }
+
+    initializeRenderer()
 
     window.addEventListener('resize', handleWindowResize)
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -126,45 +233,78 @@ export function CanvasArea() {
     window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => {
-      disposed = true
+      cancelled = true
+      initializeRendererRef.current = null
+      isInitializingRef.current = false
       window.removeEventListener('resize', handleWindowResize)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('beforeunload', handleBeforeUnload)
       canvasRef.current?.removeEventListener('webglcontextlost', handleContextLost)
       canvasRef.current?.removeEventListener('webglcontextrestored', handleContextRestored)
-      if (resizeFrameId != null) {
-        cancelAnimationFrame(resizeFrameId)
+      if (resizeOuterFrameId != null) {
+        cancelAnimationFrame(resizeOuterFrameId)
       }
+      if (resizeInnerFrameId != null) {
+        cancelAnimationFrame(resizeInnerFrameId)
+      }
+      void renderer.destroy()
     }
   }, [])
 
   useEffect(() => {
-    let resizeFrameId: number | null = null
+    let resizeOuterFrameId: number | null = null
+    let resizeInnerFrameId: number | null = null
 
     const scheduleResize = () => {
-      if (resizeFrameId != null) {
-        cancelAnimationFrame(resizeFrameId)
+      if (resizeOuterFrameId != null) {
+        cancelAnimationFrame(resizeOuterFrameId)
+      }
+      if (resizeInnerFrameId != null) {
+        cancelAnimationFrame(resizeInnerFrameId)
       }
 
-      resizeFrameId = window.requestAnimationFrame(() => {
-        resizeFrameId = null
+      resizeOuterFrameId = window.requestAnimationFrame(() => {
+        resizeOuterFrameId = null
+        resizeInnerFrameId = window.requestAnimationFrame(() => {
+          resizeInnerFrameId = null
 
-        if (containerRef.current == null) {
-          return
-        }
+          if (!renderer.isReady()) {
+            initializeRendererRef.current?.()
+            return
+          }
 
-        const width = containerRef.current.clientWidth
-        const height = containerRef.current.clientHeight
-        if (width <= 0 || height <= 0 || !renderer.isReady()) {
-          return
-        }
+          if (availableAreaRef.current == null) {
+            return
+          }
 
-        if (!cameraSystem.isInitialized()) {
-          return
-        }
+          const availableWidth = availableAreaRef.current.clientWidth
+          const availableHeight = availableAreaRef.current.clientHeight
+          if (availableWidth <= 0 || availableHeight <= 0) {
+            return
+          }
 
-        cameraSystem.setViewportSize(width, height)
-        renderer.resize(width, height)
+          const nextSize = getConstrainedDimensions(availableWidth, availableHeight, aspectRatio)
+          setFrameSize(nextSize)
+
+          if (canvasRef.current != null) {
+            canvasRef.current.style.width = `${nextSize.width}px`
+            canvasRef.current.style.height = `${nextSize.height}px`
+          }
+
+          if (!cameraSystem.isInitialized()) {
+            return
+          }
+
+          cameraSystem.setViewportSize(nextSize.width, nextSize.height)
+
+          if (renderer.isReady()) {
+            renderer.resize(nextSize.width, nextSize.height)
+            if (canvasRef.current != null) {
+              canvasRef.current.style.width = `${nextSize.width}px`
+              canvasRef.current.style.height = `${nextSize.height}px`
+            }
+          }
+        })
       })
     }
 
@@ -172,25 +312,80 @@ export function CanvasArea() {
       scheduleResize()
     })
 
-    if (containerRef.current) {
-      observer.observe(containerRef.current)
+    if (availableAreaRef.current) {
+      observer.observe(availableAreaRef.current)
     }
+
+    scheduleResize()
 
     return () => {
       observer.disconnect()
-      if (resizeFrameId != null) {
-        cancelAnimationFrame(resizeFrameId)
+      if (resizeOuterFrameId != null) {
+        cancelAnimationFrame(resizeOuterFrameId)
+      }
+      if (resizeInnerFrameId != null) {
+        cancelAnimationFrame(resizeInnerFrameId)
       }
     }
-  }, [])
+  }, [aspectRatio])
+
+  const handleWindowExpand = async () => {
+    const maximizeWindow = window.electronAPI?.window?.maximize
+    if (typeof maximizeWindow === 'function') {
+      await maximizeWindow()
+    }
+  }
 
   return (
     <div
-      ref={containerRef}
+      data-testid="canvas-area"
       className={styles.canvasArea}
-      style={{ width: '100%', height: '100%', overflow: 'hidden' }}
+      style={{ flex: '1 1 100%', width: '100%', height: '100%', margin: 0, padding: 0, overflow: 'hidden' }}
     >
-      <canvas ref={canvasRef} className={styles.canvas} />
+      {showWindowExpandButton ? (
+        <button
+          type="button"
+          aria-label="Expand window"
+          title="Expand window"
+          onClick={() => {
+            void handleWindowExpand()
+          }}
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 2,
+            background: 'transparent',
+            border: '0',
+            color: '#2e65a2',
+            cursor: 'pointer',
+            fontSize: 20,
+            lineHeight: 1,
+            padding: 0,
+          }}
+        >
+          {'<>'}
+        </button>
+      ) : null}
+      <div ref={availableAreaRef} data-testid="canvas-available-area" className={styles.availableArea}>
+        <div
+          data-testid="canvas-preview-frame"
+          className={styles.previewFrame}
+          style={{
+            width: `${frameSize.width}px`,
+            height: `${frameSize.height}px`,
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            className={styles.canvas}
+            style={{
+              width: `${frameSize.width}px`,
+              height: `${frameSize.height}px`,
+            }}
+          />
+        </div>
+      </div>
     </div>
   )
 }

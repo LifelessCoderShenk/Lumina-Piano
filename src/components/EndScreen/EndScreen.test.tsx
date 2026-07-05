@@ -146,5 +146,8 @@ function createElectronApiMock() {
         title: 'Moonlight Sonata',
       },
     ]),
+    openJsonFile: vi.fn(async () => null),
+    openMidiFile: vi.fn(async () => null),
+    showSaveDialog: vi.fn(),
   } as typeof window.electronAPI
 }

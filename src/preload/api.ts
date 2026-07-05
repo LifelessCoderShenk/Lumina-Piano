@@ -20,6 +20,9 @@ export interface ElectronAPI {
   getSongs(): Promise<SongMetadata[]>
   uploadSong(): Promise<SongMetadata | null>
   deleteSong(songId: string): Promise<void>
+  showSaveDialog(options: SaveDialogOptions): Promise<string | null>
+  openJsonFile(): Promise<string | null>
+  openMidiFile(): Promise<string | null>
   dialog: {
     openMidiFile(): Promise<string | null>
     showSaveDialog(options: SaveDialogOptions): Promise<string | null>

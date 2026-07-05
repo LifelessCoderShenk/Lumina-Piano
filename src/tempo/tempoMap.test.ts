@@ -164,12 +164,12 @@ describe('secondsToTick', () => {
 describe('edge cases', () => {
   const tempoMap = buildTempoMap([tempoEvent(0, 500_000)], 480)
 
-  it('returns 0 for negative tick values', () => {
-    expect(tickToSeconds(-1, tempoMap)).toBe(0)
+  it('converts negative tick values into negative seconds using the first tempo segment', () => {
+    expect(tickToSeconds(-480, tempoMap)).toBe(-0.5)
   })
 
-  it('returns 0 for negative seconds values', () => {
-    expect(secondsToTick(-0.5, tempoMap)).toBe(0)
+  it('converts negative seconds values into negative ticks using the first tempo segment', () => {
+    expect(secondsToTick(-0.5, tempoMap)).toBe(-480)
   })
 
   it('throws INVALID_INPUT for NaN and Infinity inputs', () => {

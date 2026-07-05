@@ -1,63 +1,55 @@
 .overlay {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 16px;
-  z-index: 20;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 0 20px;
+  flex: 0 0 auto;
+  width: 100%;
+  background: #000000;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   box-sizing: border-box;
-  pointer-events: none;
+  z-index: 20;
 }
 
 .errorMessage {
-  width: min(760px, 100%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  width: 100%;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   background: #000000;
   color: #ffffff;
-  padding: 10px 14px;
+  padding: 10px 16px;
   font-size: 13px;
-  letter-spacing: 0.06em;
-  pointer-events: auto;
-}
-
-.sessionBar {
-  width: min(1120px, 100%);
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #000000;
-  color: #ffffff;
-  padding: 14px 18px;
-  pointer-events: auto;
+  letter-spacing: 0.04em;
   box-sizing: border-box;
 }
 
-.backButton {
+.sessionBar {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 8px 16px 10px;
+  box-sizing: border-box;
+}
+
+.controlsRow {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.controlButton {
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: #000000;
   color: #ffffff;
-  min-width: 48px;
-  min-height: 40px;
+  padding: 7px 12px;
   font: inherit;
-  font-size: 26px;
-  line-height: 1;
+  letter-spacing: 0.04em;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.backButton:hover {
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.scrubber {
-  width: 100%;
-  accent-color: #ffffff;
-  background: transparent;
+.controlButton:hover {
+  border-color: rgba(255, 255, 255, 0.36);
 }
 
 .metric {
@@ -66,13 +58,21 @@
   white-space: nowrap;
 }
 
+.audioToggle {
+  justify-self: end;
+}
+
 @media (max-width: 900px) {
-  .overlay {
-    bottom: 12px;
-    padding: 0 12px;
+  .sessionBar {
+    padding: 8px 12px 10px;
   }
 
-  .sessionBar {
-    grid-template-columns: 1fr;
+  .controlsRow {
+    grid-template-columns: repeat(3, auto);
+  }
+
+  .audioToggle {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }

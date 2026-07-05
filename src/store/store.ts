@@ -44,7 +44,49 @@ export const DEFAULT_PITCH_CLASS_COLORS: Record<number, string> = {
 type LearnMode = 'listen' | 'noteByNote' | 'playAlong'
 type LearnHand = 'left' | 'right' | 'both'
 type MidiConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'failed'
-type AppMode = 'select' | 'create' | 'learn' | 'learnSong' | 'learnSession' | 'learnEnd'
+type AppMode = 'select' | 'create' | 'createCamera' | 'createRecord' | 'learn' | 'learnSong' | 'learnSession' | 'learnEnd'
+type LearnNoteColorMode = 'white' | 'perHand' | 'custom'
+type PieceType = 'midi' | 'recording'
+export type CreateTab = 'pieces' | 'particles' | 'color' | 'camera'
+export type AlignStep = 'idle' | 'waiting-low-a' | 'waiting-high-c' | 'complete'
+
+export interface AlignmentPoint {
+  x: number
+  y: number
+}
+
+export interface VisualizerSettings {
+  aspectRatio: 'fit' | '16:9' | '1:1' | '4:3'
+  resolution: '720p' | '1080p' | '1440p' | '4K'
+  framerate: 24 | 30 | 60
+}
+
+export interface CameraOverlaySettings {
+  offsetX: number
+  offsetY: number
+  scale: number
+  cropTop: number
+  cropRight: number
+  cropBottom: number
+  cropLeft: number
+}
+
+export interface RecordModeConfig {
+  audioSourceDeviceId: string | null
+  useMidiAudio: boolean
+  useMic: boolean
+  midiDeviceId: string | null
+  cameraDeviceId: string | null
+}
+
+export interface Piece {
+  id: string
+  name: string
+  type: PieceType
+  filePath: string | null
+  thumbnail?: string
+  createdAt: number
+}
 
 interface LearnSessionConfig {
   mode: LearnMode | null
@@ -81,6 +123,16 @@ interface LearnV3State {
   }
 }
 
+interface LearnVisuals {
+  noteColor: LearnNoteColorMode
+  leftHandColor: string
+  rightHandColor: string
+  noteOpacity: number
+  glowEnabled: boolean
+  noteLabelsEnabled: boolean
+  fingerNumbersEnabled: boolean
+}
+
 interface ProjectSlice {
   projectData: ProjectData | null
   precomputedTempoMap: PrecomputedTempoMap | null
@@ -115,17 +167,39 @@ interface TrackSlice {
   trackSoloed: Record<string, boolean>
 }
 
+interface PiecesSlice {
+  pieces: Piece[]
+  currentPieceId: string | null
+  loadPieceError: string | null
+}
+
+interface CreateVisualizerSettingsSlice {
+  visualizerSettings: VisualizerSettings
+}
+
+interface CameraOverlaySlice {
+  cameraOverlay: CameraOverlaySettings
+}
+
+interface AlignmentSlice {
+  alignStep: AlignStep
+  lowAPoint: AlignmentPoint | null
+  highCPoint: AlignmentPoint | null
+}
+
+interface RecordModeSlice {
+  recordModeConfig: RecordModeConfig
+}
+
 interface UISlice {
   appMode: AppMode
+  activeSecondBarTab: CreateTab
   activePanel: 'notes' | 'effects' | 'export' | null
   isExporting: boolean
   exportProgress: number
   exportFramesRendered: number
   exportTotalFrames: number
   exportEstimatedSecondsRemaining: number
-  showEffects: boolean
-  showParticles: boolean
-  showBloom: boolean
   errorMessage: string | null
 }
 
@@ -144,15 +218,6 @@ interface VisualizerSettingsSlice {
   gradientBottomColorLeft: string
   gradientBottomColorRightBlack: string
   gradientBottomColorLeftBlack: string
-  bloomEnabled: boolean
-  bloomStrength: number
-  bloomRadius: number
-  particlesEnabled: boolean
-  particleCount: number
-  particleSize: number
-  particleTrails: boolean
-  keyGlowEnabled: boolean
-  keyGlowIntensity: number
   backgroundColor: string
   laneOpacity: number
   noteLabelsOnNotes: boolean
@@ -160,10 +225,6 @@ interface VisualizerSettingsSlice {
   noteLabelFormat: 'name' | 'nameOctave'
   noteLabelColor: string
   noteLabelSize: number
-  effectsEnabled: {
-    innerGlow: boolean
-    layeredGlow: boolean
-  }
 }
 
 export type AppState =
@@ -172,8 +233,14 @@ export type AppState =
   & CameraSlice
   & SelectionSlice
   & TrackSlice
+  & PiecesSlice
+  & CreateVisualizerSettingsSlice
+  & CameraOverlaySlice
+  & AlignmentSlice
+  & RecordModeSlice
   & UISlice
   & { learnV3: LearnV3State }
+  & { learnVisuals: LearnVisuals }
   & VisualizerSettingsSlice
 
 export interface AppActions {
@@ -194,8 +261,22 @@ export interface AppActions {
   setTrackMuted(trackId: string, muted: boolean): void
   setTrackSoloed(trackId: string, soloed: boolean): void
   initTrackDefaults(tracks: Track[]): void
+  addPiece(piece: Piece): void
+  removePiece(id: string): void
+  loadPiece(id: string): Promise<boolean>
+  clearLoadPieceError(): void
+  clearLoadedPiece(): void
+  setVisualizerSettings(patch: Partial<VisualizerSettings>): void
+  setCameraOverlay(patch: Partial<CameraOverlaySettings>): void
+  setAlignStep(step: AlignStep): void
+  setLowAPoint(point: AlignmentPoint | null): void
+  setHighCPoint(point: AlignmentPoint | null): void
+  enterRecordMode(): void
+  setRecordModeConfig(patch: Partial<RecordModeConfig>): void
   setActivePanel(panel: UISlice['activePanel']): void
+  setActiveSecondBarTab(tab: CreateTab): void
   setAppMode(mode: AppMode): void
+  enterCameraMode(): void
   setExportProgress(
     progress: number,
     framesRendered: number,
@@ -203,9 +284,6 @@ export interface AppActions {
     estimatedSeconds: number,
   ): void
   setIsExporting(exporting: boolean): void
-  setShowEffects(show: boolean): void
-  setShowParticles(show: boolean): void
-  setShowBloom(show: boolean): void
   setColorMode(mode: VisualizerSettingsSlice['colorMode']): void
   setPitchClassColor(pitchClass: number, color: string): void
   setSplitPitch(pitch: number): void
@@ -219,15 +297,6 @@ export interface AppActions {
   setGradientBottomColorLeft(color: string): void
   setGradientBottomColorRightBlack(color: string): void
   setGradientBottomColorLeftBlack(color: string): void
-  setBloomEnabled(enabled: boolean): void
-  setBloomStrength(value: number): void
-  setBloomRadius(value: number): void
-  setParticlesEnabled(enabled: boolean): void
-  setParticleCount(value: number): void
-  setParticleSize(value: number): void
-  setParticleTrails(value: boolean): void
-  setKeyGlowEnabled(enabled: boolean): void
-  setKeyGlowIntensity(value: number): void
   setBackgroundColor(color: string): void
   setLaneOpacity(value: number): void
   setNoteLabelsOnNotes(value: boolean): void
@@ -235,8 +304,6 @@ export interface AppActions {
   setNoteLabelFormat(format: VisualizerSettingsSlice['noteLabelFormat']): void
   setNoteLabelColor(color: string): void
   setNoteLabelSize(size: number): void
-  setInnerGlowEnabled(enabled: boolean): void
-  setLayeredGlowEnabled(enabled: boolean): void
   setErrorMessage(message: string | null): void
   setSelectedSong(id: string | null): void
   setSessionConfig(config: Partial<LearnSessionConfig>): void
@@ -255,6 +322,8 @@ export interface AppActions {
   setMidiDevices(devices: MidiDeviceInfo[]): void
   setConnectedDevice(id: string | null): void
   setConnectionStatus(status: MidiConnectionStatus): void
+  setLearnVisuals(patch: Partial<LearnVisuals>): void
+  setLearnVisualsPreset(preset: LearnVisuals): void
   batchUpdate(fn: (state: AppState) => void): void
   resetStore(): void
 }
@@ -299,28 +368,14 @@ const exportSelector = (state: AppState) => ({
   isExporting: state.isExporting,
 })
 
-const uiSelector = (state: AppState) => ({
-  activePanel: state.activePanel,
-  errorMessage: state.errorMessage,
-  showBloom: state.showBloom,
-  showEffects: state.showEffects,
-  showParticles: state.showParticles,
-})
-
 const visualizerSelector = (state: AppState) => ({
   backgroundColor: state.backgroundColor,
-  bloomEnabled: state.bloomEnabled,
-  bloomRadius: state.bloomRadius,
-  bloomStrength: state.bloomStrength,
   colorMode: state.colorMode,
-  effectsEnabled: state.effectsEnabled,
   gradientBottomColorLeft: state.gradientBottomColorLeft,
   gradientBottomColorLeftBlack: state.gradientBottomColorLeftBlack,
   gradientBottomColorRight: state.gradientBottomColorRight,
   gradientBottomColorRightBlack: state.gradientBottomColorRightBlack,
   gradientTopColor: state.gradientTopColor,
-  keyGlowEnabled: state.keyGlowEnabled,
-  keyGlowIntensity: state.keyGlowIntensity,
   laneOpacity: state.laneOpacity,
   leftHandColor: state.leftHandColor,
   noteGradientDirection: state.noteGradientDirection,
@@ -330,10 +385,6 @@ const visualizerSelector = (state: AppState) => ({
   noteLabelSize: state.noteLabelSize,
   noteLabelsOnKeys: state.noteLabelsOnKeys,
   noteLabelsOnNotes: state.noteLabelsOnNotes,
-  particleCount: state.particleCount,
-  particleSize: state.particleSize,
-  particleTrails: state.particleTrails,
-  particlesEnabled: state.particlesEnabled,
   pitchClassColors: state.pitchClassColors,
   rightHandColor: state.rightHandColor,
   splitPitch: state.splitPitch,
@@ -367,9 +418,64 @@ const learnV3Initial: LearnV3State = {
   },
 }
 
+const learnVisualsInitial: LearnVisuals = {
+  fingerNumbersEnabled: true,
+  glowEnabled: false,
+  leftHandColor: '#4ade80',
+  noteColor: 'perHand',
+  noteLabelsEnabled: true,
+  noteOpacity: 1.0,
+  rightHandColor: '#60a5fa',
+}
+
+export const visualizerSettingsInitial: VisualizerSettings = {
+  aspectRatio: 'fit',
+  framerate: 60,
+  resolution: '1080p',
+}
+
+export const cameraOverlayInitial: CameraOverlaySettings = {
+  cropBottom: 0,
+  cropLeft: 0,
+  cropRight: 0,
+  cropTop: 0,
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1,
+}
+
+export const recordModeConfigInitial: RecordModeConfig = {
+  audioSourceDeviceId: null,
+  cameraDeviceId: null,
+  midiDeviceId: null,
+  useMic: false,
+  useMidiAudio: true,
+}
+
+const alignmentInitial = {
+  alignStep: 'idle' as AlignStep,
+  highCPoint: null as AlignmentPoint | null,
+  lowAPoint: null as AlignmentPoint | null,
+}
+
+const UNSUPPORTED_RECORDING_PIECE_MESSAGE =
+  'MP4 recording pieces cannot be loaded yet. This feature is coming in a future update.'
+
+function normalizeVisualizerAspectRatio(
+  aspectRatio: VisualizerSettings['aspectRatio'] | '9:16' | undefined,
+): VisualizerSettings['aspectRatio'] | undefined {
+  if (aspectRatio == null) {
+    return undefined
+  }
+
+  return aspectRatio === '9:16' ? 'fit' : aspectRatio
+}
+
 function createInitialState(): AppState {
   return {
-    appMode: 'select',
+    appMode: 'create',
+    activeSecondBarTab: 'pieces',
+    alignStep: alignmentInitial.alignStep,
     activePanel: null,
     currentTick: 0,
     errorMessage: null,
@@ -381,19 +487,25 @@ function createInitialState(): AppState {
     isExporting: false,
     isPlaying: false,
     isProjectLoaded: false,
+    currentPieceId: null,
+    cameraOverlay: { ...cameraOverlayInitial },
+    highCPoint: alignmentInitial.highCPoint,
+    loadPieceError: null,
+    learnVisuals: { ...learnVisualsInitial },
     learnV3: structuredClone(learnV3Initial),
     loopEnabled: false,
     loopEndTick: 0,
     loopStartTick: 0,
+    lowAPoint: alignmentInitial.lowAPoint,
     panX: 0,
     panY: 0,
+    pieces: [],
+    recordModeConfig: { ...recordModeConfigInitial },
     precomputedTempoMap: null,
     projectData: null,
     renderScale: 1,
     selectedNoteIds: new Set<string>(),
-    showBloom: true,
-    showEffects: true,
-    showParticles: true,
+    visualizerSettings: { ...visualizerSettingsInitial },
     ...createVisualizerSettingsDefaults(),
     trackColors: {},
     trackMuted: {},
@@ -407,34 +519,21 @@ function createInitialState(): AppState {
 function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   return {
     backgroundColor: '#303030',
-    bloomEnabled: true,
-    bloomRadius: 2,
-    bloomStrength: 20,
     colorMode: 'split',
-    effectsEnabled: {
-      innerGlow: false,
-      layeredGlow: false,
-    },
     gradientBottomColorLeft: '#77a3ca',
     gradientBottomColorLeftBlack: '#4b75af',
     gradientBottomColorRight: '#9ee65a',
     gradientBottomColorRightBlack: '#86c04c',
     gradientTopColor: '#ffffff',
-    keyGlowEnabled: true,
-    keyGlowIntensity: 60,
     laneOpacity: 40,
     leftHandColor: '#77a3ca',
     noteLabelFormat: 'name',
     noteLabelColor: '#000000',
     noteLabelSize: 16,
     noteLabelsOnKeys: true,
-    noteLabelsOnNotes: false,
+    noteLabelsOnNotes: true,
     noteGradientDirection: 'horizontal',
     noteStyle: 'gradient',
-    particleCount: 10,
-    particleSize: 50,
-    particleTrails: true,
-    particlesEnabled: true,
     pitchClassColors: { ...DEFAULT_PITCH_CLASS_COLORS },
     rightHandColor: '#9ee65a',
     splitPitch: 60,
@@ -535,6 +634,7 @@ export const useAppStore = create<AppStore>()(
         state.exportEstimatedSecondsRemaining = exportDefaults.exportEstimatedSecondsRemaining
 
         state.errorMessage = null
+        state.loadPieceError = null
       })
     },
 
@@ -689,6 +789,209 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    addPiece: (piece) => {
+      validatePiece(piece)
+
+      set((state) => {
+        const existingIndex = state.pieces.findIndex((candidate) => candidate.id === piece.id)
+        if (existingIndex >= 0) {
+          state.pieces[existingIndex] = piece
+          return
+        }
+
+        state.pieces.push(piece)
+      })
+    },
+
+    removePiece: (id) => {
+      validateTrackId(id)
+
+      set((state) => {
+        state.pieces = state.pieces.filter((piece) => piece.id !== id)
+        if (state.currentPieceId === id) {
+          state.currentPieceId = null
+        }
+      })
+    },
+
+    loadPiece: async (id) => {
+      validateTrackId(id)
+
+      set((state) => {
+        state.loadPieceError = null
+      })
+
+      const piece = get().pieces.find((candidate) => candidate.id === id) ?? null
+      if (piece == null || piece.filePath == null) {
+        return false
+      }
+
+      if (!/\.(mid|midi)$/i.test(piece.filePath)) {
+        console.warn('[loadPiece] Skipping non-MIDI file:', piece.filePath)
+        set((state) => {
+          state.loadPieceError = UNSUPPORTED_RECORDING_PIECE_MESSAGE
+        })
+        return false
+      }
+
+      try {
+        const { loadMidiFileFromPath, warmUpAudioAndStartPlayback } = await import('../midi/loadMidiProject')
+        const loaded = await loadMidiFileFromPath(piece.filePath)
+
+        if (loaded) {
+          set((state) => {
+            state.currentPieceId = piece.id
+            state.errorMessage = null
+            state.loadPieceError = null
+          })
+
+          await warmUpAudioAndStartPlayback()
+        }
+
+        return loaded
+      } catch (error) {
+        console.error(`Failed to load piece "${piece.name}":`, error)
+        set((state) => {
+          state.errorMessage = `Failed to load piece "${piece.name}".`
+        })
+        return false
+      }
+    },
+
+    clearLoadPieceError: () => {
+      set((state) => {
+        state.loadPieceError = null
+      })
+    },
+
+    clearLoadedPiece: () => {
+      const playbackDefaults = createPlaybackDefaults()
+      const selectionDefaults = createSelectionDefaults()
+      const exportDefaults = createExportDefaults()
+
+      set((state) => {
+        state.alignStep = alignmentInitial.alignStep
+        state.currentPieceId = null
+        state.loadPieceError = null
+        state.highCPoint = alignmentInitial.highCPoint
+        state.lowAPoint = alignmentInitial.lowAPoint
+        state.projectData = null
+        state.precomputedTempoMap = null
+        state.isProjectLoaded = false
+
+        state.currentTick = playbackDefaults.currentTick
+        state.isPlaying = playbackDefaults.isPlaying
+        state.loopEnabled = playbackDefaults.loopEnabled
+        state.loopStartTick = playbackDefaults.loopStartTick
+        state.loopEndTick = playbackDefaults.loopEndTick
+
+        state.selectedNoteIds = selectionDefaults.selectedNoteIds
+        state.hoveredNoteId = selectionDefaults.hoveredNoteId
+
+        state.trackColors = {}
+        state.trackMuted = {}
+        state.trackSoloed = {}
+
+        state.isExporting = exportDefaults.isExporting
+        state.exportProgress = exportDefaults.exportProgress
+        state.exportFramesRendered = exportDefaults.exportFramesRendered
+        state.exportTotalFrames = exportDefaults.exportTotalFrames
+        state.exportEstimatedSecondsRemaining = exportDefaults.exportEstimatedSecondsRemaining
+
+        state.errorMessage = null
+      })
+    },
+
+    setVisualizerSettings: (patch) => {
+      set((state) => {
+        const normalizedAspectRatio = normalizeVisualizerAspectRatio(
+          (patch as Partial<VisualizerSettings> & { aspectRatio?: VisualizerSettings['aspectRatio'] | '9:16' }).aspectRatio,
+        )
+
+        state.visualizerSettings = {
+          ...state.visualizerSettings,
+          ...patch,
+          ...(normalizedAspectRatio == null ? {} : { aspectRatio: normalizedAspectRatio }),
+        }
+      })
+    },
+
+    setCameraOverlay: (patch) => {
+      if (patch.offsetX != null) {
+        validateFiniteStateNumber(patch.offsetX, 'cameraOverlay.offsetX')
+      }
+      if (patch.offsetY != null) {
+        validateFiniteStateNumber(patch.offsetY, 'cameraOverlay.offsetY')
+      }
+      if (patch.scale != null) {
+        validateFiniteStateNumber(patch.scale, 'cameraOverlay.scale')
+      }
+      if (patch.cropTop != null) {
+        validateFiniteStateNumber(patch.cropTop, 'cameraOverlay.cropTop')
+      }
+      if (patch.cropRight != null) {
+        validateFiniteStateNumber(patch.cropRight, 'cameraOverlay.cropRight')
+      }
+      if (patch.cropBottom != null) {
+        validateFiniteStateNumber(patch.cropBottom, 'cameraOverlay.cropBottom')
+      }
+      if (patch.cropLeft != null) {
+        validateFiniteStateNumber(patch.cropLeft, 'cameraOverlay.cropLeft')
+      }
+
+      set((state) => {
+        state.cameraOverlay = {
+          ...state.cameraOverlay,
+          ...patch,
+        }
+      })
+    },
+
+    setAlignStep: (step) => {
+      validateAlignStep(step)
+
+      set((state) => {
+        state.alignStep = step
+      })
+    },
+
+    setLowAPoint: (point) => {
+      validateAlignmentPoint(point, 'lowAPoint')
+
+      set((state) => {
+        state.lowAPoint = point
+      })
+    },
+
+    setHighCPoint: (point) => {
+      validateAlignmentPoint(point, 'highCPoint')
+
+      set((state) => {
+        state.highCPoint = point
+      })
+    },
+
+    enterRecordMode: () => {
+      set((state) => {
+        state.appMode = 'createRecord'
+        state.activeSecondBarTab = 'pieces'
+        state.alignStep = alignmentInitial.alignStep
+        state.lowAPoint = alignmentInitial.lowAPoint
+        state.highCPoint = alignmentInitial.highCPoint
+      })
+    },
+
+    setRecordModeConfig: (patch) => {
+      validateRecordModeConfigPatch(patch)
+
+      set((state) => {
+        state.recordModeConfig = {
+          ...state.recordModeConfig,
+          ...patch,
+        }
+      })
+    },
+
     setActivePanel: (panel) => {
       validateActivePanel(panel)
 
@@ -697,11 +1000,44 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    setActiveSecondBarTab: (tab) => {
+      validateCreateTab(tab)
+
+      set((state) => {
+        state.activeSecondBarTab = tab
+      })
+    },
+
     setAppMode: (mode) => {
       validateAppMode(mode)
 
       set((state) => {
         state.appMode = mode
+        if (mode !== 'createCamera' && state.activeSecondBarTab === 'camera') {
+          state.activeSecondBarTab = 'pieces'
+        }
+        if (mode !== 'createCamera') {
+          state.alignStep = alignmentInitial.alignStep
+          state.lowAPoint = alignmentInitial.lowAPoint
+          state.highCPoint = alignmentInitial.highCPoint
+        }
+      })
+    },
+
+    enterCameraMode: () => {
+      set((state) => {
+        const hasLoadedPiece = (
+          state.isProjectLoaded &&
+          state.currentPieceId != null &&
+          state.pieces.some((piece) => piece.id === state.currentPieceId)
+        )
+
+        if (!hasLoadedPiece) {
+          return
+        }
+
+        state.appMode = 'createCamera'
+        state.activeSecondBarTab = 'camera'
       })
     },
 
@@ -722,26 +1058,6 @@ export const useAppStore = create<AppStore>()(
     setIsExporting: (exporting) => {
       set((state) => {
         state.isExporting = Boolean(exporting)
-      })
-    },
-
-    setShowEffects: (show) => {
-      set((state) => {
-        state.showEffects = Boolean(show)
-      })
-    },
-
-    setShowParticles: (show) => {
-      set((state) => {
-        state.showParticles = Boolean(show)
-        state.particlesEnabled = Boolean(show)
-      })
-    },
-
-    setShowBloom: (show) => {
-      set((state) => {
-        state.showBloom = Boolean(show)
-        state.bloomEnabled = Boolean(show)
       })
     },
 
@@ -855,72 +1171,6 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
-    setBloomEnabled: (enabled) => {
-      set((state) => {
-        state.bloomEnabled = Boolean(enabled)
-        state.showBloom = Boolean(enabled)
-      })
-    },
-
-    setBloomStrength: (value) => {
-      validateFiniteStateNumber(value, 'bloomStrength')
-
-      set((state) => {
-        state.bloomStrength = clamp(Math.round(value), 0, 100)
-      })
-    },
-
-    setBloomRadius: (value) => {
-      validateFiniteStateNumber(value, 'bloomRadius')
-
-      set((state) => {
-        state.bloomRadius = clamp(Math.round(value), 0, 100)
-      })
-    },
-
-    setParticlesEnabled: (enabled) => {
-      set((state) => {
-        state.particlesEnabled = Boolean(enabled)
-        state.showParticles = Boolean(enabled)
-      })
-    },
-
-    setParticleCount: (value) => {
-      validateFiniteStateNumber(value, 'particleCount')
-
-      set((state) => {
-        state.particleCount = clamp(Math.round(value), 0, 20)
-      })
-    },
-
-    setParticleSize: (value) => {
-      validateFiniteStateNumber(value, 'particleSize')
-
-      set((state) => {
-        state.particleSize = clamp(Math.round(value), 0, 100)
-      })
-    },
-
-    setParticleTrails: (value) => {
-      set((state) => {
-        state.particleTrails = Boolean(value)
-      })
-    },
-
-    setKeyGlowEnabled: (enabled) => {
-      set((state) => {
-        state.keyGlowEnabled = Boolean(enabled)
-      })
-    },
-
-    setKeyGlowIntensity: (value) => {
-      validateFiniteStateNumber(value, 'keyGlowIntensity')
-
-      set((state) => {
-        state.keyGlowIntensity = clamp(Math.round(value), 0, 100)
-      })
-    },
-
     setBackgroundColor: (color) => {
       validateHexColor(color)
 
@@ -970,18 +1220,6 @@ export const useAppStore = create<AppStore>()(
 
       set((state) => {
         state.noteLabelSize = clamp(Math.round(size), 8, 16)
-      })
-    },
-
-    setInnerGlowEnabled: (enabled) => {
-      set((state) => {
-        state.effectsEnabled.innerGlow = Boolean(enabled)
-      })
-    },
-
-    setLayeredGlowEnabled: (enabled) => {
-      set((state) => {
-        state.effectsEnabled.layeredGlow = Boolean(enabled)
       })
     },
 
@@ -1113,6 +1351,61 @@ export const useAppStore = create<AppStore>()(
       })
     },
 
+    setLearnVisuals: (patch) => {
+      if (patch.noteColor != null) {
+        validateLearnNoteColorMode(patch.noteColor)
+      }
+      if (patch.leftHandColor != null) {
+        validateHexColor(patch.leftHandColor)
+      }
+      if (patch.rightHandColor != null) {
+        validateHexColor(patch.rightHandColor)
+      }
+      if (patch.noteOpacity != null) {
+        validateFiniteStateNumber(patch.noteOpacity, 'learnVisuals.noteOpacity')
+      }
+
+      set((state) => {
+        if (patch.noteColor != null) {
+          state.learnVisuals.noteColor = patch.noteColor
+        }
+        if (patch.leftHandColor != null) {
+          state.learnVisuals.leftHandColor = patch.leftHandColor
+        }
+        if (patch.rightHandColor != null) {
+          state.learnVisuals.rightHandColor = patch.rightHandColor
+        }
+        if (patch.noteOpacity != null) {
+          state.learnVisuals.noteOpacity = clamp(patch.noteOpacity, 0.3, 1)
+        }
+        if (patch.glowEnabled != null) {
+          state.learnVisuals.glowEnabled = Boolean(patch.glowEnabled)
+        }
+        if (patch.noteLabelsEnabled != null) {
+          state.learnVisuals.noteLabelsEnabled = Boolean(patch.noteLabelsEnabled)
+        }
+        if (patch.fingerNumbersEnabled != null) {
+          state.learnVisuals.fingerNumbersEnabled = Boolean(patch.fingerNumbersEnabled)
+        }
+      })
+    },
+
+    setLearnVisualsPreset: (preset) => {
+      validateLearnVisuals(preset)
+
+      set((state) => {
+        state.learnVisuals = {
+          fingerNumbersEnabled: Boolean(preset.fingerNumbersEnabled),
+          glowEnabled: Boolean(preset.glowEnabled),
+          leftHandColor: preset.leftHandColor,
+          noteColor: preset.noteColor,
+          noteLabelsEnabled: Boolean(preset.noteLabelsEnabled),
+          noteOpacity: clamp(preset.noteOpacity, 0.3, 1),
+          rightHandColor: preset.rightHandColor,
+        }
+      })
+    },
+
     batchUpdate: (fn) => {
       if (typeof fn !== 'function') {
         throw new StoreError('batchUpdate requires a function.', 'INVALID_STATE', fn)
@@ -1140,8 +1433,6 @@ export const useSelection = () => useAppStore(useShallow(selectionSelector))
 export const useTrackColors = () => useAppStore(trackColorsSelector)
 
 export const useExportState = () => useAppStore(useShallow(exportSelector))
-
-export const useUIState = () => useAppStore(useShallow(uiSelector))
 
 export const useVisualizerSettings = () => useAppStore(useShallow(visualizerSelector))
 
@@ -1195,6 +1486,32 @@ function validateTrackId(trackId: string): void {
   }
 }
 
+function validatePieceType(type: PieceType): void {
+  if (type === 'midi' || type === 'recording') {
+    return
+  }
+
+  throw new StoreError('Piece type is invalid.', 'INVALID_STATE', type)
+}
+
+function validatePiece(piece: Piece): void {
+  if (piece == null || typeof piece !== 'object') {
+    throw new StoreError('Piece is invalid.', 'INVALID_STATE', piece)
+  }
+
+  validateTrackId(piece.id)
+  if (typeof piece.name !== 'string' || piece.name.trim().length === 0) {
+    throw new StoreError('Piece name must be a non-empty string.', 'INVALID_STATE', piece)
+  }
+
+  validatePieceType(piece.type)
+  if (piece.filePath !== null && typeof piece.filePath !== 'string') {
+    throw new StoreError('Piece filePath must be a string or null.', 'INVALID_STATE', piece)
+  }
+
+  validateFiniteStateNumber(piece.createdAt, 'piece.createdAt')
+}
+
 function validateHexColor(color: string): void {
   if (typeof color !== 'string' || !HEX_COLOR_PATTERN.test(color)) {
     throw new StoreError('Track color must be a valid hex color.', 'INVALID_COLOR', color)
@@ -1234,6 +1551,8 @@ function validateAppMode(mode: AppMode): void {
   if (
     mode === 'select' ||
     mode === 'create' ||
+    mode === 'createCamera' ||
+    mode === 'createRecord' ||
     mode === 'learn' ||
     mode === 'learnSong' ||
     mode === 'learnSession' ||
@@ -1243,6 +1562,93 @@ function validateAppMode(mode: AppMode): void {
   }
 
   throw new StoreError('App mode is invalid.', 'INVALID_STATE', mode)
+}
+
+function validateCreateTab(tab: CreateTab): void {
+  if (
+    tab === 'pieces' ||
+    tab === 'particles' ||
+    tab === 'color' ||
+    tab === 'camera'
+  ) {
+    return
+  }
+
+  throw new StoreError('Create tab is invalid.', 'INVALID_STATE', tab)
+}
+
+function validateAlignStep(step: AlignStep): void {
+  if (
+    step === 'idle' ||
+    step === 'waiting-low-a' ||
+    step === 'waiting-high-c' ||
+    step === 'complete'
+  ) {
+    return
+  }
+
+  throw new StoreError('Align step is invalid.', 'INVALID_STATE', step)
+}
+
+function validateAlignmentPoint(
+  point: AlignmentPoint | null,
+  label: 'highCPoint' | 'lowAPoint',
+): void {
+  if (point == null) {
+    return
+  }
+
+  if (typeof point !== 'object') {
+    throw new StoreError(`${label} must be an object or null.`, 'INVALID_STATE', point)
+  }
+
+  validateFiniteStateNumber(point.x, `${label}.x`)
+  validateFiniteStateNumber(point.y, `${label}.y`)
+}
+
+function validateRecordModeConfigPatch(patch: Partial<RecordModeConfig>): void {
+  if (patch == null || typeof patch !== 'object') {
+    throw new StoreError('Record mode config patch is invalid.', 'INVALID_STATE', patch)
+  }
+
+  if (patch.audioSourceDeviceId !== undefined) {
+    validateOptionalString(patch.audioSourceDeviceId, 'recordModeConfig.audioSourceDeviceId')
+  }
+  if (patch.midiDeviceId !== undefined) {
+    validateOptionalString(patch.midiDeviceId, 'recordModeConfig.midiDeviceId')
+  }
+  if (patch.cameraDeviceId !== undefined) {
+    validateOptionalString(patch.cameraDeviceId, 'recordModeConfig.cameraDeviceId')
+  }
+  if (patch.useMidiAudio !== undefined && typeof patch.useMidiAudio !== 'boolean') {
+    throw new StoreError(
+      'recordModeConfig.useMidiAudio must be a boolean.',
+      'INVALID_STATE',
+      patch.useMidiAudio,
+    )
+  }
+  if (patch.useMic !== undefined && typeof patch.useMic !== 'boolean') {
+    throw new StoreError('recordModeConfig.useMic must be a boolean.', 'INVALID_STATE', patch.useMic)
+  }
+}
+
+function validateLearnNoteColorMode(mode: LearnNoteColorMode): void {
+  if (mode === 'white' || mode === 'perHand' || mode === 'custom') {
+    return
+  }
+
+  throw new StoreError('Learn note color mode is invalid.', 'INVALID_STATE', mode)
+}
+
+function validateLearnVisuals(visuals: LearnVisuals): void {
+  if (visuals == null || typeof visuals !== 'object') {
+    throw new StoreError('Learn visuals preset is invalid.', 'INVALID_STATE', visuals)
+  }
+
+  validateLearnNoteColorMode(visuals.noteColor)
+  validateHexColor(visuals.leftHandColor)
+  validateHexColor(visuals.rightHandColor)
+  validateFiniteStateNumber(visuals.noteOpacity, 'learnVisuals.noteOpacity')
 }
 
 function validateColorMode(mode: VisualizerSettingsSlice['colorMode']): void {
@@ -1315,5 +1721,17 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-export { StoreError }
-export type { AppMode, LearnMode, LearnHand, MidiConnectionStatus, LearnSessionConfig, LearnStats, MidiDeviceInfo, LearnV3State }
+export { StoreError, learnVisualsInitial }
+export type {
+  AppMode,
+  LearnMode,
+  LearnHand,
+  LearnNoteColorMode,
+  PieceType,
+  MidiConnectionStatus,
+  LearnSessionConfig,
+  LearnStats,
+  MidiDeviceInfo,
+  LearnV3State,
+  LearnVisuals,
+}

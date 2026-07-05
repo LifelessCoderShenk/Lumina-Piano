@@ -11,7 +11,6 @@ const mockRm = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const mockGetCanvas = vi.hoisted(() => vi.fn(() => createMockCanvas()))
 const mockRenderFrame = vi.hoisted(() => vi.fn())
 const mockResize = vi.hoisted(() => vi.fn())
-const mockEffectsSeek = vi.hoisted(() => vi.fn())
 const mockGetTempDir = vi.hoisted(() => vi.fn(() => Promise.resolve('C:\\temp\\lumina-export-test')))
 const mockSaveFile = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const mockFfmpegRun = vi.hoisted(() => vi.fn(() => Promise.resolve()))
@@ -91,12 +90,6 @@ vi.mock('../camera/CameraSystem', () => ({
   },
 }))
 
-vi.mock('../effects/EffectsLayer', () => ({
-  effectsLayer: {
-    seek: mockEffectsSeek,
-  },
-}))
-
 vi.mock('../playback/PlaybackEngine', () => ({
   playbackEngine: {
     pause: mockPlaybackPause,
@@ -148,6 +141,9 @@ beforeEach(() => {
   })
   window.electronAPI = {
     deleteSong: vi.fn(),
+    openJsonFile: vi.fn(),
+    openMidiFile: vi.fn(),
+    showSaveDialog: vi.fn(),
     dialog: {
       getDefaultExportPath: vi.fn(),
       openMidiFile: vi.fn(),
@@ -268,7 +264,6 @@ describe('ExportEngine', () => {
     expect(mockRenderFrame).toHaveBeenCalledTimes(expectedFrames)
     expect(mockRenderFrame.mock.calls[0]?.[0]).toBe(0)
     expect(mockGetCanvas).toHaveBeenCalled()
-    expect(mockEffectsSeek).toHaveBeenCalled()
     expect(mockVideoEncoderEncode).toHaveBeenCalledTimes(expectedFrames)
     expect(mockSaveFile).toHaveBeenCalledTimes(1)
     expect(mockMkdir).toHaveBeenCalled()

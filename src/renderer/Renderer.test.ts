@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetStore, useAppStore } from '../store/store'
+import { getKeyboardLayoutMetrics } from './layoutConstants'
+import { getBlackKeyWidth, getWhiteKeyBounds } from './pianoMath'
 
-const mockEffectsDestroy = vi.hoisted(() => vi.fn())
-const mockEffectsInit = vi.hoisted(() => vi.fn())
-const mockEffectsReset = vi.hoisted(() => vi.fn())
-const mockEffectsSeek = vi.hoisted(() => vi.fn())
-const mockEffectsUpdate = vi.hoisted(() => vi.fn())
 const mockSpatialGetNotesInRegion = vi.hoisted(() => vi.fn(() => []))
 const mockSpatialGetTotalNoteCount = vi.hoisted(() => vi.fn(() => 0))
+const mockCreatedGraphics = vi.hoisted(() => [] as unknown[])
 
 vi.mock('pixi.js', () => {
   class MockContainer {
@@ -61,6 +59,7 @@ vi.mock('pixi.js', () => {
     y = 0
     destroyed = false
     parent: MockContainer | null = null
+    filters: unknown[] = []
     clear = vi.fn(() => this)
     beginFill = vi.fn(() => this)
     drawRect = vi.fn(() => this)
@@ -74,6 +73,18 @@ vi.mock('pixi.js', () => {
     destroy = vi.fn(() => {
       this.destroyed = true
     })
+
+    constructor() {
+      mockCreatedGraphics.push(this)
+    }
+  }
+
+  class MockBlurFilter {
+    strength: number
+
+    constructor(strength = 8) {
+      this.strength = strength
+    }
   }
 
   class MockTextStyle {
@@ -161,14 +172,26 @@ vi.mock('pixi.js', () => {
   class MockTicker {
     elapsedMS = 0
     started = false
-    add = vi.fn()
-    remove = vi.fn()
+    private callbacks = new Set<(ticker: MockTicker) => void>()
+    add = vi.fn((callback: (ticker: MockTicker) => void) => {
+      this.callbacks.add(callback)
+    })
+    remove = vi.fn((callback: (ticker: MockTicker) => void) => {
+      this.callbacks.delete(callback)
+    })
     start = vi.fn(() => {
       this.started = true
     })
     stop = vi.fn(() => {
       this.started = false
     })
+
+    advance(elapsedMS = 16.6667) {
+      this.elapsedMS = elapsedMS
+      for (const callback of [...this.callbacks]) {
+        callback(this)
+      }
+    }
   }
 
   class MockApplication {
@@ -214,6 +237,9 @@ vi.mock('pixi.js', () => {
     Text: MockText,
     TextStyle: MockTextStyle,
     Texture: MockTexture,
+    filters: {
+      BlurFilter: MockBlurFilter,
+    },
   }
 })
 
@@ -221,16 +247,6 @@ vi.mock('../camera/CameraSystem', () => ({
   cameraSystem: {
     isInitialized: vi.fn(() => true),
     setViewportSize: vi.fn(),
-  },
-}))
-
-vi.mock('../effects/EffectsLayer', () => ({
-  effectsLayer: {
-    destroy: mockEffectsDestroy,
-    init: mockEffectsInit,
-    reset: mockEffectsReset,
-    seek: mockEffectsSeek,
-    update: mockEffectsUpdate,
   },
 }))
 
@@ -253,24 +269,36 @@ vi.mock('./noteMotion', () => ({
   getVisibleTickWindow: vi.fn(() => ({ maxTick: 1000, minTick: 0 })),
 }))
 
-const { Renderer } = await import('./Renderer')
+const { Renderer, pitchToKeyX } = await import('./Renderer')
+const { getNoteScreenRect } = await import('./noteMotion')
+
+function setFullscreenElement(element: Element | null): void {
+  Object.defineProperty(document, 'fullscreenElement', {
+    configurable: true,
+    value: element,
+  })
+}
 
 describe('Renderer playback sync', () => {
   beforeEach(() => {
     resetStore()
-    mockEffectsDestroy.mockReset()
-    mockEffectsInit.mockReset()
-    mockEffectsReset.mockReset()
-    mockEffectsSeek.mockReset()
-    mockEffectsUpdate.mockReset()
+    setFullscreenElement(null)
+    mockCreatedGraphics.length = 0
     mockSpatialGetNotesInRegion.mockReset()
     mockSpatialGetNotesInRegion.mockReturnValue([])
     mockSpatialGetTotalNoteCount.mockReset()
     mockSpatialGetTotalNoteCount.mockReturnValue(0)
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(16)
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
 
   afterEach(() => {
     resetStore()
+    setFullscreenElement(null)
+    vi.unstubAllGlobals()
   })
 
   it('forceResume() restarts rendering when playback is active', async () => {
@@ -285,7 +313,19 @@ describe('Renderer playback sync', () => {
 
     expect((renderer as unknown as { isRunning: boolean }).isRunning).toBe(true)
 
-    renderer.destroy()
+    await renderer.destroy()
+  })
+
+  it('render loop guard returns early when isInitialized is false', () => {
+    const renderer = new Renderer()
+    const renderSpy = vi.spyOn(renderer as unknown as { renderFrame: (currentTick: number) => void }, 'renderFrame')
+    const startSpy = vi.spyOn(renderer as unknown as { startRenderLoop: () => void }, 'startRenderLoop')
+
+    useAppStore.getState().setIsPlaying(true)
+    ;(renderer as unknown as { handleTick: (currentTick: number) => void }).handleTick(0)
+
+    expect(startSpy).not.toHaveBeenCalled()
+    expect(renderSpy).not.toHaveBeenCalled()
   })
 
   it('store subscription to isPlaying starts and stops renderer running state', async () => {
@@ -301,7 +341,7 @@ describe('Renderer playback sync', () => {
     useAppStore.getState().setIsPlaying(false)
     expect((renderer as unknown as { isRunning: boolean }).isRunning).toBe(false)
 
-    renderer.destroy()
+    await renderer.destroy()
   })
 
   it('destroy() sets isInitialized=false and clears renderer scene references', async () => {
@@ -310,13 +350,38 @@ describe('Renderer playback sync', () => {
 
     await renderer.init(canvas)
 
-    renderer.destroy()
+    await renderer.destroy()
 
     expect((renderer as unknown as { isInitialized: boolean }).isInitialized).toBe(false)
     expect((renderer as unknown as { layers: unknown | null }).layers).toBeNull()
     expect((renderer as unknown as { backgroundGraphic: unknown | null }).backgroundGraphic).toBeNull()
     expect((renderer as unknown as { app: unknown | null }).app).toBeNull()
-    expect((renderer as unknown as { unsubscribeStore: (() => void) | null }).unsubscribeStore).toBeNull()
+    expect((renderer as unknown as { subscriptions: Array<() => void> }).subscriptions).toHaveLength(0)
+  })
+
+  it('unsubscribes all store subscriptions on destroy', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+
+    const rebuildSpy = vi.spyOn(renderer as unknown as { rebuildNoteByNoteLayer: () => void }, 'rebuildNoteByNoteLayer')
+    const startSpy = vi.spyOn(renderer as unknown as { startRenderLoop: () => void }, 'startRenderLoop')
+    rebuildSpy.mockClear()
+    startSpy.mockClear()
+
+    await renderer.destroy()
+
+    expect(() => {
+      useAppStore.getState().setIsPlaying(true)
+      useAppStore.getState().setLearnActive(true)
+      useAppStore.getState().setSessionConfig({ mode: 'noteByNote' })
+      useAppStore.getState().setCurrentChordIndex(1)
+    }).not.toThrow()
+
+    expect(startSpy).not.toHaveBeenCalled()
+    expect(rebuildSpy).not.toHaveBeenCalled()
+    expect((renderer as unknown as { subscriptions: Array<() => void> }).subscriptions).toHaveLength(0)
   })
 
   it('rebuilds a fresh scene after destroy() and re-init()', async () => {
@@ -327,7 +392,7 @@ describe('Renderer playback sync', () => {
     const firstApp = (renderer as unknown as { app: { stage: { children: unknown[] } } | null }).app
     expect(firstApp?.stage.children.length).toBeGreaterThan(0)
 
-    renderer.destroy()
+    await renderer.destroy()
     await renderer.init(canvas)
 
     const nextApp = (renderer as unknown as { app: { stage: { children: unknown[] } } | null }).app
@@ -335,7 +400,289 @@ describe('Renderer playback sync', () => {
     expect(nextApp).not.toBe(firstApp)
     expect(nextApp?.stage.children.length).toBeGreaterThan(0)
 
-    renderer.destroy()
+    await renderer.destroy()
+  })
+
+  it('renders create mode notes as a single flat blue regardless of pitch with no glow layers', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+    const leftNote = createIndexedNote('left-note', 59)
+    const rightNote = createIndexedNote('right-note', 60)
+
+    loadProjectWithNotes([leftNote.note, rightNote.note])
+    mockSpatialGetTotalNoteCount.mockReturnValue(2)
+    mockSpatialGetNotesInRegion.mockReturnValue([leftNote, rightNote])
+
+    await renderer.init(canvas)
+    ;(renderer as unknown as { updateNotes: (currentTick: number) => unknown[] }).updateNotes(0)
+
+    const layers = (renderer as unknown as {
+      layers: { notes: { children: Array<{ beginFill?: { mock: { calls: Array<[number, number]> } } }> } }
+    }).layers
+    const graphics = layers.notes.children.filter((child) => 'beginFill' in child)
+
+    expect(graphics).toHaveLength(2)
+    expect(graphics[0].beginFill?.mock.calls.at(-1)).toEqual([0x2e65a2, 1])
+    expect(graphics[1].beginFill?.mock.calls.at(-1)).toEqual([0x2e65a2, 1])
+
+    await renderer.destroy()
+  })
+
+  it('always renders create mode falling note labels regardless of note height', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+    const note = createIndexedNote('tiny-note', 60)
+
+    loadProjectWithNotes([note.note])
+    mockSpatialGetTotalNoteCount.mockReturnValue(1)
+    mockSpatialGetNotesInRegion.mockReturnValue([note])
+    vi.mocked(getNoteScreenRect).mockReturnValueOnce({ h: 6, w: 6, x: 120, y: 80 })
+
+    await renderer.init(canvas)
+    ;(renderer as unknown as { updateNotes: (currentTick: number) => unknown[] }).updateNotes(0)
+
+    const noteTexts = (renderer as unknown as {
+      layers: { notes: { children: Array<{ text?: string; visible?: boolean; style?: { fill?: number } }> } }
+    }).layers.notes.children.filter((child) => 'text' in child)
+
+    expect(noteTexts).toHaveLength(1)
+    expect(noteTexts[0].text).toBe('C4')
+    expect(noteTexts[0].visible).toBe(true)
+    expect(noteTexts[0].style?.fill).toBe(0xffffff)
+
+    await renderer.destroy()
+  })
+
+  it('always renders create mode keyboard labels on white keys in black text', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+    useAppStore.getState().setNoteLabelsOnKeys(false)
+    ;(renderer as unknown as { keyLabelsDirty: boolean }).keyLabelsDirty = true
+    ;(renderer as unknown as { updateKeyboard: (currentTick: number) => void }).updateKeyboard(0)
+
+    const keyboardTexts = (renderer as unknown as {
+      layers: { keyboard: { children: Array<{ text?: string; style?: { fill?: number } }> } }
+    }).layers.keyboard.children.filter((child) => 'text' in child)
+
+    expect(keyboardTexts.length).toBeGreaterThan(0)
+    expect(keyboardTexts[0].style?.fill).toBe(0x000000)
+    expect(keyboardTexts.some((child) => child.text === 'C')).toBe(true)
+
+    await renderer.destroy()
+  })
+
+  it('increases create mode keyboard height by 1.5x in fullscreen without changing key widths', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    setFullscreenElement(document.documentElement)
+    await renderer.init(canvas)
+
+    const keyboardEntries = (renderer as unknown as {
+      keyboardPool: {
+        getEntries: () => Array<{
+          isBlack: boolean
+          pitch: number
+          graphic: { drawRect: { mockClear: () => void; mock: { calls: Array<[number, number, number, number]> } } }
+        }>
+      }
+    }).keyboardPool.getEntries()
+    for (const entry of keyboardEntries) {
+      entry.graphic.drawRect.mockClear()
+    }
+    ;(renderer as unknown as { updateKeyboard: (currentTick: number) => void; keyLabelsDirty: boolean }).keyLabelsDirty = true
+    ;(renderer as unknown as { updateKeyboard: (currentTick: number) => void }).updateKeyboard(0)
+
+    const app = (renderer as unknown as { app: { screen: { width: number; height: number } } }).app
+    const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const expectedWhiteKeyBounds = getWhiteKeyBounds(21, app.screen.width)
+    const expectedBlackKeyWidth = Math.max(1, Math.round(getBlackKeyWidth(app.screen.width)))
+    const expectedBlackKeyHeight = Math.max(1, Math.round(keyboardHeight * 0.6))
+    const firstWhiteEntry = keyboardEntries.find((entry) => !entry.isBlack)
+    const firstBlackEntry = keyboardEntries.find((entry) => entry.isBlack)
+    const keyboardLabels = (renderer as unknown as {
+      layers: { keyboard: { children: Array<{ text?: string; x?: number }> } }
+    }).layers.keyboard.children.filter((child) => 'text' in child)
+    const firstWhiteRect = firstWhiteEntry?.graphic.drawRect.mock.calls[0]
+    const firstBlackRect = firstBlackEntry?.graphic.drawRect.mock.calls[0]
+
+    expect(keyboardHeight).toBe(405)
+    expect(keyboardY).toBe(app.screen.height - keyboardHeight)
+    expect(firstWhiteRect).toBeDefined()
+    expect(firstBlackRect).toBeDefined()
+    expect(firstWhiteRect?.[1]).toBe(keyboardY)
+    expect(firstWhiteRect?.[2]).toBe(Math.max(1, expectedWhiteKeyBounds.width - 1))
+    expect(firstWhiteRect?.[3]).toBe(Math.max(1, keyboardHeight - 4))
+    expect(firstBlackRect?.[1]).toBe(keyboardY + 1)
+    expect(firstBlackRect?.[2]).toBe(expectedBlackKeyWidth)
+    expect(firstBlackRect?.[3]).toBe(Math.max(1, expectedBlackKeyHeight - 1))
+    expect(keyboardLabels[0]?.x).toBe(expectedWhiteKeyBounds.x + (expectedWhiteKeyBounds.width / 2))
+
+    await renderer.destroy()
+  })
+
+  it('renders create mode lane lines only at C note positions with the new thin gray style', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+    const app = (renderer as unknown as { app: { screen: { height: number; width: number } } }).app
+
+    const laneLineGraphic = (renderer as unknown as {
+      laneLineGraphic: {
+        lineStyle: { mock: { calls: Array<[number, number, number]> } }
+        lineTo: { mock: { calls: Array<[number, number]> } }
+        moveTo: { mock: { calls: Array<[number, number]> } }
+      }
+    }).laneLineGraphic
+
+    expect(laneLineGraphic.lineStyle.mock.calls.at(-1)).toEqual([1, 0x444444, 0.4])
+
+    const expectedCPitches = [24, 36, 48, 60, 72, 84, 96, 108]
+    const expectedXPositions = expectedCPitches.map((pitch) => pitchToKeyX(pitch, app.screen.width))
+
+    expect(laneLineGraphic.moveTo.mock.calls).toHaveLength(expectedCPitches.length)
+    expect(laneLineGraphic.lineTo.mock.calls).toHaveLength(expectedCPitches.length)
+    expect(laneLineGraphic.moveTo.mock.calls.map((call) => call[0])).toEqual(expectedXPositions)
+    expect(laneLineGraphic.lineTo.mock.calls.map((call) => call[0])).toEqual(expectedXPositions)
+    expect(laneLineGraphic.lineTo.mock.calls.every((call) => call[1] === app.screen.height)).toBe(true)
+
+    await renderer.destroy()
+  })
+
+  it('creates the boundary line graphic once in init and keeps animating it on the empty canvas', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+
+    const initialGraphicsCount = mockCreatedGraphics.length
+    const hitLineGraphic = (renderer as unknown as {
+      app: { screen: { height: number } }
+      hitLineGraphic: {
+        clear: { mock: { calls: unknown[] } }
+        lineStyle: { mock: { calls: Array<[number, number, number]> } }
+        moveTo: { mock: { calls: Array<[number, number]> } }
+      }
+      boundaryWaveTime: number
+    }).hitLineGraphic
+    const rendererInternals = renderer as unknown as {
+      app: { render: { mock: { calls: unknown[] } }; screen: { height: number }; ticker: { advance: (elapsedMs?: number) => void; started: boolean } }
+      boundaryWaveTime: number
+      hitLineGraphic: {
+        clear: { mock: { calls: unknown[] } }
+        lineStyle: { mock: { calls: Array<[number, number, number]> } }
+        moveTo: { mock: { calls: Array<[number, number]> } }
+      }
+    }
+    const app = rendererInternals.app
+    const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const clearCountBeforeAdvance = hitLineGraphic.clear.mock.calls.length
+    const renderCountBeforeAdvance = app.render.mock.calls.length
+    const boundaryWaveTimeBeforeAdvance = rendererInternals.boundaryWaveTime
+
+    expect(app.ticker.started).toBe(true)
+    expect(hitLineGraphic.lineStyle.mock.calls.slice(-3)).toEqual([
+      [16, 0x1a3a6e, 0.15],
+      [6, 0x4a9eff, 0.35],
+      [2, 0x7ec8ff, 1],
+    ])
+    expect(hitLineGraphic.moveTo.mock.calls.at(-3)?.[1]).toBe(keyboardY)
+
+    app.ticker.advance()
+
+    expect((renderer as unknown as { hitLineGraphic: unknown }).hitLineGraphic).toBe(hitLineGraphic)
+    expect(mockCreatedGraphics.length).toBe(initialGraphicsCount)
+    expect(rendererInternals.boundaryWaveTime).toBeGreaterThan(boundaryWaveTimeBeforeAdvance)
+    expect(hitLineGraphic.clear.mock.calls.length).toBeGreaterThan(clearCountBeforeAdvance)
+    expect(app.render.mock.calls.length).toBeGreaterThan(renderCountBeforeAdvance)
+
+    await renderer.destroy()
+  })
+
+  it('keeps learn mode note rendering on the learn visuals path', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+    const note = createIndexedNote('learn-note', 60)
+
+    loadProjectWithNotes([note.note])
+    useAppStore.getState().setLearnActive(true)
+    useAppStore.getState().setSessionConfig({ mode: 'listen' })
+    useAppStore.getState().setNoteStyle('solid')
+    useAppStore.getState().setLearnVisuals({
+      glowEnabled: false,
+      leftHandColor: '#4ade80',
+      noteColor: 'custom',
+      noteLabelsEnabled: false,
+      noteOpacity: 0.6,
+      rightHandColor: '#60a5fa',
+    })
+    mockSpatialGetTotalNoteCount.mockReturnValue(1)
+    mockSpatialGetNotesInRegion.mockReturnValue([note])
+
+    await renderer.init(canvas)
+    ;(renderer as unknown as { updateNotes: (currentTick: number) => unknown[] }).updateNotes(0)
+
+    const layers = (renderer as unknown as {
+      layers: { notes: { children: Array<{ beginFill?: { mock: { calls: Array<[number, number]> } } }> } }
+    }).layers
+    const graphics = layers.notes.children.filter((child) => 'beginFill' in child)
+    const texts = layers.notes.children.filter((child) => 'text' in child)
+    const laneLineGraphic = (renderer as unknown as {
+      laneLineGraphic: { lineStyle: { mock: { calls: Array<[number, number, number]> } } }
+    }).laneLineGraphic
+    const hitLineGraphic = (renderer as unknown as {
+      hitLineGraphic: { drawRect: { mock: { calls: Array<[number, number, number, number]> } } }
+    }).hitLineGraphic
+
+    expect(graphics).toHaveLength(1)
+    expect(graphics[0].beginFill?.mock.calls.at(-1)?.[0]).not.toBe(0x60a5fa)
+    expect(graphics[0].beginFill?.mock.calls.at(-1)?.[1]).toBe(0.6)
+    expect(texts).toHaveLength(0)
+    expect(laneLineGraphic.lineStyle.mock.calls.at(-1)?.[1]).toBe(0xffffff)
+    expect(hitLineGraphic.drawRect.mock.calls.length).toBeGreaterThan(0)
+
+    await renderer.destroy()
+  })
+
+  it('keeps learn mode keyboard sizing at the normal scale in fullscreen', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    useAppStore.getState().setLearnActive(true)
+    useAppStore.getState().setSessionConfig({ mode: 'listen' })
+    setFullscreenElement(document.documentElement)
+    await renderer.init(canvas)
+
+    const keyboardEntries = (renderer as unknown as {
+      keyboardPool: {
+        getEntries: () => Array<{
+          isBlack: boolean
+          graphic: { drawRect: { mockClear: () => void; mock: { calls: Array<[number, number, number, number]> } } }
+        }>
+      }
+    }).keyboardPool.getEntries()
+    for (const entry of keyboardEntries) {
+      entry.graphic.drawRect.mockClear()
+    }
+    ;(renderer as unknown as { keyLabelsDirty: boolean }).keyLabelsDirty = true
+    ;(renderer as unknown as { updateKeyboard: (currentTick: number) => void }).updateKeyboard(0)
+
+    const app = (renderer as unknown as { app: { screen: { width: number; height: number } } }).app
+    const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const expectedWhiteKeyBounds = getWhiteKeyBounds(21, app.screen.width)
+    const firstWhiteEntry = keyboardEntries.find((entry) => !entry.isBlack)
+    const firstWhiteRect = firstWhiteEntry?.graphic.drawRect.mock.calls[0]
+
+    expect(keyboardHeight).toBe(270)
+    expect(keyboardY).toBe(app.screen.height - keyboardHeight)
+    expect(firstWhiteRect?.[1]).toBe(keyboardY)
+    expect(firstWhiteRect?.[2]).toBe(Math.max(1, expectedWhiteKeyBounds.width - 1))
+    expect(firstWhiteRect?.[3]).toBe(Math.max(1, keyboardHeight - 4))
+
+    await renderer.destroy()
   })
 
   it('skips drawing excluded hand notes when learn mode is active', async () => {
@@ -358,7 +705,7 @@ describe('Renderer playback sync', () => {
     expect(renderedNotes).toHaveLength(1)
     expect(renderedNotes[0].note.pitch).toBe(59)
 
-    renderer.destroy()
+    await renderer.destroy()
   })
 
   it('keyboard does not highlight excluded hand keys', async () => {
@@ -386,7 +733,134 @@ describe('Renderer playback sync', () => {
     expect(includedEntry).toBeTruthy()
     expect(excludedEntry!.graphic.beginFill.mock.calls.length).toBeLessThan(includedEntry!.graphic.beginFill.mock.calls.length)
 
-    renderer.destroy()
+    await renderer.destroy()
+  })
+
+  it('calling init() while destroy() is in progress waits for destroy to complete first', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+    let resolveDestroy: (() => void) | null = null
+    const destroyInternalSpy = vi
+      .spyOn(renderer as unknown as { destroyInternal: () => Promise<void> }, 'destroyInternal')
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveDestroy = resolve
+          }),
+      )
+
+    await renderer.init(canvas)
+
+    const destroyPromise = renderer.destroy()
+    const initPromise = renderer.init(canvas)
+    let initResolved = false
+    void initPromise.then(() => {
+      initResolved = true
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(destroyInternalSpy).toHaveBeenCalledTimes(1)
+    expect(initResolved).toBe(false)
+
+    resolveDestroy?.()
+
+    await destroyPromise
+    await initPromise
+
+    expect((renderer as unknown as { isInitialized: boolean }).isInitialized).toBe(true)
+    destroyInternalSpy.mockRestore()
+    await renderer.destroy()
+  })
+
+  it('concurrent destroy() calls return the same promise and only destroy once', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+    let resolveDestroy: (() => void) | null = null
+    const destroyInternalSpy = vi
+      .spyOn(renderer as unknown as { destroyInternal: () => Promise<void> }, 'destroyInternal')
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveDestroy = resolve
+          }),
+      )
+
+    await renderer.init(canvas)
+
+    const destroyPromiseA = renderer.destroy()
+    const destroyPromiseB = renderer.destroy()
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(destroyPromiseA).toBe(destroyPromiseB)
+    expect(destroyInternalSpy).toHaveBeenCalledTimes(1)
+
+    resolveDestroy?.()
+
+    await destroyPromiseA
+
+    destroyInternalSpy.mockRestore()
+  })
+
+  it('applies camera overlay horizontal offset and scale to the dedicated overlay container in camera mode', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+
+    useAppStore.getState().setAppMode('createCamera')
+    useAppStore.getState().setCameraOverlay({
+      offsetX: 120,
+      offsetY: 60,
+      scale: 1.35,
+    })
+
+    const overlayContainer = (renderer as unknown as {
+      overlayContainer: {
+        scale?: { x?: number; y?: number }
+        x: number
+        y: number
+      } | null
+    }).overlayContainer
+
+    expect(overlayContainer?.x).toBe(120)
+    expect(overlayContainer?.y).toBe(0)
+    expect(overlayContainer?.scale?.x).toBe(1.35)
+    expect(overlayContainer?.scale?.y).toBe(1.35)
+
+    await renderer.destroy()
+  })
+
+  it('resets camera overlay transform when leaving camera mode', async () => {
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+
+    useAppStore.getState().setAppMode('createCamera')
+    useAppStore.getState().setCameraOverlay({
+      offsetX: 80,
+      offsetY: 32,
+      scale: 1.2,
+    })
+    useAppStore.getState().setAppMode('create')
+
+    const overlayContainer = (renderer as unknown as {
+      overlayContainer: {
+        scale?: { x?: number; y?: number }
+        x: number
+        y: number
+      } | null
+    }).overlayContainer
+
+    expect(overlayContainer?.x).toBe(0)
+    expect(overlayContainer?.y).toBe(0)
+    expect(overlayContainer?.scale?.x).toBe(1)
+    expect(overlayContainer?.scale?.y).toBe(1)
+
+    await renderer.destroy()
   })
 })
 

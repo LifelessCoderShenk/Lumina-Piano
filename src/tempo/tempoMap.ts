@@ -70,7 +70,7 @@ export function tickToSeconds(tick: number, tempoMap: PrecomputedTempoMap): numb
   validateTempoMap(tempoMap)
 
   if (tick < 0) {
-    return 0
+    return ticksToSecondsDelta(tick, tempoMap.segments[0].ticksPerSecond)
   }
 
   const segment = findSegmentByTick(tick, tempoMap.segments)
@@ -82,7 +82,7 @@ export function secondsToTick(seconds: number, tempoMap: PrecomputedTempoMap): n
   validateTempoMap(tempoMap)
 
   if (seconds < 0) {
-    return 0
+    return Math.floor(seconds * tempoMap.segments[0].ticksPerSecond)
   }
 
   const segment = findSegmentBySeconds(seconds, tempoMap.segments)

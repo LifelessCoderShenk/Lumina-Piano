@@ -1,0 +1,145 @@
+.panel {
+  width: 240px;
+  background: #000000;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  color: #ffffff;
+}
+
+.header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fieldHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fieldLabel,
+.valueLabel,
+.colorLabel {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.segmentedControl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.segmentButton,
+.secondaryButton,
+.primaryButton,
+.toggleButton {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #000000;
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.segmentButton {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.segmentButtonActive,
+.toggleButtonActive {
+  background: #ffffff;
+  color: #000000;
+}
+
+.colorPickerRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.colorField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.colorField input[type="color"] {
+  width: 100%;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #000000;
+  cursor: pointer;
+}
+
+.toggleList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toggleButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.presetRow,
+.actionRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.secondaryButton,
+.primaryButton {
+  padding: 10px 12px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.errorMessage {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 10px 12px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}

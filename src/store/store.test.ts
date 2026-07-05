@@ -33,6 +33,23 @@ describe('initial state', () => {
     expect(state.trackColors).toEqual({})
     expect(state.isExporting).toBe(false)
     expect(state.errorMessage).toBeNull()
+    expect(state.loadPieceError).toBeNull()
+    expect(state.cameraOverlay).toEqual({
+      cropBottom: 0,
+      cropLeft: 0,
+      cropRight: 0,
+      cropTop: 0,
+      offsetX: 0,
+      offsetY: 0,
+      scale: 1,
+    })
+    expect(state.recordModeConfig).toEqual({
+      audioSourceDeviceId: null,
+      cameraDeviceId: null,
+      midiDeviceId: null,
+      useMic: false,
+      useMidiAudio: true,
+    })
   })
 })
 
@@ -104,6 +121,9 @@ describe('unloadProject', () => {
     useAppStore.getState().setTrackMuted('track-1', true)
     useAppStore.getState().setActivePanel('export')
     useAppStore.getState().setErrorMessage('problem')
+    useAppStore.getState().batchUpdate((state) => {
+      state.loadPieceError = 'piece problem'
+    })
 
     useAppStore.getState().unloadProject()
 
@@ -120,6 +140,7 @@ describe('unloadProject', () => {
     expect(state.trackMuted).toEqual({})
     expect(state.activePanel).toBeNull()
     expect(state.errorMessage).toBeNull()
+    expect(state.loadPieceError).toBeNull()
   })
 })
 
@@ -229,6 +250,90 @@ describe('export state', () => {
   })
 })
 
+describe('create camera mode', () => {
+  it('only enters camera mode when a loaded piece exists and switches to the camera tab', () => {
+    useAppStore.getState().enterCameraMode()
+    expect(getAppState().appMode).toBe('create')
+    expect(getAppState().activeSecondBarTab).toBe('pieces')
+
+    useAppStore.getState().addPiece({
+      createdAt: Date.now(),
+      filePath: 'C:/pieces/demo.mid',
+      id: 'piece-1',
+      name: 'Demo Piece',
+      type: 'midi',
+    })
+
+    useAppStore.setState({
+      currentPieceId: 'piece-1',
+      isProjectLoaded: true,
+    })
+
+    useAppStore.getState().enterCameraMode()
+    expect(getAppState().appMode).toBe('createCamera')
+    expect(getAppState().activeSecondBarTab).toBe('camera')
+  })
+})
+
+describe('create record mode', () => {
+  it('enters record mode and resets the second bar to pieces', () => {
+    useAppStore.setState({
+      activeSecondBarTab: 'camera',
+      alignStep: 'waiting-high-c',
+      appMode: 'createCamera',
+      highCPoint: { x: 20, y: 30 },
+      lowAPoint: { x: 10, y: 15 },
+    })
+
+    useAppStore.getState().enterRecordMode()
+
+    expect(getAppState().appMode).toBe('createRecord')
+    expect(getAppState().activeSecondBarTab).toBe('pieces')
+    expect(getAppState().alignStep).toBe('idle')
+    expect(getAppState().lowAPoint).toBeNull()
+    expect(getAppState().highCPoint).toBeNull()
+  })
+
+  it('updates the record mode config through setRecordModeConfig', () => {
+    useAppStore.getState().setRecordModeConfig({
+      audioSourceDeviceId: 'audio-1',
+      cameraDeviceId: 'camera-1',
+      midiDeviceId: 'midi-1',
+      useMic: true,
+    })
+
+    expect(getAppState().recordModeConfig).toEqual({
+      audioSourceDeviceId: 'audio-1',
+      cameraDeviceId: 'camera-1',
+      midiDeviceId: 'midi-1',
+      useMic: true,
+      useMidiAudio: true,
+    })
+  })
+})
+
+describe('camera overlay settings', () => {
+  it('updates the overlay transform and crop values through setCameraOverlay', () => {
+    useAppStore.getState().setCameraOverlay({
+      cropLeft: 12,
+      cropTop: 24,
+      offsetX: 100,
+      offsetY: -50,
+      scale: 1.5,
+    })
+
+    expect(getAppState().cameraOverlay).toEqual({
+      cropBottom: 0,
+      cropLeft: 12,
+      cropRight: 0,
+      cropTop: 24,
+      offsetX: 100,
+      offsetY: -50,
+      scale: 1.5,
+    })
+  })
+})
+
 describe('selector hooks', () => {
   it('avoids playback rerenders on unrelated store updates', () => {
     let renderCount = 0
@@ -266,7 +371,7 @@ describe('selector hooks', () => {
     const initialSelection = result.current
 
     act(() => {
-      useAppStore.getState().setShowBloom(false)
+      useAppStore.getState().setErrorMessage('still unrelated')
     })
 
     expect(renderCount).toBe(1)

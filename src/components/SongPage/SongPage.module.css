@@ -195,6 +195,11 @@
   cursor: pointer;
 }
 
+.startButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .bottomBar {
   margin-top: 28px;
   padding-top: 18px;
@@ -260,6 +265,12 @@
 
 .failedStatus {
   color: #d41414;
+}
+
+.midiWarning {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 @media (max-width: 1100px) {

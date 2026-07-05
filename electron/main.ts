@@ -39,6 +39,7 @@ const createWindow = () => {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
+    mainWindow?.minimize()
   })
 }
 
@@ -58,7 +59,9 @@ app.on('ready', () => {
     const dialogTarget = mainWindow ?? undefined
     const result = await dialog.showOpenDialog(dialogTarget, {
       filters: [
+        { name: 'Supported Files', extensions: ['mid', 'midi', 'mp4'] },
         { name: 'MIDI Files', extensions: ['mid', 'midi'] },
+        { name: 'MP4 Files', extensions: ['mp4'] },
       ],
       properties: ['openFile'],
     })
@@ -68,6 +71,22 @@ app.on('ready', () => {
     }
 
     return result.filePaths[0]
+  })
+
+  ipcMain.handle('dialog:openJsonFile', async () => {
+    const dialogTarget = mainWindow ?? undefined
+    const result = await dialog.showOpenDialog(dialogTarget, {
+      filters: [
+        { name: 'JSON Files', extensions: ['json'] },
+      ],
+      properties: ['openFile'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    return readFile(result.filePaths[0], 'utf8')
   })
 
   ipcMain.handle('shell:openPath', async (_, filePath: string) => {
@@ -205,6 +224,10 @@ app.on('ready', () => {
   })
 
   ipcMain.handle('window:maximize', () => {
+    if (mainWindow?.isFullScreen()) {
+      mainWindow.setFullScreen(false)
+    }
+
     if (mainWindow?.isMaximized()) {
       mainWindow.unmaximize()
     } else {

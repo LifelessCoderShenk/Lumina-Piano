@@ -116,6 +116,9 @@ describe('LearnHome', () => {
 function createElectronApiMock() {
   return {
     deleteSong: vi.fn(async () => undefined),
+    openJsonFile: vi.fn(async () => null),
+    openMidiFile: vi.fn(async () => null),
+    showSaveDialog: vi.fn(),
     dialog: {
       getDefaultExportPath: vi.fn(),
       openMidiFile: vi.fn(),

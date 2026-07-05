@@ -32,6 +32,7 @@ const createWindow = () => {
   }
   mainWindow.once("ready-to-show", () => {
     mainWindow == null ? void 0 : mainWindow.show();
+    mainWindow == null ? void 0 : mainWindow.minimize();
   });
 };
 electron.app.on("ready", () => {
@@ -48,7 +49,9 @@ electron.app.on("ready", () => {
     const dialogTarget = mainWindow ?? void 0;
     const result = await electron.dialog.showOpenDialog(dialogTarget, {
       filters: [
-        { name: "MIDI Files", extensions: ["mid", "midi"] }
+        { name: "Supported Files", extensions: ["mid", "midi", "mp4"] },
+        { name: "MIDI Files", extensions: ["mid", "midi"] },
+        { name: "MP4 Files", extensions: ["mp4"] }
       ],
       properties: ["openFile"]
     });
@@ -56,6 +59,19 @@ electron.app.on("ready", () => {
       return null;
     }
     return result.filePaths[0];
+  });
+  electron.ipcMain.handle("dialog:openJsonFile", async () => {
+    const dialogTarget = mainWindow ?? void 0;
+    const result = await electron.dialog.showOpenDialog(dialogTarget, {
+      filters: [
+        { name: "JSON Files", extensions: ["json"] }
+      ],
+      properties: ["openFile"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return promises.readFile(result.filePaths[0], "utf8");
   });
   electron.ipcMain.handle("shell:openPath", async (_, filePath) => {
     await electron.shell.openPath(filePath);
@@ -159,6 +175,9 @@ electron.app.on("ready", () => {
     mainWindow == null ? void 0 : mainWindow.minimize();
   });
   electron.ipcMain.handle("window:maximize", () => {
+    if (mainWindow == null ? void 0 : mainWindow.isFullScreen()) {
+      mainWindow.setFullScreen(false);
+    }
     if (mainWindow == null ? void 0 : mainWindow.isMaximized()) {
       mainWindow.unmaximize();
     } else {

@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as PIXI from 'pixi.js'
+import { getKeyboardLayoutMetrics } from './layoutConstants'
 
 const mockNoteRect = vi.hoisted(() => ({
   value: { h: 48, w: 24, x: 120, y: 80 },
@@ -8,11 +9,16 @@ const mockNoteRect = vi.hoisted(() => ({
 const mockStoreState = vi.hoisted(() => createMockState())
 const mockSpatialGetTotalNoteCount = vi.hoisted(() => vi.fn(() => 0))
 const mockSpatialGetNotesInRegion = vi.hoisted(() => vi.fn(() => []))
-const mockEffectsDestroy = vi.hoisted(() => vi.fn())
-const mockEffectsInit = vi.hoisted(() => vi.fn())
-const mockEffectsReset = vi.hoisted(() => vi.fn())
-const mockEffectsSeek = vi.hoisted(() => vi.fn())
-const mockEffectsUpdate = vi.hoisted(() => vi.fn())
+const mockStoreListeners = vi.hoisted(() => [] as Array<(state: ReturnType<typeof createMockState>, previousState: ReturnType<typeof createMockState>) => void>)
+const mockSubscribeToStore = vi.hoisted(() => vi.fn((listener: (state: ReturnType<typeof createMockState>, previousState: ReturnType<typeof createMockState>) => void) => {
+  mockStoreListeners.push(listener)
+  return () => {
+    const index = mockStoreListeners.indexOf(listener)
+    if (index >= 0) {
+      mockStoreListeners.splice(index, 1)
+    }
+  }
+}))
 
 vi.mock('pixi.js', () => {
   class MockContainer {
@@ -63,6 +69,7 @@ vi.mock('pixi.js', () => {
     y = 0
     destroyed = false
     parent: MockContainer | null = null
+    filters: unknown[] = []
     clear = vi.fn(() => this)
     beginFill = vi.fn(() => this)
     drawRect = vi.fn(() => this)
@@ -76,6 +83,14 @@ vi.mock('pixi.js', () => {
     destroy = vi.fn(() => {
       this.destroyed = true
     })
+  }
+
+  class MockBlurFilter {
+    strength: number
+
+    constructor(strength = 8) {
+      this.strength = strength
+    }
   }
 
   class MockTextStyle {
@@ -229,28 +244,21 @@ vi.mock('pixi.js', () => {
     Text: MockText,
     TextStyle: MockTextStyle,
     Texture: MockTexture,
+    filters: {
+      BlurFilter: MockBlurFilter,
+    },
   }
 })
 
 vi.mock('../store/store', () => ({
   getAppState: () => mockStoreState,
-  subscribeToStore: vi.fn(() => () => undefined),
+  subscribeToStore: mockSubscribeToStore,
 }))
 
 vi.mock('../camera/CameraSystem', () => ({
   cameraSystem: {
     isInitialized: vi.fn(() => true),
     setViewportSize: vi.fn(),
-  },
-}))
-
-vi.mock('../effects/EffectsLayer', () => ({
-  effectsLayer: {
-    destroy: mockEffectsDestroy,
-    init: mockEffectsInit,
-    reset: mockEffectsReset,
-    seek: mockEffectsSeek,
-    update: mockEffectsUpdate,
   },
 }))
 
@@ -283,11 +291,17 @@ describe('Renderer learn extensions', () => {
     mockSpatialGetNotesInRegion.mockReturnValue([])
     mockSpatialGetTotalNoteCount.mockReset()
     mockSpatialGetTotalNoteCount.mockReturnValue(0)
-    mockEffectsDestroy.mockReset()
-    mockEffectsInit.mockReset()
-    mockEffectsReset.mockReset()
-    mockEffectsSeek.mockReset()
-    mockEffectsUpdate.mockReset()
+    mockSubscribeToStore.mockClear()
+    mockStoreListeners.length = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(16)
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('renders finger numbers when learn mode is active, supported mode, and height is greater than 20px', () => {
@@ -379,26 +393,179 @@ describe('Renderer learn extensions', () => {
     expect((renderer as any).layers.noteByNote.visible).toBe(true)
   })
 
-  it('renders the current chord at full opacity and the next two previews at 60% and 30%', () => {
-    mockStoreState.projectData = createProjectData()
+  it('renders the current chord with as many previews as fit to the top of the canvas', () => {
+    mockStoreState.projectData = createManyChordProjectData()
     mockStoreState.learnV3.isActive = true
     mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
     mockStoreState.learnV3.fingerNumbers = {
       'note-1': 1,
-      'note-2': 2,
-      'note-3': 3,
     }
 
     const renderer = createTestRenderer()
     ;(renderer as any).updateNoteByNoteLayer()
 
     const graphics = getGraphicChildren((renderer as any).layers.noteByNote)
-    expect(graphics.map((graphic) => graphic.alpha)).toEqual([1, 0.6, 0.3])
+    expect(graphics[0].alpha).toBe(1)
+    expect((renderer as any).noteByNotePreviewEntries.length).toBeGreaterThanOrEqual(3)
+
+    const currentEntry = (renderer as any).noteByNoteEntries[0]
+    const previewEntries = (renderer as any).noteByNotePreviewEntries
+    const { keyboardY } = getKeyboardLayoutMetrics((renderer as any).app.screen.height)
+    expect(currentEntry.baseY + 60).toBe(keyboardY)
+    expect(previewEntries[0].graphic.alpha).toBeCloseTo(0.69)
+    expect(previewEntries[1].graphic.alpha).toBeCloseTo(0.63)
+    expect(previewEntries[2].graphic.alpha).toBeCloseTo(0.57)
+    expect(previewEntries.at(-1)?.graphic.alpha ?? 0).toBeGreaterThanOrEqual(0.08)
+    expect(previewEntries[0].baseY).toBeLessThan(currentEntry.baseY)
+    expect(previewEntries[1].baseY).toBeLessThan(previewEntries[0].baseY)
+    expect(previewEntries[2].baseY).toBeLessThan(previewEntries[1].baseY)
+    expect(previewEntries.every((entry: { baseY: number }) => entry.baseY >= 0)).toBe(true)
 
     const labels = getTextChildren((renderer as any).layers.noteByNote).map((label) => label.text)
-    expect(labels).toContain('C4 1')
-    expect(labels).toContain('E4 2')
-    expect(labels).toContain('G4 3')
+    expect(labels).toEqual(['C4', '1'])
+  })
+
+  it('shows only the remaining previews when near the end of the song', () => {
+    mockStoreState.projectData = createFourChordProjectData()
+    mockStoreState.learnV3.currentChordIndex = 2
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const renderer = createTestRenderer()
+    ;(renderer as any).updateNoteByNoteLayer()
+
+    const graphics = getGraphicChildren((renderer as any).layers.noteByNote)
+    expect(graphics.map((graphic) => graphic.alpha)).toEqual([1, 0.69])
+    expect((renderer as any).noteByNotePreviewEntries).toHaveLength(1)
+  })
+
+  it('scales the initial rect height from note duration and clamps very short notes to 60px', () => {
+    mockStoreState.projectData = createLongDurationProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const renderer = createTestRenderer()
+    ;(renderer as any).updateNoteByNoteLayer()
+
+    const longEntry = (renderer as any).noteByNoteEntries[0]
+    expect(longEntry.baseHeight).toBe(150)
+
+    mockStoreState.projectData = createShortDurationProjectData()
+    ;(renderer as any).updateNoteByNoteLayer()
+
+    const shortEntry = (renderer as any).noteByNoteEntries[0]
+    expect(shortEntry.baseHeight).toBe(60)
+  })
+
+  it('applies the hand filter when building the note-by-note chord groups', () => {
+    mockStoreState.projectData = createMixedHandProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.hand = 'left'
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const renderer = createTestRenderer()
+    ;(renderer as any).updateNoteByNoteLayer()
+
+    const graphics = getGraphicChildren((renderer as any).layers.noteByNote)
+    expect(graphics).toHaveLength(2)
+
+    const labels = getTextChildren((renderer as any).layers.noteByNote).map((label) => label.text)
+    expect(labels).toEqual(['C3'])
+  })
+
+  it('renders nothing when the chord list is empty', () => {
+    mockStoreState.projectData = createRightHandOnlyProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.hand = 'left'
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const renderer = createTestRenderer()
+    expect(() => {
+      ;(renderer as any).updateNoteByNoteLayer()
+    }).not.toThrow()
+
+    const graphics = getGraphicChildren((renderer as any).layers.noteByNote)
+    const labels = getTextChildren((renderer as any).layers.noteByNote)
+    expect(graphics).toHaveLength(0)
+    expect(labels).toHaveLength(0)
+  })
+
+  it('empties the falling note pool in noteByNote mode', () => {
+    mockStoreState.projectData = createProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+    mockSpatialGetNotesInRegion.mockReturnValue([createIndexedNote('note-1', 60, 0)])
+    mockSpatialGetTotalNoteCount.mockReturnValue(1)
+
+    const renderer = createTestRenderer()
+    ;(renderer as any).renderNote(
+      createIndexedNote('note-1', 60, 0),
+      new Map(),
+      0,
+      0,
+      'solid',
+      new Set(),
+      null,
+      mockStoreState,
+    )
+
+    expect(getGraphicChildren((renderer as any).layers.notes)).toHaveLength(1)
+
+    const visibleNotes = (renderer as any).updateNotes(0)
+    expect(visibleNotes).toEqual([])
+    expect(getGraphicChildren((renderer as any).layers.notes)).toHaveLength(0)
+  })
+
+  it('startNoteDrain animates the matching chord rect downward over its duration', () => {
+    mockStoreState.projectData = createProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const performanceSpy = vi.spyOn(performance, 'now')
+    performanceSpy.mockReturnValue(0)
+
+    const renderer = createTestRenderer()
+    const ticker = (renderer as any).app.ticker as MockTicker
+    ;(renderer as any).updateNoteByNoteLayer()
+
+    const entry = (renderer as any).noteByNoteEntries[0]
+    const initialLabelY = entry.noteLabel.y
+
+    renderer.startNoteDrain(60, 250, 0)
+    performanceSpy.mockReturnValue(125)
+    ticker.advance(16)
+
+    expect(entry.noteLabel.y).toBeGreaterThan(initialLabelY)
+    expect((renderer as any).noteDrainAnimations.size).toBe(1)
+    performanceSpy.mockRestore()
+  })
+
+  it('cancelNoteDrain restores the rect to its full height', () => {
+    mockStoreState.projectData = createProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const performanceSpy = vi.spyOn(performance, 'now')
+    performanceSpy.mockReturnValue(0)
+
+    const renderer = createTestRenderer()
+    const ticker = (renderer as any).app.ticker as MockTicker
+    ;(renderer as any).updateNoteByNoteLayer()
+
+    const entry = (renderer as any).noteByNoteEntries[0]
+    const fullHeightLabelY = entry.baseY + (entry.baseHeight / 2)
+
+    renderer.startNoteDrain(60, 250, 0)
+    performanceSpy.mockReturnValue(125)
+    ticker.advance(16)
+
+    expect(entry.noteLabel.y).toBeGreaterThan(fullHeightLabelY)
+
+    renderer.cancelNoteDrain(60)
+
+    expect(entry.noteLabel.y).toBe(fullHeightLabelY)
+    expect((renderer as any).noteDrainAnimations.size).toBe(0)
+    performanceSpy.mockRestore()
   })
 
   it('triggerChordCorrect animates the current chord with fade and downward translation', () => {
@@ -409,17 +576,48 @@ describe('Renderer learn extensions', () => {
     const renderer = createTestRenderer()
     const ticker = (renderer as any).app.ticker as MockTicker
     ;(renderer as any).updateNoteByNoteLayer()
+    const rebuildSpy = vi.spyOn(renderer as any, 'rebuildNoteByNoteLayer')
+    rebuildSpy.mockClear()
 
     const entry = (renderer as any).noteByNoteEntries[0]
     renderer.triggerChordCorrect(['note-1'])
 
     ticker.advance(75)
     expect(entry.graphic.alpha).toBeLessThan(1)
-    expect(entry.label.y).toBeGreaterThan(entry.baseY)
+    expect(entry.noteLabel.y).toBeGreaterThan(entry.baseY + (entry.baseHeight / 2))
 
     ticker.advance(75)
-    expect(entry.graphic.alpha).toBe(0)
-    expect(entry.label.y).toBe(entry.baseY + 20)
+    expect((renderer as any).chordCorrectAnimation).toBeNull()
+    expect(rebuildSpy).not.toHaveBeenCalled()
+  })
+
+  it('triggerChordCorrect shifts preview chords downward and rebuilds after the shift completes', () => {
+    mockStoreState.projectData = createFourChordProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const renderer = createTestRenderer()
+    const ticker = (renderer as any).app.ticker as MockTicker
+    ;(renderer as any).updateNoteByNoteLayer()
+    const rebuildSpy = vi.spyOn(renderer as any, 'rebuildNoteByNoteLayer')
+    rebuildSpy.mockClear()
+
+    const previewEntry = (renderer as any).noteByNotePreviewEntries[0]
+    renderer.triggerChordCorrect(['note-1'])
+    ;(renderer as any).pendingNoteByNoteRebuild = true
+
+    ticker.advance(150)
+    expect((renderer as any).chordCorrectAnimation).toBeNull()
+    expect((renderer as any).previewShiftAnimation).not.toBeNull()
+    expect(previewEntry.graphic.y).toBe(0)
+
+    ticker.advance(60)
+    expect(previewEntry.graphic.y).toBeGreaterThan(0)
+    expect(rebuildSpy).not.toHaveBeenCalled()
+
+    ticker.advance(60)
+    expect((renderer as any).previewShiftAnimation).toBeNull()
+    expect(rebuildSpy).toHaveBeenCalled()
   })
 
   it('triggerKeyFlash flashes the key red and then restores the original color', () => {
@@ -453,10 +651,9 @@ describe('Renderer learn extensions', () => {
     await renderer.init(canvas)
     expect((renderer as any).isInitialized).toBe(true)
 
-    renderer.destroy()
+    await renderer.destroy()
 
     expect((renderer as any).isInitialized).toBe(false)
-    expect(mockEffectsDestroy).toHaveBeenCalledTimes(1)
   })
 
   it('init() after destroy() succeeds without crashing', async () => {
@@ -464,11 +661,34 @@ describe('Renderer learn extensions', () => {
     const canvas = document.createElement('canvas')
 
     await renderer.init(canvas)
-    renderer.destroy()
+    await renderer.destroy()
 
     await expect(renderer.init(canvas)).resolves.toBeUndefined()
     expect((renderer as any).isInitialized).toBe(true)
-    expect(mockEffectsReset).toHaveBeenCalledTimes(2)
+  })
+
+  it('currentChordIndex change triggers NoteByNoteLayer rebuild', async () => {
+    mockStoreState.projectData = createProjectData()
+    mockStoreState.learnV3.isActive = true
+    mockStoreState.learnV3.sessionConfig.mode = 'noteByNote'
+
+    const renderer = new Renderer()
+    const canvas = document.createElement('canvas')
+
+    await renderer.init(canvas)
+    const rebuildSpy = vi.spyOn(renderer as any, 'rebuildNoteByNoteLayer')
+    rebuildSpy.mockClear()
+
+    const previousState = structuredClone(mockStoreState)
+    mockStoreState.learnV3.currentChordIndex = 1
+
+    for (const listener of mockStoreListeners) {
+      listener(mockStoreState as never, previousState as never)
+    }
+
+    expect(rebuildSpy).toHaveBeenCalled()
+
+    await renderer.destroy()
   })
 })
 
@@ -490,7 +710,6 @@ function createTestRenderer() {
     background: new PIXI.Container(),
     hitLine: new PIXI.Container(),
     keyboard: new PIXI.Container(),
-    keyboardGlow: new PIXI.Container(),
     laneLines: new PIXI.Container(),
     noteByNote: new PIXI.Container(),
     notes: new PIXI.Container(),
@@ -604,6 +823,202 @@ function createProjectData() {
   }
 }
 
+function createFourChordProjectData() {
+  return {
+    tempoMap: [{ bpm: 120, microsecondsPerBeat: 500000, tick: 0 }],
+    ticksPerQuarter: 480,
+    timeSignatures: [{ denominator: 4, numerator: 4, tick: 0 }],
+    totalTicks: 1200,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes: [
+          {
+            endTick: 120,
+            id: 'note-1',
+            pitch: 60,
+            startTick: 0,
+            velocity: 100,
+            visualEndTick: 120,
+          },
+          {
+            endTick: 360,
+            id: 'note-2',
+            pitch: 64,
+            startTick: 240,
+            velocity: 100,
+            visualEndTick: 360,
+          },
+          {
+            endTick: 600,
+            id: 'note-3',
+            pitch: 67,
+            startTick: 480,
+            velocity: 100,
+            visualEndTick: 600,
+          },
+          {
+            endTick: 840,
+            id: 'note-4',
+            pitch: 69,
+            startTick: 720,
+            velocity: 100,
+            visualEndTick: 840,
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function createManyChordProjectData() {
+  const notes = Array.from({ length: 16 }, (_, index) => ({
+    endTick: (index * 240) + 120,
+    id: `note-${index + 1}`,
+    pitch: 60 + (index % 12),
+    startTick: index * 240,
+    velocity: 100,
+    visualEndTick: (index * 240) + 120,
+  }))
+
+  return {
+    tempoMap: [{ bpm: 120, microsecondsPerBeat: 500000, tick: 0 }],
+    ticksPerQuarter: 480,
+    timeSignatures: [{ denominator: 4, numerator: 4, tick: 0 }],
+    totalTicks: 4000,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes,
+      },
+    ],
+  }
+}
+
+function createMixedHandProjectData() {
+  return {
+    tempoMap: [{ bpm: 120, microsecondsPerBeat: 500000, tick: 0 }],
+    ticksPerQuarter: 480,
+    timeSignatures: [{ denominator: 4, numerator: 4, tick: 0 }],
+    totalTicks: 720,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes: [
+          {
+            endTick: 120,
+            id: 'left-note-1',
+            pitch: 48,
+            startTick: 0,
+            velocity: 100,
+            visualEndTick: 120,
+          },
+          {
+            endTick: 120,
+            id: 'right-note-1',
+            pitch: 60,
+            startTick: 0,
+            velocity: 100,
+            visualEndTick: 120,
+          },
+          {
+            endTick: 360,
+            id: 'left-note-2',
+            pitch: 50,
+            startTick: 240,
+            velocity: 100,
+            visualEndTick: 360,
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function createRightHandOnlyProjectData() {
+  return {
+    tempoMap: [{ bpm: 120, microsecondsPerBeat: 500000, tick: 0 }],
+    ticksPerQuarter: 480,
+    timeSignatures: [{ denominator: 4, numerator: 4, tick: 0 }],
+    totalTicks: 480,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes: [
+          {
+            endTick: 120,
+            id: 'right-note-1',
+            pitch: 60,
+            startTick: 0,
+            velocity: 100,
+            visualEndTick: 120,
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function createLongDurationProjectData() {
+  return {
+    tempoMap: [{ bpm: 120, microsecondsPerBeat: 500000, tick: 0 }],
+    ticksPerQuarter: 480,
+    timeSignatures: [{ denominator: 4, numerator: 4, tick: 0 }],
+    totalTicks: 1440,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes: [
+          {
+            endTick: 1200,
+            id: 'long-note-1',
+            pitch: 60,
+            startTick: 0,
+            velocity: 100,
+            visualEndTick: 1200,
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function createShortDurationProjectData() {
+  return {
+    tempoMap: [{ bpm: 120, microsecondsPerBeat: 500000, tick: 0 }],
+    ticksPerQuarter: 480,
+    timeSignatures: [{ denominator: 4, numerator: 4, tick: 0 }],
+    totalTicks: 40,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes: [
+          {
+            endTick: 10,
+            id: 'short-note-1',
+            pitch: 60,
+            startTick: 0,
+            velocity: 100,
+            visualEndTick: 10,
+          },
+        ],
+      },
+    ],
+  }
+}
+
 function resetMockState() {
   Object.assign(mockStoreState, createMockState())
   mockStoreState.learnV3 = {
@@ -613,22 +1028,15 @@ function resetMockState() {
     sessionConfig: { ...createMockState().learnV3.sessionConfig },
     stats: { ...createMockState().learnV3.stats },
   }
-  mockStoreState.effectsEnabled = { ...createMockState().effectsEnabled }
+  mockStoreState.learnVisuals = { ...createMockState().learnVisuals }
   mockStoreState.selectedNoteIds = new Set()
 }
 
 function createMockState() {
   return {
     backgroundColor: '#000000',
-    bloomEnabled: true,
-    bloomRadius: 2,
-    bloomStrength: 20,
     colorMode: 'split',
     currentTick: 0,
-    effectsEnabled: {
-      innerGlow: false,
-      layeredGlow: false,
-    },
     gradientBottomColorLeft: '#77a3ca',
     gradientBottomColorLeftBlack: '#4b75af',
     gradientBottomColorRight: '#9ee65a',
@@ -637,10 +1045,17 @@ function createMockState() {
     hoveredNoteId: null,
     isPlaying: false,
     isProjectLoaded: true,
-    keyGlowEnabled: true,
-    keyGlowIntensity: 60,
     laneOpacity: 40,
     leftHandColor: '#77a3ca',
+    learnVisuals: {
+      fingerNumbersEnabled: true,
+      glowEnabled: false,
+      leftHandColor: '#4ade80',
+      noteColor: 'perHand',
+      noteLabelsEnabled: true,
+      noteOpacity: 1,
+      rightHandColor: '#60a5fa',
+    },
     learnV3: {
       currentChordIndex: 0,
       fingerNumbers: {} as Record<string, number>,
@@ -675,10 +1090,6 @@ function createMockState() {
     noteStyle: 'solid',
     panX: 0,
     panY: 0,
-    particleCount: 10,
-    particleSize: 50,
-    particleTrails: true,
-    particlesEnabled: true,
     pitchClassColors: {},
     precomputedTempoMap: {
       segments: [
@@ -696,9 +1107,6 @@ function createMockState() {
     renderScale: 1,
     rightHandColor: '#9ee65a',
     selectedNoteIds: new Set<string>(),
-    showBloom: true,
-    showEffects: true,
-    showParticles: true,
     splitPitch: 60,
     trackColors: {} as Record<string, string>,
     trackMuted: {} as Record<string, boolean>,

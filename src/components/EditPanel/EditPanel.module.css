@@ -1,0 +1,41 @@
+.editPanel {
+  flex: 0 0 25%;
+  width: 25%;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 0;
+  pointer-events: auto;
+  background: var(--color-bg);
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  z-index: 0;
+  pointer-events: auto;
+  background: var(--color-bg);
+}
+
+.divider {
+  width: 1px;
+  background: rgba(46, 101, 162, 0.45);
+  flex: 0 0 1px;
+}
+
+.placeholderPanel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cfcfcf;
+  font-size: 13px;
+  padding: 16px;
+}

@@ -1,4 +1,4 @@
-import { getAppState, subscribeToStore } from '../store/store'
+import { getAppState, subscribeToStore, useAppStore } from '../store/store'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 import { secondsToTick } from '../tempo/tempoMap'
 import { PlaybackEngineError } from './errors'
@@ -112,6 +112,25 @@ export class PlaybackEngine {
     this.emit('onPlay')
   }
 
+  playWithPreRoll(preRollSeconds: number): void {
+    this.assertInitialized()
+
+    if (!Number.isFinite(preRollSeconds) || preRollSeconds < 0) {
+      throw new PlaybackEngineError('Pre-roll seconds must be a non-negative finite number.', 'INVALID_TICK', {
+        preRollSeconds,
+      })
+    }
+
+    if (preRollSeconds === 0) {
+      this.play()
+      return
+    }
+
+    const preRollTicks = secondsToTick(preRollSeconds, this.tempoMap!)
+    this.seekInternal(-preRollTicks, true)
+    this.play()
+  }
+
   pause(): void {
     const state = getAppState()
     if (!state.isPlaying) {
@@ -125,13 +144,17 @@ export class PlaybackEngine {
   }
 
   seek(tick: number): void {
+    this.seekInternal(tick, false)
+  }
+
+  private seekInternal(tick: number, allowNegative: boolean): void {
     this.assertValidTick(tick)
 
     const state = getAppState()
     const totalTicks = state.projectData?.totalTicks ?? Number.POSITIVE_INFINITY
-    const clampedTick = clampTick(tick, totalTicks)
+    const clampedTick = clampTick(tick, totalTicks, allowNegative)
 
-    state.setCurrentTick(clampedTick)
+    this.setCurrentTick(clampedTick)
 
     if (state.isPlaying) {
       this.playStartRealTime = performance.now()
@@ -184,13 +207,13 @@ export class PlaybackEngine {
     }
 
     if (newTick >= totalTicks) {
-      state.setCurrentTick(totalTicks)
+      this.setCurrentTick(totalTicks)
       this.pause()
       this.emit('onEnded')
       return
     }
 
-    state.setCurrentTick(newTick)
+    this.setCurrentTick(newTick)
     this.emit('onTick', newTick)
   }
 
@@ -222,10 +245,14 @@ export class PlaybackEngine {
       })
     }
   }
+
+  private setCurrentTick(tick: number): void {
+    useAppStore.setState({ currentTick: tick })
+  }
 }
 
-function clampTick(tick: number, maxTick: number): number {
-  const normalizedTick = Math.max(0, Math.floor(tick))
+function clampTick(tick: number, maxTick: number, allowNegative = false): number {
+  const normalizedTick = allowNegative ? Math.floor(tick) : Math.max(0, Math.floor(tick))
   return Math.min(normalizedTick, maxTick)
 }
 

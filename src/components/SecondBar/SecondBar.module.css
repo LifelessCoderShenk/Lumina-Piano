@@ -1,0 +1,59 @@
+.secondBar {
+  background: var(--color-bg);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.tabRow {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 10px;
+}
+
+.tabButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tabButton:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.activeTab {
+  border-color: var(--color-icon);
+}
+
+.tabIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  color: var(--color-icon);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.label {
+  color: var(--color-text-body);
+}
+
+.activeLabel {
+  color: var(--color-text-header);
+}
+
+.colorSwatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff3b30 0%, #ffcc00 25%, #34c759 50%, #0a84ff 75%, #af52de 100%);
+}

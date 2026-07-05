@@ -1,11 +1,10 @@
 import * as PIXI from 'pixi.js'
 
 import { cameraSystem } from '../camera/CameraSystem'
-import { effectsLayer } from '../effects/EffectsLayer'
 import type { Track } from '../midi/types'
 import { type PlaybackEventMap, playbackEngine } from '../playback/PlaybackEngine'
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
-import { getAppState, subscribeToStore } from '../store/store'
+import { getAppState, subscribeToStore, type CameraOverlaySettings } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
 import { KeyboardPool, type KeyboardGraphic } from './KeyboardPool'
 import { GradientTextureCache } from './GradientTextureCache'
@@ -46,6 +45,23 @@ import {
 } from './pianoMath'
 
 const LANE_LINE_COLOR = 0xffffff
+const CREATE_MODE_BACKGROUND_COLOR = 0x000000
+const CREATE_MODE_LANE_LINE_COLOR = 0x444444
+const CREATE_MODE_LANE_LINE_ALPHA = 0.4
+const CREATE_MODE_NOTE_COLOR = 0x2e65a2
+const CREATE_MODE_BOUNDARY_OUTER_AURA_COLOR = 0x1a3a6e
+const CREATE_MODE_BOUNDARY_MID_GLOW_COLOR = 0x4a9eff
+const CREATE_MODE_BOUNDARY_CORE_COLOR = 0x7ec8ff
+const CREATE_MODE_BOUNDARY_OUTER_AURA_THICKNESS = 16
+const CREATE_MODE_BOUNDARY_MID_GLOW_THICKNESS = 6
+const CREATE_MODE_BOUNDARY_CORE_THICKNESS = 2
+const CREATE_MODE_BOUNDARY_OUTER_AURA_ALPHA = 0.15
+const CREATE_MODE_BOUNDARY_MID_GLOW_ALPHA = 0.35
+const CREATE_MODE_BOUNDARY_CORE_ALPHA = 1
+const CREATE_MODE_BOUNDARY_WAVE_LENGTH = 300
+const CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE = 1.5
+const CREATE_MODE_BOUNDARY_WAVE_TIME_STEP = 0.02
+const CREATE_MODE_BOUNDARY_SEGMENT_WIDTH = 12
 const HIT_LINE_COLOR = 0x000000
 const HIT_LINE_ALPHA = 0.6
 const BLACK_KEY_HEIGHT_RATIO = 0.62
@@ -66,11 +82,12 @@ const BLACK_KEY_HIGHLIGHT_ALPHA = 0.6
 const BLACK_KEY_NOTE_INSET = 2
 const BLACK_KEY_VERTICAL_INSET = 3
 const BLACK_KEY_NOTE_ALPHA = 0.85
+const NOTE_BY_NOTE_PREVIEW_GAP_PX = 16
+const NOTE_BY_NOTE_PREVIEW_SHIFT_DURATION_MS = 120
 export interface RenderLayers {
   background: PIXI.Container
   laneLines: PIXI.Container
   keyboard: PIXI.Container
-  keyboardGlow: PIXI.Container
   noteByNote: PIXI.Container
   notes: PIXI.Container
   hitLine: PIXI.Container
@@ -79,10 +96,37 @@ export interface RenderLayers {
 
 interface NoteByNoteRenderEntry {
   alpha: number
+  baseHeight: number
   baseY: number
+  fingerLabel: PIXI.Text | null
+  fillColor: number
   graphic: PIXI.Graphics
-  label: PIXI.Text
+  glowEnabled: boolean
+  fingerNumbersEnabled: boolean
   noteId: string
+  noteLabel: PIXI.Text
+  noteLabelsEnabled: boolean
+  pitch: number
+  width: number
+  x: number
+}
+
+interface NoteByNotePreviewEntry {
+  alpha: number
+  baseHeight: number
+  baseY: number
+  fillColor: number
+  graphic: PIXI.Graphics
+  glowEnabled: boolean
+  pitch: number
+  width: number
+  x: number
+}
+
+interface NoteByNotePreviewLevel {
+  bottomY: number
+  entries: NoteByNotePreviewEntry[]
+  levelHeight: number
 }
 
 export class Renderer {
@@ -115,13 +159,13 @@ export class Renderer {
   })
   private noteByNoteLabelPool = new TextPool({
     compactFontSize: 10,
-    compactFill: 0xffffff,
+    compactFill: 0x000000,
     dropShadow: false,
-    fill: 0xffffff,
+    fill: 0x000000,
     fontFamily: 'Arial, sans-serif',
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: 'bold',
-    prewarmCount: 48,
+    prewarmCount: 96,
     resolution: getLabelResolution(),
   })
   private keyLabelPool = new TextPool({
@@ -134,27 +178,58 @@ export class Renderer {
     prewarmCount: PIANO_WHITE_KEY_COUNT,
     resolution: getLabelResolution(),
   })
-  private isInitialized = false
-  private unsubscribeStore: (() => void) | null = null
+  public isInitialized = false
+  private subscriptions: Array<() => void> = []
+  private destroyPromise: Promise<void> | null = null
+  private initPromise: Promise<void> | null = null
+  private lifecyclePromise: Promise<void> = Promise.resolve()
   private backgroundGraphic: PIXI.Graphics | null = null
   private laneLineGraphic: PIXI.Graphics | null = null
   private hitLineGraphic: PIXI.Graphics | null = null
   private keyboardBackingGraphic: PIXI.Graphics | null = null
+  private overlayContainer: PIXI.Container | null = null
+  private boundaryWaveTime = 0
+  private createModeTickerActive = false
   private overlayDrawCallback: ((currentTick: number) => void) | null = null
   private keyLabelsDirty = true
   private isRunning = false
   private noteByNoteEntries: NoteByNoteRenderEntry[] = []
+  private noteByNotePreviewEntries: NoteByNotePreviewEntry[] = []
+  private noteByNotePreviewLevels: NoteByNotePreviewLevel[] = []
   private chordCorrectAnimation:
     | {
       durationMs: number
       elapsedMs: number
-      entries: NoteByNoteRenderEntry[]
+      entries: Array<{
+        entry: NoteByNoteRenderEntry
+        fingerLabelY: number | null
+        graphicY: number
+        noteLabelY: number
+      }>
     }
     | null = null
+  private previewShiftAnimation:
+    | {
+      durationMs: number
+      elapsedMs: number
+      entries: Array<{
+        entry: NoteByNotePreviewEntry
+        startOffsetY: number
+        targetOffsetY: number
+      }>
+    }
+    | null = null
+  private pendingNoteByNoteRebuild = false
+  private previewShiftEligible = false
+  private noteDrainAnimations = new Map<number, { durationMs: number; heldSince: number }>()
   private keyFlashAnimations = new Map<number, { color: number; remainingMs: number }>()
   private learnTickerActive = false
 
   private readonly handleTick: PlaybackEventMap['onTick'] = (currentTick) => {
+    if (!this.isInitialized) {
+      return
+    }
+
     if (getAppState().isPlaying && !this.isRunning) {
       this.startRenderLoop()
       return
@@ -164,15 +239,54 @@ export class Renderer {
   }
 
   private readonly handleSeek: PlaybackEventMap['onSeek'] = (currentTick) => {
-    effectsLayer.seek(currentTick)
+    if (!this.isInitialized) {
+      return
+    }
+
     this.renderFrame(currentTick)
   }
 
   private readonly handleEnded: PlaybackEventMap['onEnded'] = () => {
+    if (!this.isInitialized) {
+      return
+    }
+
     this.renderFrame(getAppState().currentTick)
   }
 
-  async init(canvas: HTMLCanvasElement): Promise<void> {
+  init(canvas: HTMLCanvasElement): Promise<void> {
+    if (this.initPromise != null) {
+      return this.initPromise
+    }
+
+    const operation = this.lifecyclePromise.then(() => this.initInternal(canvas))
+
+    this.initPromise = operation
+      .finally(() => {
+        this.initPromise = null
+      })
+    this.lifecyclePromise = this.initPromise.catch(() => undefined)
+
+    return this.initPromise
+  }
+
+  destroy(): Promise<void> {
+    if (this.destroyPromise != null) {
+      return this.destroyPromise
+    }
+
+    const operation = this.lifecyclePromise.then(() => this.destroyInternal())
+
+    this.destroyPromise = operation
+      .finally(() => {
+        this.destroyPromise = null
+      })
+    this.lifecyclePromise = this.destroyPromise.catch(() => undefined)
+
+    return this.destroyPromise
+  }
+
+  private async initInternal(canvas: HTMLCanvasElement): Promise<void> {
     if (!(canvas instanceof HTMLCanvasElement)) {
       throw new RendererError('Renderer requires a valid canvas element.', 'CANVAS_ERROR', canvas)
     }
@@ -189,7 +303,7 @@ export class Renderer {
         antialias: false,
         autoDensity: true,
         autoStart: false,
-        backgroundColor: 0x0a0a0f,
+        backgroundColor: CREATE_MODE_BACKGROUND_COLOR,
         height: state.viewportHeight || REFERENCE_HEIGHT,
         resolution: getCanvasResolution(),
         sharedTicker: false,
@@ -201,14 +315,13 @@ export class Renderer {
     }
 
     this.layers = this.createLayers()
-    effectsLayer.init(this.layers)
-    effectsLayer.reset()
+    this.overlayContainer = new PIXI.Container()
 
-    this.app.stage.addChild(
-      this.layers.background,
+    this.app.stage.addChild(this.layers.background, this.overlayContainer)
+
+    this.overlayContainer.addChild(
       this.layers.laneLines,
       this.layers.keyboard,
-      this.layers.keyboardGlow,
       this.layers.noteByNote,
       this.layers.notes,
       this.layers.hitLine,
@@ -228,6 +341,7 @@ export class Renderer {
     this.drawLaneLines()
     this.drawHitLine()
     this.initKeyboard()
+    this.applyCameraOverlayForMode(state.appMode, state.cameraOverlay)
 
     if (state.projectData != null) {
       const projectNoteCount = getProjectNoteCount(state.projectData.tracks)
@@ -235,7 +349,7 @@ export class Renderer {
       this.gradientSpritePool.prewarm(projectNoteCount)
     }
 
-    this.unsubscribeStore = subscribeToStore((nextState, previousState) => {
+    this.addSubscription(subscribeToStore((nextState, previousState) => {
       if (
         nextState.viewportWidth !== previousState.viewportWidth ||
         nextState.viewportHeight !== previousState.viewportHeight ||
@@ -307,9 +421,10 @@ export class Renderer {
         (nextState.learnV3.isActive || previousState.learnV3.isActive) &&
         (
           nextState.learnV3.isActive !== previousState.learnV3.isActive ||
-          nextState.learnV3.currentChordIndex !== previousState.learnV3.currentChordIndex ||
+          nextState.learnVisuals !== previousState.learnVisuals ||
           nextState.learnV3.fingerNumbers !== previousState.learnV3.fingerNumbers ||
-          nextState.learnV3.sessionConfig.mode !== previousState.learnV3.sessionConfig.mode
+          nextState.learnV3.sessionConfig.mode !== previousState.learnV3.sessionConfig.mode ||
+          nextState.learnV3.sessionConfig.hand !== previousState.learnV3.sessionConfig.hand
         )
       ) {
         if (!nextState.learnV3.isActive) {
@@ -318,7 +433,10 @@ export class Renderer {
           this.stopLearnTicker()
         }
 
-        this.renderFrame(nextState.currentTick)
+        this.syncCreateModeTicker()
+
+        this.rebuildNoteByNoteLayer()
+        this.app?.render()
       }
 
       if (nextState.isPlaying !== previousState.isPlaying) {
@@ -330,13 +448,52 @@ export class Renderer {
           this.stopRenderLoop()
         }
       }
-    })
+    }))
+
+    this.addSubscription(subscribeToStore((nextState, previousState) => {
+      if (nextState.cameraOverlay === previousState.cameraOverlay) {
+        return
+      }
+
+      this.applyCameraOverlayForMode(nextState.appMode, nextState.cameraOverlay)
+      this.app?.render()
+    }))
+
+    this.addSubscription(subscribeToStore((nextState, previousState) => {
+      if (nextState.appMode === previousState.appMode) {
+        return
+      }
+
+      this.applyCameraOverlayForMode(nextState.appMode, nextState.cameraOverlay)
+      this.app?.render()
+    }))
+
+    this.addSubscription(subscribeToStore((nextState, previousState) => {
+      if (nextState.learnV3.currentChordIndex === previousState.learnV3.currentChordIndex) {
+        return
+      }
+
+      if (this.chordCorrectAnimation != null || this.previewShiftAnimation != null) {
+        this.pendingNoteByNoteRebuild = true
+        return
+      }
+
+      if (this.previewShiftEligible && this.startPreviewShiftAnimation()) {
+        this.app?.render()
+        return
+      }
+
+      this.previewShiftEligible = false
+      this.rebuildNoteByNoteLayer()
+      this.app?.render()
+    }))
 
     playbackEngine.on('onTick', this.handleTick)
     playbackEngine.on('onSeek', this.handleSeek)
     playbackEngine.on('onEnded', this.handleEnded)
 
     this.isInitialized = true
+    this.syncCreateModeTicker()
 
     if (state.isPlaying) {
       this.startRenderLoop()
@@ -346,7 +503,7 @@ export class Renderer {
     this.renderFrame(state.currentTick)
   }
 
-  destroy(): void {
+  private async destroyInternal(): Promise<void> {
     const app = this.app
     this.isInitialized = false
     this.stopRenderLoop()
@@ -355,10 +512,7 @@ export class Renderer {
     playbackEngine.off('onSeek', this.handleSeek)
     playbackEngine.off('onEnded', this.handleEnded)
 
-    this.unsubscribeStore?.()
-    this.unsubscribeStore = null
-
-    effectsLayer.destroy()
+    this.clearSubscriptions()
 
     app?.stage.removeChildren()
 
@@ -378,9 +532,16 @@ export class Renderer {
     this.keyLabelPool.releaseAll()
     this.keyLabelPool.destroy()
     this.keyboardPool.destroy()
+    this.stopCreateModeTicker()
     this.stopLearnTicker()
     this.noteByNoteEntries = []
+    this.noteByNotePreviewEntries = []
+    this.noteByNotePreviewLevels = []
     this.chordCorrectAnimation = null
+    this.previewShiftAnimation = null
+    this.pendingNoteByNoteRebuild = false
+    this.previewShiftEligible = false
+    this.noteDrainAnimations.clear()
     this.keyFlashAnimations.clear()
     this.overlayDrawCallback = null
     this.keyLabelsDirty = true
@@ -389,10 +550,13 @@ export class Renderer {
     this.laneLineGraphic = null
     this.hitLineGraphic = null
     this.keyboardBackingGraphic = null
+    this.overlayContainer = null
+    this.boundaryWaveTime = 0
 
     app?.destroy(true, { baseTexture: true, children: true, texture: true })
     this.app = null
     this.layers = null
+    await waitForRendererCleanupFrame()
   }
 
   isReady(): boolean {
@@ -401,6 +565,34 @@ export class Renderer {
 
   getOverlayLayer(): PIXI.Container {
     return this.requireLayers().overlay
+  }
+
+  getKeyX(pitch: number): number {
+    this.assertInitialized()
+
+    const app = this.requireApp()
+    if (isBlackKey(pitch)) {
+      return pitchToKeyX(pitch, app.screen.width) + (getBlackKeyWidth(app.screen.width) / 2)
+    }
+
+    const { width, x } = getWhiteKeyBounds(pitch, app.screen.width)
+    return x + (width / 2)
+  }
+
+  getKeyboardY(): number {
+    this.assertInitialized()
+
+    return getKeyboardLayoutMetrics(this.requireApp().screen.height).keyboardY
+  }
+
+  setKeyboardOpacity(opacity: number): void {
+    const keyboardLayer = this.layers?.keyboard ?? this.keyboardBackingGraphic?.parent ?? null
+    if (keyboardLayer == null) {
+      return
+    }
+
+    keyboardLayer.alpha = clamp(opacity, 0, 1)
+    this.app?.render()
   }
 
   setOverlayDrawCallback(callback: ((currentTick: number) => void) | null): void {
@@ -417,12 +609,11 @@ export class Renderer {
     this.assertInitialized()
     this.syncLabelStyles()
 
-    const app = this.requireApp()
-    const visibleNotes = this.updateNotes(currentTick)
-    this.updateNoteByNoteLayer()
-    effectsLayer.update(currentTick, visibleNotes, app.screen.width, app.screen.height)
+    this.updateNotes(currentTick)
+    this.rebuildNoteByNoteLayer()
     this.overlayDrawCallback?.(currentTick)
     this.updateKeyboard(currentTick)
+    this.drawHitLine()
     this.app?.render()
   }
 
@@ -438,11 +629,24 @@ export class Renderer {
       return
     }
 
-    const animatedEntries = this.noteByNoteEntries.filter((entry) => noteIds.includes(entry.noteId))
+    const animatedEntries = this.noteByNoteEntries
+      .filter((entry) => noteIds.includes(entry.noteId))
+      .map((entry) => ({
+        entry,
+        fingerLabelY: entry.fingerLabel?.y ?? null,
+        graphicY: entry.graphic.y,
+        noteLabelY: entry.noteLabel.y,
+      }))
     if (animatedEntries.length === 0) {
       return
     }
 
+    for (const animatedEntry of animatedEntries) {
+      this.noteDrainAnimations.delete(animatedEntry.entry.pitch)
+    }
+
+    this.previewShiftEligible = true
+    this.pendingNoteByNoteRebuild = false
     this.chordCorrectAnimation = {
       durationMs: 150,
       elapsedMs: 0,
@@ -490,6 +694,7 @@ export class Renderer {
     this.drawLaneLines()
     this.drawHitLine()
     this.drawKeyboardBacking()
+    this.applyCameraOverlayForMode(getAppState().appMode, getAppState().cameraOverlay)
     this.keyLabelsDirty = true
     this.renderFrame(getAppState().currentTick)
   }
@@ -497,7 +702,10 @@ export class Renderer {
   private drawBackground(): void {
     const app = this.requireApp()
     const backgroundGraphic = this.requireGraphic(this.backgroundGraphic)
-    const backgroundColor = hexToPixi(getAppState().backgroundColor)
+    const state = getAppState()
+    const backgroundColor = state.learnV3.isActive
+      ? hexToPixi(state.backgroundColor)
+      : CREATE_MODE_BACKGROUND_COLOR
 
     backgroundGraphic.clear()
     backgroundGraphic.beginFill(backgroundColor, 1)
@@ -508,29 +716,122 @@ export class Renderer {
   private drawLaneLines(): void {
     const app = this.requireApp()
     const laneLineGraphic = this.requireGraphic(this.laneLineGraphic)
-    const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
-    const noteFieldHeight = keyboardY
-    const laneAlpha = (getAppState().laneOpacity / 100) * 0.15
+    const state = getAppState()
 
     laneLineGraphic.clear()
-    laneLineGraphic.lineStyle(1, LANE_LINE_COLOR, laneAlpha)
+    if (state.learnV3.isActive) {
+      const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+      const laneAlpha = (state.laneOpacity / 100) * 0.15
+
+      laneLineGraphic.lineStyle(1, LANE_LINE_COLOR, laneAlpha)
+
+      for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+        if (!isBlackKey(pitch)) {
+          const x = pitchToKeyX(pitch, app.screen.width)
+          laneLineGraphic.moveTo(x, 0)
+          laneLineGraphic.lineTo(x, keyboardY)
+        }
+      }
+
+      return
+    }
+
+    laneLineGraphic.lineStyle(1, CREATE_MODE_LANE_LINE_COLOR, CREATE_MODE_LANE_LINE_ALPHA)
 
     for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
-      if (!isBlackKey(pitch)) {
+      if (pitch % 12 === 0) {
         const x = pitchToKeyX(pitch, app.screen.width)
         laneLineGraphic.moveTo(x, 0)
-        laneLineGraphic.lineTo(x, noteFieldHeight)
+        laneLineGraphic.lineTo(x, app.screen.height)
       }
+    }
+  }
+
+  startNoteDrain(pitch: number, durationMs: number, heldSince: number): void {
+    const state = getAppState()
+    if (!this.isNoteByNoteModeActive(state) || !Number.isFinite(pitch)) {
+      return
+    }
+
+    const entry = this.noteByNoteEntries.find((candidate) => candidate.pitch === Math.round(pitch))
+    if (entry == null) {
+      return
+    }
+
+    const normalizedDurationMs = Math.max(100, durationMs)
+    this.noteDrainAnimations.set(entry.pitch, {
+      durationMs: normalizedDurationMs,
+      heldSince,
+    })
+    this.applyNoteByNoteEntryVisual(entry, 0)
+    this.app?.render()
+    this.ensureLearnTicker()
+  }
+
+  cancelNoteDrain(pitch: number): void {
+    const state = getAppState()
+    if (!this.isNoteByNoteModeActive(state) || !Number.isFinite(pitch)) {
+      return
+    }
+
+    const normalizedPitch = Math.round(pitch)
+    this.noteDrainAnimations.delete(normalizedPitch)
+    const entry = this.noteByNoteEntries.find((candidate) => candidate.pitch === normalizedPitch)
+    if (entry == null) {
+      return
+    }
+
+    this.applyNoteByNoteEntryVisual(entry, 0)
+    this.app?.render()
+
+    if (!this.hasActiveLearnAnimations()) {
+      this.stopLearnTicker()
     }
   }
 
   private drawHitLine(): void {
     const app = this.requireApp()
     const hitLineGraphic = this.requireGraphic(this.hitLineGraphic)
+    const state = getAppState()
     const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
-    const hitLineY = keyboardY - HIT_LINE_HEIGHT
 
     hitLineGraphic.clear()
+
+    if (!state.learnV3.isActive) {
+      hitLineGraphic.visible = true
+
+      this.drawBoundaryWave(
+        hitLineGraphic,
+        app.screen.width,
+        keyboardY,
+        CREATE_MODE_BOUNDARY_OUTER_AURA_THICKNESS,
+        CREATE_MODE_BOUNDARY_OUTER_AURA_COLOR,
+        CREATE_MODE_BOUNDARY_OUTER_AURA_ALPHA,
+      )
+      this.drawBoundaryWave(
+        hitLineGraphic,
+        app.screen.width,
+        keyboardY,
+        CREATE_MODE_BOUNDARY_MID_GLOW_THICKNESS,
+        CREATE_MODE_BOUNDARY_MID_GLOW_COLOR,
+        CREATE_MODE_BOUNDARY_MID_GLOW_ALPHA,
+      )
+      this.drawBoundaryWave(
+        hitLineGraphic,
+        app.screen.width,
+        keyboardY,
+        CREATE_MODE_BOUNDARY_CORE_THICKNESS,
+        CREATE_MODE_BOUNDARY_CORE_COLOR,
+        CREATE_MODE_BOUNDARY_CORE_ALPHA,
+      )
+      hitLineGraphic.endFill()
+
+      return
+    }
+
+    hitLineGraphic.visible = true
+
+    const hitLineY = keyboardY - HIT_LINE_HEIGHT
     hitLineGraphic.beginFill(HIT_LINE_COLOR, HIT_LINE_ALPHA)
     hitLineGraphic.drawRect(0, hitLineY, app.screen.width, HIT_LINE_HEIGHT)
     hitLineGraphic.endFill()
@@ -560,20 +861,30 @@ export class Renderer {
   private drawKeyboardBacking(): void {
     const app = this.requireApp()
     const keyboardBackingGraphic = this.requireGraphic(this.keyboardBackingGraphic)
+    const state = getAppState()
     const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
     const backingY = Math.round(keyboardY - 2)
     const backingWidth = Math.round(app.screen.width)
     const backingHeight = Math.round(keyboardHeight + 2)
+    const backingColor = state.learnV3.isActive ? KEYBOARD_BACKING_COLOR : CREATE_MODE_BACKGROUND_COLOR
 
     keyboardBackingGraphic.clear()
-    keyboardBackingGraphic.beginFill(KEYBOARD_BACKING_COLOR, 1)
+    keyboardBackingGraphic.beginFill(backingColor, 1)
     keyboardBackingGraphic.drawRect(0, backingY, backingWidth, backingHeight)
     keyboardBackingGraphic.endFill()
   }
 
   private updateNotes(currentTick: number): IndexedNote[] {
-    const app = this.requireApp()
     const state = getAppState()
+    if (state.learnV3.isActive && state.learnV3.sessionConfig.mode === 'noteByNote') {
+      this.notePool.releaseAll()
+      this.gradientSpritePool.releaseAll()
+      this.noteLabelPool.releaseAll()
+      this.fingeringLabelPool.releaseAll()
+      return []
+    }
+
+    const app = this.requireApp()
     const learnHand = getActiveLearnHandFilter(state)
 
     this.notePool.releaseAll()
@@ -581,7 +892,12 @@ export class Renderer {
     this.noteLabelPool.releaseAll()
     this.fingeringLabelPool.releaseAll()
 
-    if (state.projectData == null || state.precomputedTempoMap == null) {
+    const spatialIndexReady =
+      typeof spatialIndex.isBuilt === 'function'
+        ? spatialIndex.isBuilt()
+        : spatialIndex.getTotalNoteCount() > 0
+
+    if (state.projectData == null || state.precomputedTempoMap == null || !spatialIndexReady) {
       return []
     }
 
@@ -665,26 +981,47 @@ export class Renderer {
       x: rect.x + inset,
       y: rect.y + verticalInset,
     }
-    const noteColor = resolveNoteColor(indexedNote.note, indexedNote.trackId, state)
+    const isCreateMode = !state.learnV3.isActive
+    const learnVisuals = getActiveLearnVisuals(state)
+    const noteColor = isCreateMode
+      ? resolveCreateModeNoteColor(indexedNote.note.pitch)
+      : learnVisuals == null
+      ? resolveNoteColor(indexedNote.note, indexedNote.trackId, state)
+      : resolveLearnNoteColor(indexedNote.note.pitch, learnVisuals)
     const isActive = currentTick >= indexedNote.note.startTick && currentTick <= indexedNote.note.visualEndTick
     const isSelected = selectedNoteIds.has(indexedNote.note.id)
     const isHovered = hoveredNoteId === indexedNote.note.id
 
     let brightness = 1
-    if (isHovered) {
+    if (!isCreateMode && isHovered) {
       brightness = Math.max(brightness, HOVERED_NOTE_FILL_BRIGHTNESS)
     }
-    if (isSelected) {
+    if (!isCreateMode && isSelected) {
       brightness = Math.max(brightness, SELECTED_NOTE_FILL_BRIGHTNESS)
     }
-    if (isActive) {
+    if (!isCreateMode && isActive) {
       brightness = Math.max(brightness, NOTE_ACTIVE_BRIGHTNESS)
     }
 
     const fillColor = brightness === 1 ? noteColor : brightenColor(noteColor, brightness)
-    const noteAlpha = noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA
+    const noteAlpha = isCreateMode
+      ? 1
+      : learnVisuals == null
+      ? (noteIsBlack ? BLACK_KEY_NOTE_ALPHA : NOTE_ALPHA)
+      : clamp(learnVisuals.noteOpacity, 0.3, 1)
+    const noteLabelsEnabled = isCreateMode
+      ? true
+      : learnVisuals?.noteLabelsEnabled ?? state.noteLabelsOnNotes
+    const fingerNumbersEnabled = learnVisuals?.fingerNumbersEnabled ?? true
 
-    if (noteStyle === 'gradient') {
+    if (isCreateMode) {
+      const graphic = this.notePool.acquire()
+      graphic.clear()
+      graphic.beginFill(fillColor, 1)
+      graphic.drawRect(adjustedRect.x, adjustedRect.y, adjustedRect.w, adjustedRect.h)
+      graphic.endFill()
+      layers.notes.addChild(graphic)
+    } else if (noteStyle === 'gradient') {
       const gradientColors = resolveNoteGradientColors(indexedNote.note, indexedNote.trackId, state)
       const topColor = pixiToHex(brightenColor(hexToPixi(gradientColors.topColor), brightness))
       const bottomColor = pixiToHex(brightenColor(hexToPixi(gradientColors.bottomColor), brightness))
@@ -702,20 +1039,20 @@ export class Renderer {
       sprite.alpha = noteAlpha
       layers.notes.addChild(sprite)
 
-      if (state.effectsEnabled.layeredGlow) {
+      if (learnVisuals?.glowEnabled) {
         const glowGraphic = this.notePool.acquire()
         glowGraphic.clear()
-        this.drawNoteInnerGlow(
-          glowGraphic,
-          adjustedRect.x,
-          adjustedRect.y,
-          adjustedRect.w,
-          adjustedRect.h,
-          noteAlpha,
-        )
+        this.drawLearnGlow(glowGraphic, adjustedRect.x, adjustedRect.y, adjustedRect.w, adjustedRect.h, fillColor)
         layers.notes.addChild(glowGraphic)
       }
     } else {
+      if (learnVisuals?.glowEnabled) {
+        const glowGraphic = this.notePool.acquire()
+        glowGraphic.clear()
+        this.drawLearnGlow(glowGraphic, adjustedRect.x, adjustedRect.y, adjustedRect.w, adjustedRect.h, fillColor)
+        layers.notes.addChild(glowGraphic)
+      }
+
       const graphic = this.notePool.acquire()
       graphic.clear()
       this.drawStyledNote(
@@ -727,30 +1064,33 @@ export class Renderer {
         fillColor,
         noteStyle,
         noteAlpha,
-        state.effectsEnabled.layeredGlow,
       )
       layers.notes.addChild(graphic)
     }
 
-    if (state.noteLabelsOnNotes) {
-      const label = this.noteLabelPool.acquire(adjustedRect.w < 14)
-      label.text = getNoteLabel(indexedNote.note.pitch, state.noteLabelFormat)
+    if (noteLabelsEnabled) {
+      const label = this.noteLabelPool.acquire(isCreateMode ? false : adjustedRect.w < 14)
+      label.text = getNoteLabel(indexedNote.note.pitch, isCreateMode ? 'nameOctave' : state.noteLabelFormat)
       label.x = adjustedRect.x + (adjustedRect.w / 2)
       label.y = adjustedRect.y + (adjustedRect.h / 2)
       label.resolution = getLabelResolution()
 
-      if (adjustedRect.w < 8 || adjustedRect.h < 8 || (noteIsBlack && adjustedRect.h < 20)) {
+      if (!isCreateMode && (adjustedRect.w < 8 || adjustedRect.h < 8 || (noteIsBlack && adjustedRect.h < 20))) {
         label.visible = false
       } else {
-        const configuredFontSize = Math.max(8, state.noteLabelSize)
-        const fittedFontSize = Math.min(
-          configuredFontSize,
-          Math.floor(adjustedRect.w * 0.7),
-          Math.floor(adjustedRect.h * 0.6),
-        )
-        const visibleFontSize = Math.max(6, fittedFontSize)
         label.visible = true
-        label.scale.set(visibleFontSize / configuredFontSize)
+        if (isCreateMode) {
+          label.scale.set(1)
+        } else {
+          const configuredFontSize = Math.max(8, state.noteLabelSize)
+          const fittedFontSize = Math.min(
+            configuredFontSize,
+            Math.floor(adjustedRect.w * 0.7),
+            Math.floor(adjustedRect.h * 0.6),
+          )
+          const visibleFontSize = Math.max(6, fittedFontSize)
+          label.scale.set(visibleFontSize / configuredFontSize)
+        }
       }
 
       layers.notes.addChild(label)
@@ -759,7 +1099,8 @@ export class Renderer {
     if (
       state.learnV3.isActive &&
       (state.learnV3.sessionConfig.mode === 'listen' || state.learnV3.sessionConfig.mode === 'playAlong') &&
-      adjustedRect.h > 20
+      adjustedRect.h > 20 &&
+      fingerNumbersEnabled
     ) {
       const fingerNumber = state.learnV3.fingerNumbers[indexedNote.note.id]
       if (fingerNumber != null) {
@@ -808,21 +1149,24 @@ export class Renderer {
     const app = this.requireApp()
     const state = getAppState()
     const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
-    const blackKeyWidth = Math.max(1, Math.round(getBlackKeyWidth(app.screen.width)))
-    const blackKeyHeight = Math.max(1, Math.round(keyboardHeight * BLACK_KEY_HEIGHT_RATIO))
+    const keyboardWidth = app.screen.width
+    const blackKeyWidth = Math.max(1, Math.round(getBlackKeyWidth(keyboardWidth)))
+    const blackKeyHeight = state.learnV3.isActive
+      ? Math.max(1, Math.round(keyboardHeight * BLACK_KEY_HEIGHT_RATIO))
+      : Math.max(1, Math.round(keyboardHeight * 0.6))
     const activeNotesByPitch = this.getActiveNotesByPitch(currentTick)
 
     for (const entry of this.keyboardPool.getEntries()) {
       const activeNote = activeNotesByPitch.get(entry.pitch) ?? null
-      const whiteKeyBounds = entry.isBlack ? null : getWhiteKeyBounds(entry.pitch, app.screen.width)
+      const whiteKeyBounds = entry.isBlack ? null : getWhiteKeyBounds(entry.pitch, keyboardWidth)
       const keyWidth = entry.isBlack ? blackKeyWidth : whiteKeyBounds.width
       const keyHeight = entry.isBlack ? blackKeyHeight : Math.round(keyboardHeight)
-      const keyX = entry.isBlack ? Math.round(pitchToKeyX(entry.pitch, app.screen.width)) : whiteKeyBounds.x
+      const keyX = entry.isBlack ? Math.round(pitchToKeyX(entry.pitch, keyboardWidth)) : whiteKeyBounds.x
 
       this.drawKeyboardKey(entry, keyX, keyboardY, keyWidth, keyHeight, activeNote, state)
     }
 
-    this.updateKeyboardLabels(app.screen.width, app.screen.height, state)
+    this.updateKeyboardLabels(keyboardWidth, app.screen.height, state)
   }
 
   private drawKeyboardKey(
@@ -839,6 +1183,8 @@ export class Renderer {
 
     const activeColor = activeNote == null
       ? null
+      : !state.learnV3.isActive
+      ? resolveCreateModeNoteColor(activeNote.note.pitch)
       : resolveNoteColor(activeNote.note, activeNote.trackId, state)
     const flashColor = state.learnV3.isActive ? this.keyFlashAnimations.get(entry.pitch)?.color ?? null : null
     const highlightColor = flashColor ?? activeColor
@@ -913,46 +1259,165 @@ export class Renderer {
   }
 
   private updateNoteByNoteLayer(): void {
+    this.rebuildNoteByNoteLayer()
+  }
+
+  private startPreviewShiftAnimation(): boolean {
+    if (this.noteByNotePreviewLevels.length === 0) {
+      return false
+    }
+
+    const app = this.app
+    if (app == null) {
+      return false
+    }
+
+    const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
+    const entries: Array<{
+      entry: NoteByNotePreviewEntry
+      startOffsetY: number
+      targetOffsetY: number
+    }> = []
+
+    let nextBottomY = keyboardY
+    for (const level of this.noteByNotePreviewLevels) {
+      for (const entry of level.entries) {
+        entries.push({
+          entry,
+          startOffsetY: entry.graphic.y,
+          targetOffsetY: (nextBottomY - entry.baseHeight) - entry.baseY,
+        })
+      }
+
+      nextBottomY = nextBottomY - level.levelHeight - NOTE_BY_NOTE_PREVIEW_GAP_PX
+    }
+
+    if (entries.length === 0) {
+      return false
+    }
+
+    this.previewShiftAnimation = {
+      durationMs: NOTE_BY_NOTE_PREVIEW_SHIFT_DURATION_MS,
+      elapsedMs: 0,
+      entries,
+    }
+    this.ensureLearnTicker()
+    return true
+  }
+
+  private rebuildNoteByNoteLayer(): void {
     const layers = this.requireLayers()
     const state = getAppState()
 
     this.noteByNoteRectPool.releaseAll()
     this.noteByNoteLabelPool.releaseAll()
+    layers.noteByNote.removeChildren()
     this.noteByNoteEntries = []
+    this.noteByNotePreviewEntries = []
+    this.noteByNotePreviewLevels = []
+    this.previewShiftAnimation = null
+    this.noteDrainAnimations.clear()
+    layers.noteByNote.visible = this.isNoteByNoteModeActive(state)
 
-    if (!this.isNoteByNoteModeActive(state) || state.projectData == null) {
-      layers.noteByNote.visible = false
+    if (!layers.noteByNote.visible || state.projectData == null || state.precomputedTempoMap == null) {
       return
     }
 
     const app = this.requireApp()
-    const chordGroups = this.getChordGroups(state.projectData.tracks)
+    const chordGroups = this.getChordGroups(state.projectData.tracks, state.learnV3.sessionConfig.hand)
     const currentGroupIndex = state.learnV3.currentChordIndex
     const currentChord = chordGroups[currentGroupIndex]
+    const learnVisuals = getActiveLearnVisuals(state) ?? state.learnVisuals
 
     if (currentChord == null) {
-      layers.noteByNote.visible = false
       return
     }
 
-    layers.noteByNote.visible = true
-
     const { keyboardY } = getKeyboardLayoutMetrics(app.screen.height)
-    const chordDefinitions = [
-      { alpha: 1, height: 40, index: currentGroupIndex, offset: 0 },
-      { alpha: 0.6, height: 28, index: currentGroupIndex + 1, offset: 1 },
-      { alpha: 0.3, height: 28, index: currentGroupIndex + 2, offset: 2 },
-    ] as const
+    const currentChordLevelHeight = getChordLevelHeight(currentChord, state.precomputedTempoMap)
 
-    for (const definition of chordDefinitions) {
-      const chord = chordGroups[definition.index]
-      if (chord == null) {
+    for (const indexedNote of currentChord) {
+      const pitch = indexedNote.note.pitch
+      const durationMs = getNoteDurationMs(indexedNote.note, state.precomputedTempoMap)
+      const noteHeight = Math.min(200, Math.max(60, (durationMs / 500) * 60))
+      const y = keyboardY - noteHeight
+      const fillColor = resolveLearnNoteColor(pitch, learnVisuals)
+      const keyBounds = isBlackKey(pitch)
+        ? {
+          width: Math.max(1, Math.round(getBlackKeyWidth(app.screen.width))),
+          x: Math.round(pitchToKeyX(pitch, app.screen.width)),
+        }
+        : getWhiteKeyBounds(pitch, app.screen.width)
+      const graphic = this.noteByNoteRectPool.acquire()
+      graphic.clear()
+      graphic.alpha = 1
+      graphic.x = 0
+      graphic.y = 0
+
+      const noteLabel = this.noteByNoteLabelPool.acquire(false)
+      noteLabel.anchor.set(0.5, 0.5)
+      noteLabel.text = getNoteLabel(pitch, 'nameOctave')
+
+      const fingerNumber = learnVisuals.fingerNumbersEnabled
+        ? state.learnV3.fingerNumbers[indexedNote.note.id]
+        : null
+      let fingerLabel: PIXI.Text | null = null
+      if (fingerNumber != null) {
+        fingerLabel = this.noteByNoteLabelPool.acquire(true)
+        fingerLabel.anchor.set(0, 0)
+        fingerLabel.text = String(fingerNumber)
+      }
+
+      const entry: NoteByNoteRenderEntry = {
+        alpha: clamp(learnVisuals.noteOpacity, 0.3, 1),
+        baseHeight: noteHeight,
+        baseY: y,
+        fingerLabel,
+        fillColor,
+        graphic,
+        fingerNumbersEnabled: learnVisuals.fingerNumbersEnabled,
+        glowEnabled: learnVisuals.glowEnabled,
+        noteId: indexedNote.note.id,
+        noteLabel,
+        noteLabelsEnabled: learnVisuals.noteLabelsEnabled,
+        pitch,
+        width: keyBounds.width,
+        x: keyBounds.x,
+      }
+      this.noteByNoteEntries.push(entry)
+      this.applyNoteByNoteEntryVisual(entry, 0)
+      layers.noteByNote.addChild(graphic)
+      if (learnVisuals.noteLabelsEnabled) {
+        layers.noteByNote.addChild(noteLabel)
+      }
+      if (fingerLabel != null) {
+        layers.noteByNote.addChild(fingerLabel)
+      }
+    }
+
+    let previousLevelTopY = keyboardY - currentChordLevelHeight
+    for (let previewOffset = 1; currentGroupIndex + previewOffset < chordGroups.length; previewOffset += 1) {
+      const previewChord = chordGroups[currentGroupIndex + previewOffset]
+      if (previewChord == null) {
         continue
       }
 
-      const y = keyboardY - 12 - definition.height - (definition.offset * 40)
-      for (const indexedNote of chord) {
+      const levelHeight = getChordLevelHeight(previewChord, state.precomputedTempoMap)
+      const levelBottomY = previousLevelTopY - NOTE_BY_NOTE_PREVIEW_GAP_PX
+      const levelTopY = levelBottomY - levelHeight
+      if (levelTopY < 0) {
+        break
+      }
+
+      const previewOpacity = Math.max(0.08, 0.75 - (previewOffset * 0.06))
+      const entries: NoteByNotePreviewEntry[] = []
+
+      for (const indexedNote of previewChord) {
         const pitch = indexedNote.note.pitch
+        const durationMs = getNoteDurationMs(indexedNote.note, state.precomputedTempoMap)
+        const noteHeight = Math.min(200, Math.max(60, (durationMs / 500) * 60))
+        const y = levelBottomY - noteHeight
+        const fillColor = resolveLearnNoteColor(pitch, learnVisuals)
         const keyBounds = isBlackKey(pitch)
           ? {
             width: Math.max(1, Math.round(getBlackKeyWidth(app.screen.width))),
@@ -960,46 +1425,83 @@ export class Renderer {
           }
           : getWhiteKeyBounds(pitch, app.screen.width)
         const graphic = this.noteByNoteRectPool.acquire()
-        const noteColor = resolveNoteColor(indexedNote.note, indexedNote.trackId, state)
         graphic.clear()
-        graphic.alpha = definition.alpha
+        graphic.alpha = previewOpacity
         graphic.x = 0
         graphic.y = 0
-        this.drawStyledNote(
+
+        const entry: NoteByNotePreviewEntry = {
+          alpha: clamp(learnVisuals.noteOpacity, 0.3, 1) * previewOpacity,
+          baseHeight: noteHeight,
+          baseY: y,
+          fillColor,
           graphic,
-          keyBounds.x,
-          y,
-          keyBounds.width,
-          definition.height,
-          noteColor,
-          'solid',
-          definition.alpha,
-          false,
-        )
-        layers.noteByNote.addChild(graphic)
-
-        const label = this.noteByNoteLabelPool.acquire(definition.height < 32)
-        const fingerNumber = state.learnV3.fingerNumbers[indexedNote.note.id]
-        label.text = fingerNumber == null
-          ? getNoteLabel(pitch, 'nameOctave')
-          : `${getNoteLabel(pitch, 'nameOctave')} ${fingerNumber}`
-        label.x = keyBounds.x + (keyBounds.width / 2)
-        label.y = y + (definition.height / 2)
-        label.alpha = definition.alpha
-        label.scale.set(definition.height < 32 ? 0.85 : 1)
-        label.resolution = getLabelResolution()
-        layers.noteByNote.addChild(label)
-
-        if (definition.offset === 0) {
-          this.noteByNoteEntries.push({
-            alpha: definition.alpha,
-            baseY: y,
-            graphic,
-            label,
-            noteId: indexedNote.note.id,
-          })
+          glowEnabled: learnVisuals.glowEnabled,
+          pitch,
+          width: keyBounds.width,
+          x: keyBounds.x,
         }
+
+        if (entry.glowEnabled) {
+          this.drawLearnGlow(graphic, entry.x, entry.baseY, entry.width, entry.baseHeight, entry.fillColor, entry.alpha)
+        }
+        this.drawStyledNote(graphic, entry.x, entry.baseY, entry.width, entry.baseHeight, entry.fillColor, 'solid', entry.alpha)
+
+        entries.push(entry)
+        this.noteByNotePreviewEntries.push(entry)
+        layers.noteByNote.addChild(graphic)
       }
+
+      this.noteByNotePreviewLevels.push({
+        bottomY: levelBottomY,
+        entries,
+        levelHeight,
+      })
+      previousLevelTopY = levelTopY
+    }
+  }
+
+  private applyNoteByNoteEntryVisual(entry: NoteByNoteRenderEntry, progress: number): void {
+    const clampedProgress = Math.max(0, Math.min(1, progress))
+    const height = Math.max(0, entry.baseHeight * (1 - clampedProgress))
+    const topY = entry.baseY + (entry.baseHeight - height)
+    const fillColor = interpolateColor(entry.fillColor, 0xd3d3d3, clampedProgress)
+
+    entry.graphic.clear()
+    entry.graphic.alpha = entry.alpha
+    entry.graphic.x = 0
+    entry.graphic.y = 0
+
+    if (height > 0) {
+      if (entry.glowEnabled) {
+        this.drawLearnGlow(entry.graphic, entry.x, topY, entry.width, height, fillColor, entry.alpha)
+      }
+      this.drawStyledNote(
+        entry.graphic,
+        entry.x,
+        topY,
+        entry.width,
+        height,
+        fillColor,
+        'solid',
+        entry.alpha,
+      )
+    }
+
+    entry.noteLabel.visible = entry.noteLabelsEnabled && height > 0
+    entry.noteLabel.alpha = entry.alpha
+    entry.noteLabel.x = entry.x + (entry.width / 2)
+    entry.noteLabel.y = topY + (height / 2)
+    entry.noteLabel.scale.set(1)
+    entry.noteLabel.resolution = getLabelResolution()
+
+    if (entry.fingerLabel != null) {
+      entry.fingerLabel.visible = entry.fingerNumbersEnabled && height > 0
+      entry.fingerLabel.alpha = entry.alpha
+      entry.fingerLabel.x = entry.x + 6
+      entry.fingerLabel.y = topY + 6
+      entry.fingerLabel.scale.set(1)
+      entry.fingerLabel.resolution = getLabelResolution()
     }
   }
 
@@ -1012,7 +1514,6 @@ export class Renderer {
     color: number,
     noteStyle: ReturnType<typeof getAppState>['noteStyle'],
     alpha: number,
-    layeredGlowEnabled: boolean,
   ): void {
     if (noteStyle === 'gradient') {
       return
@@ -1032,10 +1533,10 @@ export class Renderer {
       graphic.drawRect(x, y, width, height)
       graphic.endFill()
 
-      const innerGlowWidth = Math.min(width, 8)
-      const innerGlowX = x + ((width - innerGlowWidth) / 2)
+      const highlightWidth = Math.min(width, 8)
+      const highlightX = x + ((width - highlightWidth) / 2)
       graphic.beginFill(0xffffff, 0.35 * alpha)
-      graphic.drawRect(innerGlowX, y, innerGlowWidth, height)
+      graphic.drawRect(highlightX, y, highlightWidth, height)
       graphic.endFill()
 
       const coreWidth = Math.min(width, 2)
@@ -1049,48 +1550,54 @@ export class Renderer {
     graphic.beginFill(color, alpha)
     drawTopRoundedRect(graphic, x, y, width, height, NOTE_CORNER_RADIUS)
     graphic.endFill()
-
-    if (layeredGlowEnabled) {
-      this.drawNoteInnerGlow(graphic, x, y, width, height, alpha)
-    }
   }
 
-  private drawNoteInnerGlow(
+  private drawLearnGlow(
     graphic: PIXI.Graphics,
     x: number,
     y: number,
     width: number,
     height: number,
-    alpha: number,
+    color: number,
+    alpha = 1,
   ): void {
-    if (width < 8) {
-      return
-    }
+    const glowWidth = width * 1.4
+    const glowX = x - ((glowWidth - width) / 2)
 
-    const coreWidth = Math.min(width, Math.max(2, Math.min(4, width * 0.2)))
-    const midWidth = Math.min(width, 6)
-    const outerWidth = Math.min(width, 12)
-
-    this.drawCenteredInnerGlowBand(graphic, x, y, width, height, outerWidth, 0.05 * alpha)
-    this.drawCenteredInnerGlowBand(graphic, x, y, width, height, midWidth, 0.15 * alpha)
-    this.drawCenteredInnerGlowBand(graphic, x, y, width, height, coreWidth, 0.3 * alpha)
-  }
-
-  private drawCenteredInnerGlowBand(
-    graphic: PIXI.Graphics,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    bandWidth: number,
-    alpha: number,
-  ): void {
-    const glowX = x + ((width - bandWidth) / 2)
-    const radius = Math.min(NOTE_CORNER_RADIUS, bandWidth / 2, height / 2)
-
-    graphic.beginFill(0xffffff, alpha)
-    drawTopRoundedRect(graphic, glowX, y, bandWidth, height, radius)
+    graphic.beginFill(color, 0.2 * alpha)
+    graphic.drawRect(glowX, y, glowWidth, height)
     graphic.endFill()
+  }
+
+  private drawBoundaryWave(
+    graphic: PIXI.Graphics,
+    width: number,
+    keyboardY: number,
+    lineWidth: number,
+    color: number,
+    alpha: number,
+  ): void {
+    graphic.lineStyle(lineWidth, color, alpha)
+
+    let drewStartPoint = false
+    for (let x = 0; x <= width; x += CREATE_MODE_BOUNDARY_SEGMENT_WIDTH) {
+      const waveY = keyboardY + Math.sin((x / CREATE_MODE_BOUNDARY_WAVE_LENGTH) + this.boundaryWaveTime) * CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE
+      if (!drewStartPoint) {
+        graphic.moveTo(x, waveY)
+        drewStartPoint = true
+      } else {
+        graphic.lineTo(x, waveY)
+      }
+    }
+
+    if (width % CREATE_MODE_BOUNDARY_SEGMENT_WIDTH !== 0) {
+      const waveY = keyboardY + Math.sin((width / CREATE_MODE_BOUNDARY_WAVE_LENGTH) + this.boundaryWaveTime) * CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE
+      if (!drewStartPoint) {
+        graphic.moveTo(width, waveY)
+      } else {
+        graphic.lineTo(width, waveY)
+      }
+    }
   }
 
   private updateKeyboardLabels(
@@ -1105,7 +1612,8 @@ export class Renderer {
     this.keyLabelPool.releaseAll()
     this.keyLabelsDirty = false
 
-    if (!state.noteLabelsOnKeys) {
+    const showKeyLabels = state.learnV3.isActive ? state.noteLabelsOnKeys : true
+    if (!showKeyLabels) {
       return
     }
 
@@ -1115,7 +1623,7 @@ export class Renderer {
     for (const entry of this.keyboardPool.getWhiteEntries()) {
       const whiteKeyBounds = getWhiteKeyBounds(entry.pitch, canvasWidth)
       const label = this.keyLabelPool.acquire()
-      label.text = getNoteLabel(entry.pitch, state.noteLabelFormat)
+      label.text = getNoteLabel(entry.pitch, state.learnV3.isActive ? state.noteLabelFormat : 'name')
       label.x = whiteKeyBounds.x + (whiteKeyBounds.width / 2)
       label.y = labelY
       label.scale.set(1)
@@ -1127,13 +1635,15 @@ export class Renderer {
   private syncLabelStyles(): void {
     const state = getAppState()
     const textResolution = getLabelResolution()
+    const isCreateMode = !state.learnV3.isActive
 
     this.noteLabelPool.updateStyles({
-      compactFill: hexToPixi(state.noteLabelColor),
-      compactFontSize: Math.max(8, state.noteLabelSize - 1),
-      fill: hexToPixi(state.noteLabelColor),
+      compactFill: isCreateMode ? 0xffffff : hexToPixi(state.noteLabelColor),
+      compactFontSize: isCreateMode ? 12 : Math.max(8, state.noteLabelSize - 1),
+      dropShadow: !isCreateMode,
+      fill: isCreateMode ? 0xffffff : hexToPixi(state.noteLabelColor),
       fontFamily: 'Arial, sans-serif',
-      fontSize: state.noteLabelSize,
+      fontSize: isCreateMode ? 12 : state.noteLabelSize,
       fontWeight: 'bold',
       resolution: textResolution,
     })
@@ -1150,21 +1660,21 @@ export class Renderer {
     })
 
     this.noteByNoteLabelPool.updateStyles({
-      compactFill: 0xffffff,
+      compactFill: 0x000000,
       compactFontSize: 10,
       dropShadow: false,
-      fill: 0xffffff,
+      fill: 0x000000,
       fontFamily: 'Arial, sans-serif',
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 'bold',
       resolution: textResolution,
     })
 
     this.keyLabelPool.updateStyles({
       dropShadow: false,
-      fill: hexToPixi(state.noteLabelColor),
+      fill: isCreateMode ? 0x000000 : hexToPixi(state.noteLabelColor),
       fontFamily: 'Arial, sans-serif',
-      fontSize: state.noteLabelSize,
+      fontSize: isCreateMode ? 12 : state.noteLabelSize,
       fontWeight: 'bold',
       resolution: textResolution,
     })
@@ -1207,7 +1717,6 @@ export class Renderer {
       background: new PIXI.Container(),
       hitLine: new PIXI.Container(),
       keyboard: new PIXI.Container(),
-      keyboardGlow: new PIXI.Container(),
       laneLines: new PIXI.Container(),
       noteByNote: new PIXI.Container(),
       notes: new PIXI.Container(),
@@ -1215,11 +1724,81 @@ export class Renderer {
     }
   }
 
-  private getChordGroups(tracks: Track[]): IndexedNote[][] {
+  private applyCameraOverlayForMode(
+    appMode: ReturnType<typeof getAppState>['appMode'],
+    overlay: CameraOverlaySettings,
+  ): void {
+    const overlayContainer = this.overlayContainer
+    if (overlayContainer == null || this.app == null) {
+      return
+    }
+
+    if (appMode !== 'createCamera') {
+      this.resetCameraOverlayTransform()
+      return
+    }
+
+    this.applyOverlayTransform(overlay)
+  }
+
+  private applyOverlayTransform(overlay: CameraOverlaySettings): void {
+    const overlayContainer = this.overlayContainer
+    if (overlayContainer == null) {
+      return
+    }
+
+    overlayContainer.x = overlay.offsetX
+    // Vertical placement is handled by the Camera Mode DOM layout so the
+    // visualizer can overlap the webcam feed instead of being clipped inside
+    // the top canvas slot.
+    overlayContainer.y = 0
+    this.setContainerScale(overlayContainer, Math.max(0.05, overlay.scale))
+  }
+
+  private resetCameraOverlayTransform(): void {
+    const overlayContainer = this.overlayContainer
+    if (overlayContainer == null) {
+      return
+    }
+
+    overlayContainer.x = 0
+    overlayContainer.y = 0
+    this.setContainerScale(overlayContainer, 1)
+  }
+
+  private setContainerScale(container: PIXI.Container, scale: number): void {
+    const scaleTarget = container as PIXI.Container & {
+      scale?: {
+        set?: (x: number, y?: number) => void
+        x?: number
+        y?: number
+      }
+    }
+
+    if (scaleTarget.scale != null && typeof scaleTarget.scale.set === 'function') {
+      scaleTarget.scale.set(scale)
+      return
+    }
+
+    scaleTarget.scale = {
+      ...scaleTarget.scale,
+      x: scale,
+      y: scale,
+    }
+  }
+
+  private getChordGroups(
+    tracks: Track[],
+    hand: ReturnType<typeof getAppState>['learnV3']['sessionConfig']['hand'] = 'both',
+  ): IndexedNote[][] {
     const flattenedNotes: IndexedNote[] = []
 
     tracks.forEach((track, trackIndex) => {
       for (const note of track.notes) {
+        if (!isPitchIncludedForHand(note.pitch, hand)) {
+          continue
+        }
+
         flattenedNotes.push({
           note,
           trackId: track.id,
@@ -1267,51 +1846,105 @@ export class Renderer {
     }
 
     app.ticker.add(this.handleLearnTicker)
-    app.ticker.start()
     this.learnTickerActive = true
+    this.syncAppTickerState()
   }
 
   private stopLearnTicker(): void {
     const app = this.app
     if (app != null && this.learnTickerActive) {
       app.ticker.remove(this.handleLearnTicker)
-      if (app.ticker.started) {
-        app.ticker.stop()
-      }
     }
 
     this.learnTickerActive = false
+    this.syncAppTickerState()
   }
 
   private hasActiveLearnAnimations(): boolean {
-    return this.chordCorrectAnimation != null || this.keyFlashAnimations.size > 0
+    return (
+      this.chordCorrectAnimation != null ||
+      this.previewShiftAnimation != null ||
+      this.keyFlashAnimations.size > 0 ||
+      this.noteDrainAnimations.size > 0
+    )
   }
 
   private readonly handleLearnTicker = (ticker: PIXI.Ticker): void => {
     const state = getAppState()
     if (!state.learnV3.isActive) {
       this.chordCorrectAnimation = null
+      this.previewShiftAnimation = null
+      this.noteDrainAnimations.clear()
       this.keyFlashAnimations.clear()
       this.stopLearnTicker()
       return
     }
 
     const elapsedMs = Number.isFinite(ticker.elapsedMS) ? ticker.elapsedMS : 16.6667
+    let previewShiftStartedThisTick = false
+
+    if (this.noteDrainAnimations.size > 0) {
+      const now = performance.now()
+      for (const [pitch, drain] of [...this.noteDrainAnimations.entries()]) {
+        const entry = this.noteByNoteEntries.find((candidate) => candidate.pitch === pitch)
+        if (entry == null) {
+          this.noteDrainAnimations.delete(pitch)
+          continue
+        }
+
+        const progress = Math.min(1, Math.max(0, (now - drain.heldSince) / drain.durationMs))
+        this.applyNoteByNoteEntryVisual(entry, progress)
+
+        if (progress >= 1) {
+          this.noteDrainAnimations.delete(pitch)
+        }
+      }
+    }
 
     if (this.chordCorrectAnimation != null) {
       this.chordCorrectAnimation.elapsedMs += elapsedMs
       const progress = Math.min(1, this.chordCorrectAnimation.elapsedMs / this.chordCorrectAnimation.durationMs)
 
-      for (const entry of this.chordCorrectAnimation.entries) {
-        const nextAlpha = entry.alpha * (1 - progress)
-        entry.graphic.alpha = nextAlpha
-        entry.label.alpha = nextAlpha
-        entry.graphic.y = progress * 20
-        entry.label.y = entry.baseY + progress * 20
+      for (const animatedEntry of this.chordCorrectAnimation.entries) {
+        const nextAlpha = animatedEntry.entry.alpha * (1 - progress)
+        animatedEntry.entry.graphic.alpha = nextAlpha
+        animatedEntry.entry.graphic.y = animatedEntry.graphicY + (progress * 20)
+        animatedEntry.entry.noteLabel.alpha = nextAlpha
+        animatedEntry.entry.noteLabel.y = animatedEntry.noteLabelY + (progress * 20)
+        if (animatedEntry.entry.fingerLabel != null && animatedEntry.fingerLabelY != null) {
+          animatedEntry.entry.fingerLabel.alpha = nextAlpha
+          animatedEntry.entry.fingerLabel.y = animatedEntry.fingerLabelY + (progress * 20)
+        }
       }
 
       if (progress >= 1) {
         this.chordCorrectAnimation = null
+        if (this.pendingNoteByNoteRebuild) {
+          this.pendingNoteByNoteRebuild = false
+          if (this.startPreviewShiftAnimation()) {
+            previewShiftStartedThisTick = true
+          } else {
+            this.previewShiftEligible = false
+            this.rebuildNoteByNoteLayer()
+          }
+        }
+      }
+    }
+
+    if (this.previewShiftAnimation != null && !previewShiftStartedThisTick) {
+      this.previewShiftAnimation.elapsedMs += elapsedMs
+      const progress = Math.min(1, this.previewShiftAnimation.elapsedMs / this.previewShiftAnimation.durationMs)
+
+      for (const animatedEntry of this.previewShiftAnimation.entries) {
+        animatedEntry.entry.graphic.y =
+          animatedEntry.startOffsetY +
+          ((animatedEntry.targetOffsetY - animatedEntry.startOffsetY) * progress)
+      }
+
+      if (progress >= 1) {
+        this.previewShiftAnimation = null
+        this.previewShiftEligible = false
+        this.rebuildNoteByNoteLayer()
       }
     }
 
@@ -1330,6 +1963,70 @@ export class Renderer {
 
     if (!this.hasActiveLearnAnimations()) {
       this.stopLearnTicker()
+    }
+  }
+
+  private readonly handleCreateModeTicker = (): void => {
+    if (!this.isInitialized) {
+      return
+    }
+
+    const state = getAppState()
+    if (state.learnV3.isActive) {
+      return
+    }
+
+    this.boundaryWaveTime += CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
+    this.drawHitLine()
+    this.app?.render()
+  }
+
+  private syncCreateModeTicker(): void {
+    const state = getAppState()
+    if (state.learnV3.isActive) {
+      this.stopCreateModeTicker()
+      return
+    }
+
+    this.ensureCreateModeTicker()
+  }
+
+  private ensureCreateModeTicker(): void {
+    const app = this.app
+    if (app == null || this.createModeTickerActive) {
+      return
+    }
+
+    app.ticker.add(this.handleCreateModeTicker)
+    this.createModeTickerActive = true
+    this.syncAppTickerState()
+  }
+
+  private stopCreateModeTicker(): void {
+    const app = this.app
+    if (app != null && this.createModeTickerActive) {
+      app.ticker.remove(this.handleCreateModeTicker)
+    }
+
+    this.createModeTickerActive = false
+    this.syncAppTickerState()
+  }
+
+  private syncAppTickerState(): void {
+    const app = this.app
+    if (app == null) {
+      return
+    }
+
+    if (this.createModeTickerActive || this.learnTickerActive) {
+      if (!app.ticker.started) {
+        app.ticker.start()
+      }
+      return
+    }
+
+    if (app.ticker.started) {
+      app.ticker.stop()
     }
   }
 
@@ -1392,6 +2089,16 @@ export class Renderer {
   private stopRenderLoop(): void {
     this.isRunning = false
   }
+
+  private addSubscription(unsubscribe: () => void): void {
+    this.subscriptions.push(unsubscribe)
+  }
+
+  private clearSubscriptions(): void {
+    for (const unsubscribe of this.subscriptions.splice(0)) {
+      unsubscribe()
+    }
+  }
 }
 
 function getProjectNoteCount(tracks: Track[]): number {
@@ -1404,12 +2111,52 @@ function getProjectNoteCount(tracks: Track[]): number {
   return total
 }
 
+function getChordLevelHeight(chord: IndexedNote[], tempoMap: PrecomputedTempoMap): number {
+  let levelHeight = 60
+
+  for (const indexedNote of chord) {
+    const noteHeight = Math.min(200, Math.max(60, (getNoteDurationMs(indexedNote.note, tempoMap) / 500) * 60))
+    if (noteHeight > levelHeight) {
+      levelHeight = noteHeight
+    }
+  }
+
+  return levelHeight
+}
+
 function brightenColor(color: number, brightness: number): number {
   const red = Math.min(255, Math.round(((color >> 16) & 0xff) * brightness))
   const green = Math.min(255, Math.round(((color >> 8) & 0xff) * brightness))
   const blue = Math.min(255, Math.round((color & 0xff) * brightness))
 
   return (red << 16) | (green << 8) | blue
+}
+
+function getNoteDurationMs(
+  note: { endTick: number; startTick: number },
+  tempoMap: PrecomputedTempoMap,
+): number {
+  return Math.max(100, (tickToSeconds(note.endTick, tempoMap) - tickToSeconds(note.startTick, tempoMap)) * 1000)
+}
+
+function interpolateColor(startColor: number, endColor: number, progress: number): number {
+  const clampedProgress = Math.max(0, Math.min(1, progress))
+  const startRed = (startColor >> 16) & 0xff
+  const startGreen = (startColor >> 8) & 0xff
+  const startBlue = startColor & 0xff
+  const endRed = (endColor >> 16) & 0xff
+  const endGreen = (endColor >> 8) & 0xff
+  const endBlue = endColor & 0xff
+
+  const red = Math.round(startRed + ((endRed - startRed) * clampedProgress))
+  const green = Math.round(startGreen + ((endGreen - startGreen) * clampedProgress))
+  const blue = Math.round(startBlue + ((endBlue - startBlue) * clampedProgress))
+
+  return (red << 16) | (green << 8) | blue
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 function getCanvasResolution(): number {
@@ -1426,6 +2173,17 @@ function getLabelResolution(): number {
   }
 
   return Math.max(2, window.devicePixelRatio * 2)
+}
+
+function waitForRendererCleanupFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      globalThis.requestAnimationFrame(() => resolve())
+      return
+    }
+
+    globalThis.setTimeout(resolve, 0)
+  })
 }
 
 function drawTopRoundedRect(
@@ -1453,18 +2211,12 @@ function haveVisualizerSettingsChanged(
 ): boolean {
   return (
     nextState.backgroundColor !== previousState.backgroundColor ||
-    nextState.bloomEnabled !== previousState.bloomEnabled ||
-    nextState.bloomRadius !== previousState.bloomRadius ||
-    nextState.bloomStrength !== previousState.bloomStrength ||
     nextState.colorMode !== previousState.colorMode ||
-    nextState.effectsEnabled.layeredGlow !== previousState.effectsEnabled.layeredGlow ||
     nextState.gradientBottomColorLeft !== previousState.gradientBottomColorLeft ||
     nextState.gradientBottomColorLeftBlack !== previousState.gradientBottomColorLeftBlack ||
     nextState.gradientBottomColorRight !== previousState.gradientBottomColorRight ||
     nextState.gradientBottomColorRightBlack !== previousState.gradientBottomColorRightBlack ||
     nextState.gradientTopColor !== previousState.gradientTopColor ||
-    nextState.keyGlowEnabled !== previousState.keyGlowEnabled ||
-    nextState.keyGlowIntensity !== previousState.keyGlowIntensity ||
     nextState.leftHandColor !== previousState.leftHandColor ||
     nextState.noteLabelColor !== previousState.noteLabelColor ||
     nextState.noteGradientDirection !== previousState.noteGradientDirection ||
@@ -1473,9 +2225,6 @@ function haveVisualizerSettingsChanged(
     nextState.noteLabelsOnKeys !== previousState.noteLabelsOnKeys ||
     nextState.noteLabelsOnNotes !== previousState.noteLabelsOnNotes ||
     nextState.noteStyle !== previousState.noteStyle ||
-    nextState.particleCount !== previousState.particleCount ||
-    nextState.particleSize !== previousState.particleSize ||
-    nextState.particlesEnabled !== previousState.particlesEnabled ||
     nextState.pitchClassColors !== previousState.pitchClassColors ||
     nextState.rightHandColor !== previousState.rightHandColor ||
     nextState.splitPitch !== previousState.splitPitch ||
@@ -1519,9 +2268,48 @@ function isNoteEligibleForLearnHand(
     return true
   }
 
+  return isPitchIncludedForHand(pitch, hand)
+}
+
+function isPitchIncludedForHand(
+  pitch: number,
+  hand: ReturnType<typeof getAppState>['learnV3']['sessionConfig']['hand'],
+): boolean {
   if (hand === 'left') {
     return pitch < 60
   }
 
-  return pitch >= 60
+  if (hand === 'right') {
+    return pitch >= 60
+  }
+
+  return true
+}
+
+function getActiveLearnVisuals(state: ReturnType<typeof getAppState>): ReturnType<typeof getAppState>['learnVisuals'] | null {
+  if (!state.learnV3.isActive) {
+    return null
+  }
+
+  return state.learnVisuals
+}
+
+function resolveLearnNoteColor(
+  pitch: number,
+  visuals: ReturnType<typeof getAppState>['learnVisuals'],
+): number {
+  if (visuals.noteColor === 'white') {
+    return 0xffffff
+  }
+
+  if (visuals.noteColor === 'custom') {
+    return hexToPixi(visuals.leftHandColor)
+  }
+
+  return pitch < 60 ? hexToPixi(visuals.leftHandColor) : hexToPixi(visuals.rightHandColor)
+}
+
+function resolveCreateModeNoteColor(pitch: number): number {
+  void pitch
+  return CREATE_MODE_NOTE_COLOR
 }

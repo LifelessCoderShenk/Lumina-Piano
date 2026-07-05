@@ -10,6 +10,9 @@ const electronApi = {
     return electron.ipcRenderer.invoke("library:saveUserSong", { sourcePath });
   },
   deleteSong: (songId) => electron.ipcRenderer.invoke("library:deleteUserSong", songId),
+  showSaveDialog: (options) => electron.ipcRenderer.invoke("dialog:showSaveDialog", options),
+  openJsonFile: () => electron.ipcRenderer.invoke("dialog:openJsonFile"),
+  openMidiFile: () => electron.ipcRenderer.invoke("dialog:openMidiFile"),
   dialog: {
     openMidiFile: () => electron.ipcRenderer.invoke("dialog:openMidiFile"),
     showSaveDialog: (options) => electron.ipcRenderer.invoke("dialog:showSaveDialog", options),

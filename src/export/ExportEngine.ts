@@ -6,7 +6,6 @@ import { writeAudioBufferToWav } from './wavWriter'
 import * as Tone from 'tone'
 
 import { cameraSystem } from '../camera/CameraSystem'
-import { effectsLayer } from '../effects/EffectsLayer'
 import { playbackEngine } from '../playback/PlaybackEngine'
 import { renderer } from '../renderer/Renderer'
 import type { AppState } from '../store/store'
@@ -131,7 +130,6 @@ export class ExportEngine {
       await mkdirExportDir(this.tempDir)
       renderer.resize(resolution.width, resolution.height)
       cameraSystem.setViewportSize(resolution.width, resolution.height)
-      effectsLayer.seek(0)
       await delay(50)
 
       const webmBuffer = await this.exportWithWebCodecs(
@@ -208,7 +206,6 @@ export class ExportEngine {
 
       renderer.resize(previousViewport.width, previousViewport.height)
       cameraSystem.setViewportSize(previousViewport.width, previousViewport.height)
-      effectsLayer.seek(getAppState().currentTick)
 
       if (this.tempDir != null) {
         await this.cleanup(this.tempDir)

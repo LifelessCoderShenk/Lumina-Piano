@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 
+import { audioScheduler } from '../../audio/AudioScheduler'
 import { loadMidiFileFromPath } from '../../midi/loadMidiProject'
 import type { Note, ProjectData } from '../../midi/types'
 import { playbackEngine } from '../../playback/PlaybackEngine'
@@ -21,8 +22,6 @@ export function ListenSession() {
   const setAppMode = useAppStore((state) => state.setAppMode)
   const setNoteLabelsOnKeys = useAppStore((state) => state.setNoteLabelsOnKeys)
   const setNoteLabelsOnNotes = useAppStore((state) => state.setNoteLabelsOnNotes)
-  const setParticlesEnabled = useAppStore((state) => state.setParticlesEnabled)
-  const setShowBloom = useAppStore((state) => state.setShowBloom)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [showWaveform, setShowWaveform] = useState(true)
   const [activeTempoMultiplier, setActiveTempoMultiplier] = useState(tempoMultiplier)
@@ -35,16 +34,12 @@ export function ListenSession() {
   useEffect(() => {
     let disposed = false
     const previousSettings = {
-      bloomEnabled: useAppStore.getState().bloomEnabled,
       noteLabelsOnKeys: useAppStore.getState().noteLabelsOnKeys,
       noteLabelsOnNotes: useAppStore.getState().noteLabelsOnNotes,
-      particlesEnabled: useAppStore.getState().particlesEnabled,
     }
 
-    setShowBloom(false)
     setNoteLabelsOnNotes(true)
     setNoteLabelsOnKeys(true)
-    setParticlesEnabled(false)
 
     const handleEnded = () => {
       sessionExitReasonRef.current = 'ended'
@@ -53,10 +48,8 @@ export function ListenSession() {
     }
 
     restoreSessionDefaultsRef.current = () => {
-      setShowBloom(previousSettings.bloomEnabled)
       setNoteLabelsOnNotes(previousSettings.noteLabelsOnNotes)
       setNoteLabelsOnKeys(previousSettings.noteLabelsOnKeys)
-      setParticlesEnabled(previousSettings.particlesEnabled)
     }
 
     const startSession = async () => {
@@ -90,6 +83,11 @@ export function ListenSession() {
         }
 
         playbackEngine.seek(0)
+        await audioScheduler.warmUpAudio()
+        if (disposed) {
+          return
+        }
+
         playbackEngine.play()
       } catch (error) {
         console.error('Failed to start listen session:', error)
@@ -122,8 +120,6 @@ export function ListenSession() {
     setAppMode,
     setNoteLabelsOnKeys,
     setNoteLabelsOnNotes,
-    setParticlesEnabled,
-    setShowBloom,
     tempoMultiplier,
   ])
 
@@ -182,12 +178,12 @@ export function ListenSession() {
           <button
             type="button"
             className={styles.controlButton}
-            onClick={() => {
+            onClick={async () => {
               sessionExitReasonRef.current = 'back'
               playbackEngine.pause()
               playbackEngine.seek(0)
               void playbackEngine.setTempoMultiplier(1.0)
-              renderer.destroy()
+              await renderer.destroy()
               restoreSessionDefaultsRef.current?.()
               exitSession()
               setAppMode('learnSong')
