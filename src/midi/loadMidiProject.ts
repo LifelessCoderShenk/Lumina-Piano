@@ -4,7 +4,8 @@ import { audioScheduler } from '../audio/AudioScheduler'
 import { PlaybackEngineError, playbackEngine } from '../playback/PlaybackEngine'
 import { renderer } from '../renderer/Renderer'
 import { spatialIndex } from '../spatial/SpatialIndex'
-import { getAppState, useAppStore } from '../store/store'
+import { registerMidiPieceLoader } from '../store/midiPieceLoaderAccess'
+import { getStoreCurrentTick, loadProjectIntoStore } from '../store/projectLoadingAccess'
 import { buildTempoMap } from '../tempo/tempoMap'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 
@@ -58,11 +59,11 @@ export async function loadMidiBytes(bytes: Uint8Array): Promise<boolean> {
   await ensureAudioSchedulerReady()
   ensurePlaybackEngineReady(tempoMap)
   spatialIndex.build(parsedProject)
-  useAppStore.getState().loadProject(parsedProject, tempoMap)
+  loadProjectIntoStore(parsedProject, tempoMap)
   playbackEngine.seek(0)
 
   if (renderer.isReady()) {
-    renderer.renderFrame(getAppState().currentTick)
+    renderer.renderFrame(getStoreCurrentTick())
   }
 
   return true
@@ -105,3 +106,8 @@ export function isMidiFilePath(filePath: string): boolean {
   const normalizedPath = filePath.trim().toLowerCase()
   return normalizedPath.endsWith('.mid') || normalizedPath.endsWith('.midi')
 }
+
+registerMidiPieceLoader({
+  loadMidiFileFromPath,
+  warmUpAudioAndStartPlayback,
+})

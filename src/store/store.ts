@@ -5,6 +5,10 @@ import { useShallow } from 'zustand/react/shallow'
 
 import type { ProjectData, Track } from '../midi/types'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
+import { registerLearnV3ActivityReader } from './learnV3Activity'
+import { getMidiPieceLoader } from './midiPieceLoaderAccess'
+import { registerProjectDataStoreAccess } from './projectDataAccess'
+import { registerProjectLoadingStoreAccess } from './projectLoadingAccess'
 import { StoreError } from './errors'
 
 enableMapSet()
@@ -835,8 +839,8 @@ export const useAppStore = create<AppStore>()(
       }
 
       try {
-        const { loadMidiFileFromPath, warmUpAudioAndStartPlayback } = await import('../midi/loadMidiProject')
-        const loaded = await loadMidiFileFromPath(piece.filePath)
+        const midiPieceLoader = getMidiPieceLoader()
+        const loaded = await midiPieceLoader.loadMidiFileFromPath(piece.filePath)
 
         if (loaded) {
           set((state) => {
@@ -845,7 +849,7 @@ export const useAppStore = create<AppStore>()(
             state.loadPieceError = null
           })
 
-          await warmUpAudioAndStartPlayback()
+          await midiPieceLoader.warmUpAudioAndStartPlayback()
         }
 
         return loaded
@@ -1421,6 +1425,22 @@ export const useAppStore = create<AppStore>()(
     },
   })),
 )
+
+registerLearnV3ActivityReader(() => useAppStore.getState().learnV3.isActive)
+registerProjectDataStoreAccess({
+  getCurrentProjectData: () => useAppStore.getState().projectData,
+  subscribeToProjectData: (listener) => {
+    return useAppStore.subscribe((state, previousState) => {
+      if (state.projectData !== previousState.projectData) {
+        listener(state.projectData, previousState.projectData)
+      }
+    })
+  },
+})
+registerProjectLoadingStoreAccess({
+  getCurrentTick: () => useAppStore.getState().currentTick,
+  loadProject: (projectData, tempoMap) => useAppStore.getState().loadProject(projectData, tempoMap),
+})
 
 export const useProjectData = () => useAppStore(useShallow(projectDataSelector))
 

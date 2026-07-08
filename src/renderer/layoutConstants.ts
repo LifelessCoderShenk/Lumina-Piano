@@ -1,4 +1,4 @@
-import { getAppState } from '../store/store'
+import { isLearnV3Active } from '../store/learnV3Activity'
 
 export const KEYBOARD_HEIGHT = 270
 export const HIT_LINE_HEIGHT = 8
@@ -39,7 +39,7 @@ export function getKeyboardScaleMultiplier(): number {
     return 1
   }
 
-  return getAppState().learnV3.isActive ? 1 : CREATE_MODE_FULLSCREEN_KEYBOARD_SCALE
+  return isLearnV3Active() ? 1 : CREATE_MODE_FULLSCREEN_KEYBOARD_SCALE
 }
 
 export function getKeyboardLayoutMetrics(canvasHeight: number): KeyboardLayoutMetrics {

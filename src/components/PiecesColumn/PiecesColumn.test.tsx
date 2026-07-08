@@ -10,6 +10,12 @@ vi.mock('../../midi/loadMidiProject', () => ({
   warmUpAudioAndStartPlayback: mockWarmUpAudioAndStartPlayback,
 }))
 
+const { registerMidiPieceLoader } = await import('../../store/midiPieceLoaderAccess')
+registerMidiPieceLoader({
+  loadMidiFileFromPath: mockLoadMidiFileFromPath,
+  warmUpAudioAndStartPlayback: mockWarmUpAudioAndStartPlayback,
+})
+
 const { PiecesColumn } = await import('./PiecesColumn')
 const { resetStore, useAppStore } = await import('../../store/store')
 

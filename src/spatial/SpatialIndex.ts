@@ -1,6 +1,6 @@
 import type { CameraViewport } from '../camera/CameraSystem'
 import type { Note, ProjectData } from '../midi/types'
-import { getAppState, subscribeToStore } from '../store/store'
+import { getCurrentProjectData, subscribeToProjectData } from '../store/projectDataAccess'
 import { SpatialIndexError } from './errors'
 
 export interface IndexedNote {
@@ -21,17 +21,17 @@ export class SpatialIndex {
     this.autoSubscribe = autoSubscribe
 
     if (this.autoSubscribe) {
-      subscribeToStore((state, previousState) => {
-        if (state.projectData !== previousState.projectData) {
-          if (state.projectData != null) {
-            this.build(state.projectData)
+      subscribeToProjectData((projectData, previousProjectData) => {
+        if (projectData !== previousProjectData) {
+          if (projectData != null) {
+            this.build(projectData)
           } else {
             this.clear()
           }
         }
       })
 
-      const currentProject = getAppState().projectData
+      const currentProject = getCurrentProjectData()
       if (currentProject != null) {
         this.build(currentProject)
       }
