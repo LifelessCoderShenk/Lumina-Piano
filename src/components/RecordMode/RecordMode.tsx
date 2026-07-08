@@ -3,10 +3,13 @@ import React, { useEffect, useRef, useState } from 'react'
 import { audioScheduler } from '../../audio/AudioScheduler'
 import { playbackEngine } from '../../playback/PlaybackEngine'
 import { renderer } from '../../renderer/Renderer'
-import { cameraOverlayInitial, useAppStore } from '../../store/store'
-import { secondsToTick, tickToSeconds } from '../../tempo/tempoMap'
+import { useAppStore } from '../../store/store'
 import { compositeExport } from '../../utils/compositeExport'
 import { CanvasArea } from '../CanvasArea/CanvasArea'
+import { useCameraAlignment } from '../shared/useCameraAlignment'
+import { useCountdown } from '../shared/useCountdown'
+import { useMediaRecording } from '../shared/useMediaRecording'
+import { usePreviewPlayback } from '../shared/usePreviewPlayback'
 import styles from './RecordMode.module.css'
 
 interface MidiMessageEventLike {
@@ -45,11 +48,6 @@ export function RecordMode() {
   const reviewVideoRef = useRef<HTMLVideoElement | null>(null)
   const setupPreviewStreamRef = useRef<MediaStream | null>(null)
   const recordingStreamRef = useRef<MediaStream | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const recordingChunksRef = useRef<BlobPart[]>([])
-  const countdownTimeoutIdsRef = useRef<Array<ReturnType<typeof globalThis.setTimeout>>>([])
-  const previewUrlRef = useRef<string | null>(null)
-  const previewStartTimeRef = useRef(0)
   const isMountedRef = useRef(false)
   const midiAccessRef = useRef<MidiAccessLike | null>(null)
   const midiTestTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
@@ -60,71 +58,87 @@ export function RecordMode() {
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle')
   const [midiTestStatus, setMidiTestStatus] = useState<MidiTestStatus>('idle')
   const [phase, setPhase] = useState<RecordModePhase>('setup')
-  const [countdownValue, setCountdownValue] = useState<number | null>(null)
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [previewCurrentTime, setPreviewCurrentTime] = useState(0)
-  const [previewDuration, setPreviewDuration] = useState(0)
-  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [midiMuted, setMidiMuted] = useState(false)
   const [isTrackVisible, setIsTrackVisible] = useState(false)
   const addPiece = useAppStore((state) => state.addPiece)
-  const alignStep = useAppStore((state) => state.alignStep)
-  const cameraOverlay = useAppStore((state) => state.cameraOverlay)
   const currentPieceId = useAppStore((state) => state.currentPieceId)
   const pieces = useAppStore((state) => state.pieces)
   const precomputedTempoMap = useAppStore((state) => state.precomputedTempoMap)
   const recordModeConfig = useAppStore((state) => state.recordModeConfig)
-  const setAlignStep = useAppStore((state) => state.setAlignStep)
   const setAppMode = useAppStore((state) => state.setAppMode)
-  const setCameraOverlay = useAppStore((state) => state.setCameraOverlay)
-  const setHighCPoint = useAppStore((state) => state.setHighCPoint)
-  const setLowAPoint = useAppStore((state) => state.setLowAPoint)
   const setRecordModeConfig = useAppStore((state) => state.setRecordModeConfig)
   const loadedPieceName = pieces.find((piece) => piece.id === currentPieceId)?.name ?? 'My Recording'
   const isSetup = phase === 'setup'
   const isLiveView = phase === 'countdown' || phase === 'recording'
   const isReview = phase === 'review'
   const hasRecording = recordingBlob != null
-  const controlsDisabled = !hasRecording
-  const cropTop = Math.max(0, cameraOverlay.cropTop)
-  const cropRight = Math.max(0, cameraOverlay.cropRight)
-  const cropBottom = Math.max(0, cameraOverlay.cropBottom)
-  const cropLeft = Math.max(0, cameraOverlay.cropLeft)
-  const cropFrameStyle = {
-    height: `calc(100% + ${cropTop + cropBottom}px)`,
-    left: `-${cropLeft}px`,
-    top: `-${cropTop}px`,
-    width: `calc(100% + ${cropLeft + cropRight}px)`,
-  }
+  const {
+    alignStep,
+    cameraOverlay,
+    cancelAlignment,
+    cropBottom,
+    cropFrameStyle,
+    cropLeft,
+    cropRight,
+    cropTop,
+    isAligned,
+    resetCameraOverlay,
+    setCameraOverlay,
+    startAlignment,
+  } = useCameraAlignment()
+  const { clearCountdown, countdownValue, setCountdownValue, waitForCountdownStep } = useCountdown()
+  const { mediaRecorderRef, recordingChunksRef, stopMediaStream } = useMediaRecording()
+  const {
+    clearPreviewSource,
+    handlePreviewScrub,
+    isPreviewPlaying,
+    pausePreview,
+    previewCurrentTime,
+    previewDuration,
+    resetPreviewState,
+    setPreviewSource,
+    togglePreviewPlayback,
+  } = usePreviewPlayback({
+    active: isReview,
+    onBeforePlay: () => {
+      audioScheduler.setMuted(false)
+      setMidiMuted(false)
+    },
+    onResetPlayback: resetPlaybackToStart,
+    playErrorMessage: 'Unable to play Record Mode preview.',
+    precomputedTempoMap,
+    preRollSeconds: RECORD_MODE_PRE_ROLL_SECONDS,
+    previewVideoRef: reviewVideoRef,
+  })
 
   useEffect(() => {
     isMountedRef.current = true
+    const setupPreviewVideo = setupPreviewVideoRef.current
+    const liveVideo = liveVideoRef.current
 
     return () => {
       isMountedRef.current = false
-      clearCountdownTimeouts(countdownTimeoutIdsRef.current)
+      clearCountdown()
       clearMidiTest()
       resetPlaybackToStart()
       renderer.setKeyboardOpacity(1)
-      revokePreviewUrl(previewUrlRef.current)
+      clearPreviewSource()
       stopMediaStream(setupPreviewStreamRef.current)
       stopMediaStream(recordingStreamRef.current)
       setupPreviewStreamRef.current = null
       recordingStreamRef.current = null
-      if (setupPreviewVideoRef.current != null) {
-        setupPreviewVideoRef.current.srcObject = null
+      if (setupPreviewVideo != null) {
+        setupPreviewVideo.srcObject = null
       }
-      if (liveVideoRef.current != null) {
-        liveVideoRef.current.srcObject = null
+      if (liveVideo != null) {
+        liveVideo.srcObject = null
       }
-      if (reviewVideoRef.current != null) {
-        reviewVideoRef.current.pause()
-      }
+      pausePreview()
       audioScheduler.setMuted(false)
     }
-  }, [])
+  }, [clearCountdown, clearPreviewSource, pausePreview, stopMediaStream])
 
   useEffect(() => {
     audioScheduler.setMuted(midiMuted)
@@ -207,6 +221,7 @@ export function RecordMode() {
     }
 
     let cancelled = false
+    const setupPreviewVideo = setupPreviewVideoRef.current
 
     const startPreview = async () => {
       stopMediaStream(setupPreviewStreamRef.current)
@@ -214,8 +229,8 @@ export function RecordMode() {
 
       if (recordModeConfig.cameraDeviceId == null || recordModeConfig.cameraDeviceId.length === 0) {
         setCameraStatus('idle')
-        if (setupPreviewVideoRef.current != null) {
-          setupPreviewVideoRef.current.srcObject = null
+        if (setupPreviewVideo != null) {
+          setupPreviewVideo.srcObject = null
         }
         return
       }
@@ -239,13 +254,13 @@ export function RecordMode() {
 
         setupPreviewStreamRef.current = stream
 
-        if (setupPreviewVideoRef.current == null) {
+        if (setupPreviewVideo == null) {
           stopMediaStream(stream)
           return
         }
 
-        setupPreviewVideoRef.current.srcObject = stream
-        await setupPreviewVideoRef.current.play()
+        setupPreviewVideo.srcObject = stream
+        await setupPreviewVideo.play()
 
         if (!cancelled && isMountedRef.current) {
           setCameraStatus('ready')
@@ -264,11 +279,11 @@ export function RecordMode() {
       cancelled = true
       stopMediaStream(setupPreviewStreamRef.current)
       setupPreviewStreamRef.current = null
-      if (setupPreviewVideoRef.current != null) {
-        setupPreviewVideoRef.current.srcObject = null
+      if (setupPreviewVideo != null) {
+        setupPreviewVideo.srcObject = null
       }
     }
-  }, [isSetup, recordModeConfig.cameraDeviceId])
+  }, [isSetup, recordModeConfig.cameraDeviceId, stopMediaStream])
 
   useEffect(() => {
     if (!isLiveView || liveVideoRef.current == null || recordingStreamRef.current == null) {
@@ -298,81 +313,6 @@ export function RecordMode() {
       cancelled = true
     }
   }, [isLiveView])
-
-  useEffect(() => {
-    if (!isReview || previewUrl == null || reviewVideoRef.current == null) {
-      return
-    }
-
-    const reviewVideo = reviewVideoRef.current
-    reviewVideo.src = previewUrl
-    if (typeof reviewVideo.load === 'function') {
-      reviewVideo.load()
-    }
-
-    const handleTimeUpdate = () => {
-      setPreviewCurrentTime(reviewVideo.currentTime)
-
-      if (precomputedTempoMap == null) {
-        return
-      }
-
-      const videoTime = reviewVideo.currentTime
-      if (videoTime < RECORD_MODE_PRE_ROLL_SECONDS) {
-        return
-      }
-
-      const elapsedSincePreviewStart = performance.now() - previewStartTimeRef.current
-      if (elapsedSincePreviewStart < 2000) {
-        return
-      }
-
-      const currentEngineSeconds = tickToSeconds(playbackEngine.getCurrentTick(), precomputedTempoMap)
-      const engineTimeWithPreRoll = currentEngineSeconds + RECORD_MODE_PRE_ROLL_SECONDS
-      if (Math.abs(videoTime - engineTimeWithPreRoll) > 0.3) {
-        playbackEngine.seek(
-          secondsToTick(
-            Math.max(0, videoTime - RECORD_MODE_PRE_ROLL_SECONDS),
-            precomputedTempoMap,
-          ),
-        )
-      }
-    }
-
-    const handleEnded = () => {
-      setIsPreviewPlaying(false)
-      reviewVideo.currentTime = 0
-      setPreviewCurrentTime(0)
-      resetPlaybackToStart()
-    }
-
-    const handlePause = () => {
-      setIsPreviewPlaying(false)
-    }
-
-    const handlePlay = () => {
-      setIsPreviewPlaying(true)
-    }
-
-    const handleLoadedMetadata = () => {
-      setPreviewDuration(Number.isFinite(reviewVideo.duration) ? reviewVideo.duration : 0)
-      setPreviewCurrentTime(reviewVideo.currentTime)
-    }
-
-    reviewVideo.addEventListener('timeupdate', handleTimeUpdate)
-    reviewVideo.addEventListener('ended', handleEnded)
-    reviewVideo.addEventListener('pause', handlePause)
-    reviewVideo.addEventListener('play', handlePlay)
-    reviewVideo.addEventListener('loadedmetadata', handleLoadedMetadata)
-
-    return () => {
-      reviewVideo.removeEventListener('timeupdate', handleTimeUpdate)
-      reviewVideo.removeEventListener('ended', handleEnded)
-      reviewVideo.removeEventListener('pause', handlePause)
-      reviewVideo.removeEventListener('play', handlePlay)
-      reviewVideo.removeEventListener('loadedmetadata', handleLoadedMetadata)
-    }
-  }, [isReview, previewUrl, precomputedTempoMap])
 
   useEffect(() => {
     setMidiTestStatus('idle')
@@ -425,90 +365,6 @@ export function RecordMode() {
     }, MIDI_TEST_TIMEOUT_MS)
   }
 
-  const waitForCountdownStep = (ms: number): Promise<void> => {
-    return new Promise((resolve) => {
-      const timeoutId = globalThis.setTimeout(() => {
-        countdownTimeoutIdsRef.current = countdownTimeoutIdsRef.current.filter((id) => id !== timeoutId)
-        resolve()
-      }, ms)
-      countdownTimeoutIdsRef.current.push(timeoutId)
-    })
-  }
-
-  const startAlignment = () => {
-    setLowAPoint(null)
-    setHighCPoint(null)
-    renderer.setKeyboardOpacity(0.3)
-    setAlignStep('waiting-low-a')
-  }
-
-  const cancelAlignment = () => {
-    setLowAPoint(null)
-    setHighCPoint(null)
-    setAlignStep('idle')
-    renderer.setKeyboardOpacity(1)
-  }
-
-  const syncPlaybackToReviewTime = (videoTime: number, shouldPlay: boolean): boolean => {
-    const state = useAppStore.getState()
-    if (state.projectData == null || state.precomputedTempoMap == null) {
-      return false
-    }
-
-    previewStartTimeRef.current = performance.now()
-
-    if (videoTime < RECORD_MODE_PRE_ROLL_SECONDS) {
-      playbackEngine.pause()
-      playbackEngine.playWithPreRoll(RECORD_MODE_PRE_ROLL_SECONDS - videoTime)
-      if (!shouldPlay) {
-        playbackEngine.pause()
-      }
-      return true
-    }
-
-    const targetTick = secondsToTick(
-      videoTime - RECORD_MODE_PRE_ROLL_SECONDS,
-      state.precomputedTempoMap,
-    )
-    playbackEngine.seek(targetTick)
-    if (shouldPlay) {
-      playbackEngine.play()
-    } else {
-      playbackEngine.pause()
-    }
-    return true
-  }
-
-  const togglePreviewPlayback = async () => {
-    const reviewVideo = reviewVideoRef.current
-    if (reviewVideo == null) {
-      return
-    }
-
-    if (isPreviewPlaying) {
-      reviewVideo.pause()
-      playbackEngine.pause()
-      setIsPreviewPlaying(false)
-      return
-    }
-
-    audioScheduler.setMuted(false)
-    setMidiMuted(false)
-
-    try {
-      await reviewVideo.play()
-      if (!syncPlaybackToReviewTime(reviewVideo.currentTime, true)) {
-        setIsPreviewPlaying(true)
-        return
-      }
-
-      setIsPreviewPlaying(true)
-    } catch (error) {
-      resetPlaybackToStart()
-      console.warn('Unable to play Record Mode preview.', error)
-    }
-  }
-
   const beginRecording = async () => {
     if (
       !isSetup ||
@@ -519,17 +375,13 @@ export function RecordMode() {
       return
     }
 
-    clearCountdownTimeouts(countdownTimeoutIdsRef.current)
+    clearCountdown()
     clearMidiTest()
     cancelAlignment()
     setIsTrackVisible(false)
-    setPreviewCurrentTime(0)
-    setPreviewDuration(0)
-    setIsPreviewPlaying(false)
+    resetPreviewState()
     setRecordingBlob(null)
-    setPreviewUrl(null)
-    revokePreviewUrl(previewUrlRef.current)
-    previewUrlRef.current = null
+    clearPreviewSource()
     stopMediaStream(setupPreviewStreamRef.current)
     setupPreviewStreamRef.current = null
     if (setupPreviewVideoRef.current != null) {
@@ -607,7 +459,7 @@ export function RecordMode() {
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordingChunksRef.current, { type: 'video/webm' })
         const nextPreviewUrl = URL.createObjectURL(blob)
-        previewUrlRef.current = nextPreviewUrl
+        setPreviewSource(nextPreviewUrl)
         stopMediaStream(recordingStreamRef.current)
         recordingStreamRef.current = null
         if (liveVideoRef.current != null) {
@@ -616,10 +468,7 @@ export function RecordMode() {
         audioScheduler.setMuted(false)
         if (isMountedRef.current) {
           setRecordingBlob(blob)
-          setPreviewUrl(nextPreviewUrl)
-          setPreviewCurrentTime(0)
-          setPreviewDuration(0)
-          setIsPreviewPlaying(false)
+          resetPreviewState()
           setCountdownValue(null)
           setPhase('review')
         }
@@ -655,7 +504,7 @@ export function RecordMode() {
 
   const resetToSetup = () => {
     cancelAlignment()
-    clearCountdownTimeouts(countdownTimeoutIdsRef.current)
+    clearCountdown()
     resetPlaybackToStart()
     audioScheduler.setMuted(false)
     setMidiMuted(false)
@@ -663,13 +512,9 @@ export function RecordMode() {
     setCountdownValue(null)
     setPhase('setup')
     setRecordingBlob(null)
-    setPreviewCurrentTime(0)
-    setPreviewDuration(0)
-    setPreviewUrl(null)
-    setIsPreviewPlaying(false)
+    resetPreviewState()
     setIsTrackVisible(false)
-    revokePreviewUrl(previewUrlRef.current)
-    previewUrlRef.current = null
+    clearPreviewSource()
     if (reviewVideoRef.current != null) {
       reviewVideoRef.current.pause()
       reviewVideoRef.current.currentTime = 0
@@ -679,7 +524,7 @@ export function RecordMode() {
     if (liveVideoRef.current != null) {
       liveVideoRef.current.srcObject = null
     }
-    setCameraOverlay({ ...cameraOverlayInitial })
+    resetCameraOverlay()
   }
 
   const handleExport = async () => {
@@ -735,18 +580,6 @@ export function RecordMode() {
       resetPlaybackToStart()
       console.warn('Unable to export Record Mode composite.', error)
     }
-  }
-
-  const handlePreviewScrub = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const reviewVideo = reviewVideoRef.current
-    if (reviewVideo == null || !isReview) {
-      return
-    }
-
-    const nextTime = Number(event.target.value)
-    reviewVideo.currentTime = nextTime
-    setPreviewCurrentTime(nextTime)
-    syncPlaybackToReviewTime(nextTime, isPreviewPlaying)
   }
 
   return (
@@ -1077,7 +910,6 @@ export function RecordMode() {
 
   function renderAdjustmentControls(disabled: boolean, testId: string) {
     const wrapperClassName = disabled ? styles.disabledControls : styles.enabledControls
-    const isAligned = alignStep === 'complete'
 
     return (
       <div className={wrapperClassName} data-testid={testId}>
@@ -1249,27 +1081,6 @@ export function RecordMode() {
       midiTestTimeoutRef.current = null
     }
   }
-}
-
-function stopMediaStream(stream: MediaStream | null) {
-  stream?.getTracks().forEach((track) => {
-    track.stop()
-  })
-}
-
-function clearCountdownTimeouts(timeoutIds: Array<ReturnType<typeof globalThis.setTimeout>>) {
-  timeoutIds.forEach((timeoutId) => {
-    globalThis.clearTimeout(timeoutId)
-  })
-  timeoutIds.length = 0
-}
-
-function revokePreviewUrl(previewUrl: string | null) {
-  if (previewUrl == null) {
-    return
-  }
-
-  URL.revokeObjectURL(previewUrl)
 }
 
 function resetPlaybackToStart() {

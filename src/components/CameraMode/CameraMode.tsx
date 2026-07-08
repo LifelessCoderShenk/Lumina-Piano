@@ -1,10 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { audioScheduler } from '../../audio/AudioScheduler'
 import { playbackEngine } from '../../playback/PlaybackEngine'
 import { useAppStore } from '../../store/store'
-import { secondsToTick, tickToSeconds } from '../../tempo/tempoMap'
 import { compositeExport } from '../../utils/compositeExport'
+import { useCameraAlignment } from '../shared/useCameraAlignment'
+import { useCountdown } from '../shared/useCountdown'
+import { useMediaRecording } from '../shared/useMediaRecording'
+import { usePreviewPlayback } from '../shared/usePreviewPlayback'
 import styles from './CameraMode.module.css'
 
 const CAMERA_MODE_PRE_ROLL_SECONDS = 3
@@ -49,13 +52,8 @@ export function CameraMode({
   const videoRef = useRef<HTMLVideoElement>(null)
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const recordingChunksRef = useRef<BlobPart[]>([])
   const audioWaveformCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const waveformDrawnRef = useRef(false)
-  const countdownTimeoutIdsRef = useRef<Array<ReturnType<typeof globalThis.setTimeout>>>([])
-  const previewUrlRef = useRef<string | null>(null)
-  const previewStartTimeRef = useRef(0)
   const barAreaRefs = useRef<Record<TrackKey, HTMLDivElement | null>>({
     audio: null,
     video: null,
@@ -67,13 +65,8 @@ export function CameraMode({
   const animationFrameRef = useRef<number | null>(null)
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('loading')
   const [isRecording, setIsRecording] = useState(false)
-  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false)
-  const [countdownValue, setCountdownValue] = useState<number | null>(null)
   const [midiMuted, setMidiMuted] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [previewCurrentTime, setPreviewCurrentTime] = useState(0)
-  const [previewDuration, setPreviewDuration] = useState(0)
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [trackOffsets, setTrackOffsets] = useState<TrackOffsets>(INITIAL_TRACK_OFFSETS)
@@ -81,26 +74,47 @@ export function CameraMode({
   const [draggingTrack, setDraggingTrack] = useState<TrackKey | null>(null)
   const [draggingTrim, setDraggingTrim] = useState<{ side: 'start' | 'end'; track: TrackKey } | null>(null)
   const currentPieceId = useAppStore((state) => state.currentPieceId)
-  const cameraOverlay = useAppStore((state) => state.cameraOverlay)
   const isProjectLoaded = useAppStore((state) => state.isProjectLoaded)
   const pieces = useAppStore((state) => state.pieces)
   const precomputedTempoMap = useAppStore((state) => state.precomputedTempoMap)
-  const alignStep = useAppStore((state) => state.alignStep)
   const setAppMode = useAppStore((state) => state.setAppMode)
   const setActiveSecondBarTab = useAppStore((state) => state.setActiveSecondBarTab)
+  const {
+    cropBottom,
+    cropFrameStyle,
+    cropLeft,
+    cropRight,
+    cropTop,
+    isAlignmentActive,
+  } = useCameraAlignment()
+  const { clearCountdown, countdownValue, setCountdownValue, waitForCountdownStep } = useCountdown()
+  const { mediaRecorderRef, recordingChunksRef, stopMediaStream } = useMediaRecording()
+  const {
+    clearPreviewSource,
+    handlePreviewScrub,
+    isPreviewPlaying,
+    pausePreview,
+    previewCurrentTime,
+    previewDuration,
+    resetPreviewState,
+    setPreviewSource,
+    togglePreviewPlayback,
+  } = usePreviewPlayback({
+    active: previewMode,
+    onBeforePlay: () => {
+      audioScheduler.setMuted(false)
+      setMidiMuted(false)
+    },
+    onResetPlayback: resetPlaybackToStart,
+    playErrorMessage: 'Unable to play camera preview.',
+    precomputedTempoMap,
+    preRollSeconds: CAMERA_MODE_PRE_ROLL_SECONDS,
+    previewVideoRef,
+    syncUnavailableMessage: 'togglePreviewPlayback: no project loaded, skipping visualizer sync',
+  })
 
   const loadedPieceName = pieces.find((piece) => piece.id === currentPieceId)?.name ?? 'piece'
   const hasRecording = recordingBlob != null
-  const cropTop = Math.max(0, cameraOverlay.cropTop)
-  const cropRight = Math.max(0, cameraOverlay.cropRight)
-  const cropBottom = Math.max(0, cameraOverlay.cropBottom)
-  const cropLeft = Math.max(0, cameraOverlay.cropLeft)
-  const cropFrameStyle = {
-    height: `calc(100% + ${cropTop + cropBottom}px)`,
-    left: `-${cropLeft}px`,
-    top: `-${cropTop}px`,
-    width: `calc(100% + ${cropLeft + cropRight}px)`,
-  }
 
   timelineVisibleRef.current = isTimelineVisible
 
@@ -141,97 +155,30 @@ export function CameraMode({
     }
   }, [midiMuted])
 
-  useEffect(() => {
-    if (!previewMode || previewUrl == null || previewVideoRef.current == null) {
-      return
+  const stopRecording = useCallback(() => {
+    isRecordingRef.current = false
+    clearCountdown()
+
+    if (animationFrameRef.current != null) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
     }
 
-    const previewVideo = previewVideoRef.current
-    previewVideo.src = previewUrl
-    if (typeof previewVideo.load === 'function') {
-      previewVideo.load()
+    if (mediaRecorderRef.current != null && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
     }
 
-    const handleTimeUpdate = () => {
-      setPreviewCurrentTime(previewVideo.currentTime)
+    resetPlaybackToStart()
 
-      if (precomputedTempoMap == null) {
-        return
-      }
-
-      const videoTime = previewVideo.currentTime
-      if (videoTime < CAMERA_MODE_PRE_ROLL_SECONDS) {
-        return
-      }
-
-      const elapsedSincePreviewStart = performance.now() - previewStartTimeRef.current
-      if (elapsedSincePreviewStart < 2000) {
-        return
-      }
-
-      const currentEngineSeconds = tickToSeconds(playbackEngine.getCurrentTick(), precomputedTempoMap)
-      const engineTimeWithPreRoll = currentEngineSeconds + CAMERA_MODE_PRE_ROLL_SECONDS
-      if (Math.abs(videoTime - engineTimeWithPreRoll) > 0.3) {
-        playbackEngine.seek(
-          secondsToTick(
-            Math.max(0, videoTime - CAMERA_MODE_PRE_ROLL_SECONDS),
-            precomputedTempoMap,
-          ),
-        )
-      }
+    if (isMountedRef.current) {
+      setCountdownValue(null)
+      setIsRecording(false)
     }
-
-    const handleEnded = () => {
-      setIsPreviewPlaying(false)
-      previewVideo.currentTime = 0
-      setPreviewCurrentTime(0)
-      resetPlaybackToStart()
-    }
-
-    const handlePause = () => {
-      setIsPreviewPlaying(false)
-    }
-
-    const handlePlay = () => {
-      setIsPreviewPlaying(true)
-    }
-
-    const handleLoadedMetadata = () => {
-      setPreviewDuration(Number.isFinite(previewVideo.duration) ? previewVideo.duration : 0)
-      setPreviewCurrentTime(previewVideo.currentTime)
-    }
-
-    previewVideo.addEventListener('timeupdate', handleTimeUpdate)
-    previewVideo.addEventListener('ended', handleEnded)
-    previewVideo.addEventListener('pause', handlePause)
-    previewVideo.addEventListener('play', handlePlay)
-    previewVideo.addEventListener('loadedmetadata', handleLoadedMetadata)
-
-    return () => {
-      previewVideo.removeEventListener('timeupdate', handleTimeUpdate)
-      previewVideo.removeEventListener('ended', handleEnded)
-      previewVideo.removeEventListener('pause', handlePause)
-      previewVideo.removeEventListener('play', handlePlay)
-      previewVideo.removeEventListener('loadedmetadata', handleLoadedMetadata)
-    }
-  }, [precomputedTempoMap, previewMode, previewUrl])
-
-  useEffect(() => {
-    const handlePlaybackEnded = () => {
-      if (isRecordingRef.current) {
-        stopRecording()
-      }
-    }
-
-    playbackEngine.on('onEnded', handlePlaybackEnded)
-
-    return () => {
-      playbackEngine.off('onEnded', handlePlaybackEnded)
-    }
-  }, [])
+  }, [clearCountdown, mediaRecorderRef, setCountdownValue])
 
   useEffect(() => {
     let cancelled = false
+    const videoElement = videoRef.current
 
     const startVideoStream = async () => {
       setCameraStatus('loading')
@@ -253,13 +200,13 @@ export function CameraMode({
 
         streamRef.current = stream
 
-        if (videoRef.current == null) {
+        if (videoElement == null) {
           stopMediaStream(stream)
           return
         }
 
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
+        videoElement.srcObject = stream
+        await videoElement.play()
 
         if (!cancelled && isMountedRef.current) {
           setCameraStatus('ready')
@@ -277,57 +224,37 @@ export function CameraMode({
     return () => {
       cancelled = true
       isMountedRef.current = false
-      clearCountdownTimeouts(countdownTimeoutIdsRef.current)
+      clearCountdown()
       stopRecording()
-      if (previewVideoRef.current != null) {
-        previewVideoRef.current.pause()
-      }
+      pausePreview()
       if (animationFrameRef.current != null) {
         cancelAnimationFrame(animationFrameRef.current)
         animationFrameRef.current = null
       }
-      revokePreviewUrl(previewUrlRef.current)
-      previewUrlRef.current = null
-      if (videoRef.current != null) {
-        videoRef.current.srcObject = null
+      clearPreviewSource()
+      if (videoElement != null) {
+        videoElement.srcObject = null
       }
       if (streamRef.current != null) {
         stopMediaStream(streamRef.current)
         streamRef.current = null
       }
     }
-  }, [])
+  }, [clearCountdown, clearPreviewSource, pausePreview, stopMediaStream, stopRecording])
 
-  const stopRecording = () => {
-    isRecordingRef.current = false
-    clearCountdownTimeouts(countdownTimeoutIdsRef.current)
-
-    if (animationFrameRef.current != null) {
-      cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
+  useEffect(() => {
+    const handlePlaybackEnded = () => {
+      if (isRecordingRef.current) {
+        stopRecording()
+      }
     }
 
-    if (mediaRecorderRef.current != null && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
+    playbackEngine.on('onEnded', handlePlaybackEnded)
+
+    return () => {
+      playbackEngine.off('onEnded', handlePlaybackEnded)
     }
-
-    resetPlaybackToStart()
-
-    if (isMountedRef.current) {
-      setCountdownValue(null)
-      setIsRecording(false)
-    }
-  }
-
-  const waitForCountdownStep = (ms: number): Promise<void> => {
-    return new Promise((resolve) => {
-      const timeoutId = globalThis.setTimeout(() => {
-        countdownTimeoutIdsRef.current = countdownTimeoutIdsRef.current.filter((id) => id !== timeoutId)
-        resolve()
-      }, ms)
-      countdownTimeoutIdsRef.current.push(timeoutId)
-    })
-  }
+  }, [stopRecording])
 
   const startCountdown = async () => {
     if (countdownValue != null || isRecordingRef.current || !isProjectLoaded) {
@@ -342,15 +269,11 @@ export function CameraMode({
     recordingChunksRef.current = []
     waveformDrawnRef.current = false
     setPreviewMode(false)
-    setPreviewUrl(null)
-    setPreviewCurrentTime(0)
-    setPreviewDuration(0)
-    setIsPreviewPlaying(false)
+    resetPreviewState()
     setRecordingBlob(null)
     setTrackOffsets(INITIAL_TRACK_OFFSETS)
     setTrackTrims(INITIAL_TRACK_TRIMS)
-    revokePreviewUrl(previewUrlRef.current)
-    previewUrlRef.current = null
+    clearPreviewSource()
     if (timelineVisibleRef.current) {
       onTimelineVisibilityChange(false)
     }
@@ -371,7 +294,7 @@ export function CameraMode({
     mediaRecorder.onstop = () => {
       const blob = new Blob(recordingChunksRef.current, { type: 'video/webm' })
       const previewObjectUrl = URL.createObjectURL(blob)
-      previewUrlRef.current = previewObjectUrl
+      setPreviewSource(previewObjectUrl)
       if (streamRef.current != null) {
         stopMediaStream(streamRef.current)
         streamRef.current = null
@@ -382,9 +305,7 @@ export function CameraMode({
       if (isMountedRef.current) {
         setRecordingBlob(blob)
         setPreviewMode(true)
-        setPreviewUrl(previewObjectUrl)
-        setPreviewCurrentTime(0)
-        setIsPreviewPlaying(false)
+        resetPreviewState()
         setIsRecording(false)
       }
       drawWaveformIfReady(blob, audioWaveformCanvasRef.current)
@@ -438,66 +359,6 @@ export function CameraMode({
       }
       await startCountdown()
     })()
-  }
-
-  const syncPlaybackToPreviewTime = (videoTime: number, shouldPlay: boolean): boolean => {
-    const currentState = useAppStore.getState()
-    if (currentState.projectData == null || currentState.precomputedTempoMap == null) {
-      return false
-    }
-
-    previewStartTimeRef.current = performance.now()
-
-    if (videoTime < CAMERA_MODE_PRE_ROLL_SECONDS) {
-      playbackEngine.pause()
-      playbackEngine.playWithPreRoll(CAMERA_MODE_PRE_ROLL_SECONDS - videoTime)
-      if (!shouldPlay) {
-        playbackEngine.pause()
-      }
-      return true
-    }
-
-    const targetTick = secondsToTick(
-      videoTime - CAMERA_MODE_PRE_ROLL_SECONDS,
-      currentState.precomputedTempoMap,
-    )
-    playbackEngine.seek(targetTick)
-    if (shouldPlay) {
-      playbackEngine.play()
-    } else {
-      playbackEngine.pause()
-    }
-    return true
-  }
-
-  const togglePreviewPlayback = async () => {
-    const previewVideo = previewVideoRef.current
-    if (previewVideo == null) {
-      return
-    }
-
-    if (isPreviewPlaying) {
-      previewVideo.pause()
-      playbackEngine.pause()
-      setIsPreviewPlaying(false)
-      return
-    }
-
-    audioScheduler.setMuted(false)
-    setMidiMuted(false)
-    try {
-      await previewVideo.play()
-      if (!syncPlaybackToPreviewTime(previewVideo.currentTime, true)) {
-        console.warn('togglePreviewPlayback: no project loaded, skipping visualizer sync')
-        setIsPreviewPlaying(true)
-        return
-      }
-
-      setIsPreviewPlaying(true)
-    } catch (error) {
-      resetPlaybackToStart()
-      console.warn('Unable to play camera preview.', error)
-    }
   }
 
   const handleExport = async () => {
@@ -700,18 +561,6 @@ export function CameraMode({
     )
   }
 
-  const handlePreviewScrub = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const previewVideo = previewVideoRef.current
-    if (previewVideo == null || !previewMode) {
-      return
-    }
-
-    const nextTime = Number(event.target.value)
-    previewVideo.currentTime = nextTime
-    setPreviewCurrentTime(nextTime)
-    syncPlaybackToPreviewTime(nextTime, isPreviewPlaying)
-  }
-
   return (
     <section className={styles.cameraModeContainer} data-testid="camera-mode">
       <div
@@ -754,7 +603,7 @@ export function CameraMode({
             </div>
           )}
 
-          {alignStep === 'waiting-low-a' || alignStep === 'waiting-high-c' ? (
+          {isAlignmentActive ? (
             <div
               aria-hidden="true"
               className={styles.alignClickOverlay}
@@ -795,7 +644,7 @@ export function CameraMode({
       <div
         className={styles.overlayBar}
         data-testid="camera-control-bar"
-        style={{ pointerEvents: alignStep === 'waiting-low-a' || alignStep === 'waiting-high-c' ? 'none' : 'auto' }}
+        style={{ pointerEvents: isAlignmentActive ? 'none' : 'auto' }}
       >
         <button
           type="button"
@@ -891,27 +740,6 @@ export function CameraMode({
       </div>
     </section>
   )
-}
-
-function stopMediaStream(stream: MediaStream) {
-  stream.getTracks().forEach((track) => {
-    track.stop()
-  })
-}
-
-function clearCountdownTimeouts(timeoutIds: Array<ReturnType<typeof globalThis.setTimeout>>) {
-  timeoutIds.forEach((timeoutId) => {
-    globalThis.clearTimeout(timeoutId)
-  })
-  timeoutIds.length = 0
-}
-
-function revokePreviewUrl(previewUrl: null | string) {
-  if (previewUrl == null) {
-    return
-  }
-
-  URL.revokeObjectURL(previewUrl)
 }
 
 function resetPlaybackToStart() {
