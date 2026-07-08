@@ -18,6 +18,9 @@ const mockRendererDestroy = vi.hoisted(() => vi.fn(async () => undefined))
 const mockRendererForceResume = vi.hoisted(() => vi.fn())
 const mockWarmUpAudio = vi.hoisted(() => vi.fn(async () => undefined))
 const mockLoadMidiFileFromPath = vi.hoisted(() => vi.fn(async () => true))
+const originalCanvasClientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'clientWidth')
+const originalCanvasClientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'clientHeight')
+const originalElectronApi = window.electronAPI
 const mockCanvasContext = vi.hoisted(() => ({
   clearRect: vi.fn(),
   fillRect: vi.fn(),
@@ -112,7 +115,12 @@ describe('ListenSession', () => {
   afterEach(() => {
     cleanup()
     resetStore()
+    restoreProperty(HTMLCanvasElement.prototype, 'clientWidth', originalCanvasClientWidthDescriptor)
+    restoreProperty(HTMLCanvasElement.prototype, 'clientHeight', originalCanvasClientHeightDescriptor)
+    window.electronAPI = originalElectronApi
+    vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('on mount sets tempo multiplier and calls play', async () => {
@@ -319,6 +327,19 @@ function createProjectData(totalTicks: number): ProjectData {
     totalTicks,
     tracks: createTracks(),
   }
+}
+
+function restoreProperty<T extends object>(
+  target: T,
+  key: keyof T,
+  descriptor: PropertyDescriptor | undefined,
+) {
+  if (descriptor == null) {
+    delete target[key]
+    return
+  }
+
+  Object.defineProperty(target, key, descriptor)
 }
 
 function createTracks(): Track[] {

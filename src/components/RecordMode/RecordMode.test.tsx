@@ -181,11 +181,9 @@ describe('RecordMode', () => {
   it('calls getUserMedia with the selected camera and audio device ids when RECORD is clicked', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-audio-select'), {
-      target: { value: 'audio-1' },
-    })
-    fireEvent.change(screen.getByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-2' },
+    await selectRecordModeDevices({
+      audioDeviceId: 'audio-1',
+      cameraDeviceId: 'camera-2',
     })
     fireEvent.click(screen.getByRole('button', { name: 'MIC' }))
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
@@ -209,9 +207,7 @@ describe('RecordMode', () => {
   it('renders the 3→2→1 countdown before recording starts', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -229,9 +225,7 @@ describe('RecordMode', () => {
   it('starts playback on countdown begin and starts the MediaRecorder after countdown completes', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -253,9 +247,7 @@ describe('RecordMode', () => {
   it('stops the MediaRecorder and playback when STOP is clicked', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -273,9 +265,7 @@ describe('RecordMode', () => {
   it('renders the post-record review layout with CanvasArea, recorded video, and control bar', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -291,9 +281,7 @@ describe('RecordMode', () => {
   it('activates the adjustment controls after a recording exists', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -311,14 +299,10 @@ describe('RecordMode', () => {
   it('re-record resets back to the setup panel while preserving selected devices', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-audio-select'), {
-      target: { value: 'audio-1' },
-    })
-    fireEvent.change(screen.getByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-2' },
-    })
-    fireEvent.change(screen.getByTestId('record-mode-midi-select'), {
-      target: { value: 'midi-1' },
+    await selectRecordModeDevices({
+      audioDeviceId: 'audio-1',
+      cameraDeviceId: 'camera-2',
+      midiDeviceId: 'midi-1',
     })
     fireEvent.click(screen.getByRole('button', { name: 'MIC' }))
     vi.useFakeTimers()
@@ -338,9 +322,7 @@ describe('RecordMode', () => {
   it('calls the shared compositeExport utility from Export', async () => {
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -359,9 +341,7 @@ describe('RecordMode', () => {
     ;(window.prompt as unknown as ReturnType<typeof vi.fn>).mockReturnValue('Moonlight Take 1')
     render(<RecordMode />)
 
-    fireEvent.change(await screen.findByTestId('record-mode-camera-select'), {
-      target: { value: 'camera-1' },
-    })
+    await selectRecordModeDevices({ cameraDeviceId: 'camera-1' })
     vi.useFakeTimers()
     fireEvent.click(screen.getByTestId('record-mode-record-button'))
 
@@ -401,6 +381,65 @@ async function flushAsyncWork() {
     await Promise.resolve()
     await Promise.resolve()
   })
+}
+
+async function waitForRecordModeInputs() {
+  const audioSelect = await screen.findByTestId('record-mode-audio-select') as HTMLSelectElement
+  const cameraSelect = screen.getByTestId('record-mode-camera-select') as HTMLSelectElement
+  const midiSelect = screen.getByTestId('record-mode-midi-select') as HTMLSelectElement
+
+  await waitFor(() => {
+    expect(audioSelect.options.length).toBeGreaterThan(1)
+    expect(cameraSelect.options.length).toBeGreaterThan(2)
+    expect(midiSelect.options.length).toBeGreaterThan(1)
+  })
+
+  return {
+    audioSelect,
+    cameraSelect,
+    midiSelect,
+    recordButton: screen.getByTestId('record-mode-record-button') as HTMLButtonElement,
+  }
+}
+
+async function selectRecordModeDevices({
+  audioDeviceId,
+  cameraDeviceId,
+  midiDeviceId,
+}: {
+  audioDeviceId?: string
+  cameraDeviceId?: string
+  midiDeviceId?: string
+}) {
+  const { audioSelect, cameraSelect, midiSelect, recordButton } = await waitForRecordModeInputs()
+
+  if (audioDeviceId != null) {
+    fireEvent.change(audioSelect, {
+      target: { value: audioDeviceId },
+    })
+    await waitFor(() => {
+      expect(audioSelect.value).toBe(audioDeviceId)
+    })
+  }
+
+  if (cameraDeviceId != null) {
+    fireEvent.change(cameraSelect, {
+      target: { value: cameraDeviceId },
+    })
+    await waitFor(() => {
+      expect(cameraSelect.value).toBe(cameraDeviceId)
+      expect(recordButton.disabled).toBe(false)
+    })
+  }
+
+  if (midiDeviceId != null) {
+    fireEvent.change(midiSelect, {
+      target: { value: midiDeviceId },
+    })
+    await waitFor(() => {
+      expect(midiSelect.value).toBe(midiDeviceId)
+    })
+  }
 }
 
 function applyDesignTokens() {

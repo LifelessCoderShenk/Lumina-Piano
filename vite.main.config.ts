@@ -13,7 +13,6 @@ export default defineConfig({
       external: [
         'electron',
         'ffmpeg-static',
-        'sharp',
         'electron-squirrel-startup',
         ...builtinModules,
         ...builtinModules.map((moduleName) => `node:${moduleName}`),

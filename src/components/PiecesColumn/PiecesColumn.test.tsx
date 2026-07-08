@@ -27,6 +27,8 @@ describe('PiecesColumn', () => {
     cleanup()
     resetStore()
     vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('renders 2 default placeholder pieces plus user pieces from the store', () => {

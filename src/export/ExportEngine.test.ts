@@ -182,6 +182,8 @@ beforeEach(() => {
 
 afterEach(() => {
   resetStore()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
