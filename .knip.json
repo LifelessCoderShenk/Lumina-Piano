@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "electron/main.ts",
+    "electron/preload.ts",
+    "vite.main.config.ts",
+    "vite.preload.config.ts",
+    "vite.renderer.config.ts",
+    "forge.config.js"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "electron/**/*.ts",
+    "*.ts",
+    "*.js",
+    "*.mjs"
+  ],
+  "ignoreDependencies": [
+    "@eslint/js",
+    "@electron-forge/maker-squirrel",
+    "@electron-forge/plugin-vite"
+  ]
+}

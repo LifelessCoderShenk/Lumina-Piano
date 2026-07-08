@@ -54,10 +54,6 @@ vi.mock('./components/EditPanel/EditPanel', () => ({
   EditPanel: () => <div data-testid="edit-panel" style={{ width: '25%', flexBasis: '25%' }}>Edit Panel</div>,
 }))
 
-vi.mock('./components/TransportBar/TransportBar', () => ({
-  TransportBar: () => <div data-testid="transport-bar">Transport Bar</div>,
-}))
-
 vi.mock('./components/StatusBar/StatusBar', () => ({
   StatusBar: () => <div data-testid="status-bar">Status Bar</div>,
 }))
@@ -244,6 +240,9 @@ describe('App Create Mode shell', () => {
   afterEach(() => {
     cleanup()
     resetStore()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('does not render transport, track list, or menu bar in Create Mode and shows the new shell', () => {
@@ -251,7 +250,6 @@ describe('App Create Mode shell', () => {
 
     expect(screen.queryByTestId('menu-bar')).toBeNull()
     expect(screen.queryByTestId('track-list')).toBeNull()
-    expect(screen.queryByTestId('transport-bar')).toBeNull()
     expect(screen.queryByTestId('mode-selector')).toBeNull()
     expect(screen.getByTestId('edit-panel').style.width).toBe('25%')
     expect(screen.getByTestId('edit-panel').style.flexBasis).toBe('25%')

@@ -301,6 +301,8 @@ describe('Renderer learn extensions', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 

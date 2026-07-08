@@ -96,6 +96,8 @@ describe('SettingsPanel', () => {
   afterEach(() => {
     cleanup()
     resetStore()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 

@@ -298,6 +298,8 @@ describe('Renderer playback sync', () => {
   afterEach(() => {
     resetStore()
     setFullscreenElement(null)
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
