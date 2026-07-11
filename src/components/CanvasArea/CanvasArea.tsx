@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 
 import { cameraSystem } from '../../camera/CameraSystem'
+import { clearActiveVisualizerCanvas, registerActiveVisualizerCanvas } from '../../renderer/activeCanvas'
 import { renderer } from '../../renderer/Renderer'
+import { threeRenderer } from '../../renderer/ThreeRenderer'
+import type { VisualizerEngine, VisualizerRenderer } from '../../renderer/VisualizerRenderer'
 import { getAppState, useAppStore } from '../../store/store'
 import styles from './CanvasArea.module.css'
 
@@ -39,18 +42,38 @@ export function getConstrainedDimensions(
   return { width, height }
 }
 
-export function CanvasArea() {
+interface CanvasAreaProps {
+  engine: VisualizerEngine
+}
+
+export function CanvasArea({ engine }: CanvasAreaProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const availableAreaRef = useRef<HTMLDivElement>(null)
   const aspectRatioRef = useRef<SupportedAspectRatio>('fit')
   const initializeRendererRef = useRef<(() => void) | null>(null)
   const isInitializingRef = useRef(false)
+  const isRendererReadyRef = useRef(false)
+  const rendererCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const [frameSize, setFrameSize] = useState<CanvasDimensions>({ width: 0, height: 0 })
   const appMode = useAppStore((state) => state.appMode)
   const aspectRatio = useAppStore((state) => state.visualizerSettings.aspectRatio)
   const showWindowExpandButton = appMode === 'create'
+  const activeRenderer: VisualizerRenderer = engine === 'three' ? threeRenderer : renderer
 
   aspectRatioRef.current = aspectRatio
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (canvas == null) {
+      return
+    }
+
+    registerActiveVisualizerCanvas(canvas)
+
+    return () => {
+      clearActiveVisualizerCanvas(canvas)
+    }
+  }, [])
 
   useEffect(() => {
     if (canvasRef.current == null || availableAreaRef.current == null) {
@@ -60,6 +83,28 @@ export function CanvasArea() {
     let cancelled = false
     let resizeOuterFrameId: number | null = null
     let resizeInnerFrameId: number | null = null
+
+    const detachRendererCanvasListeners = () => {
+      rendererCanvasRef.current?.removeEventListener('webglcontextlost', handleContextLost)
+      rendererCanvasRef.current?.removeEventListener('webglcontextrestored', handleContextRestored)
+      rendererCanvasRef.current = null
+    }
+
+    const attachRendererCanvasListeners = () => {
+      if (!isRendererReadyRef.current) {
+        return
+      }
+
+      const rendererCanvas = activeRenderer.getCanvas()
+      if (rendererCanvasRef.current === rendererCanvas) {
+        return
+      }
+
+      detachRendererCanvasListeners()
+      rendererCanvas.addEventListener('webglcontextlost', handleContextLost)
+      rendererCanvas.addEventListener('webglcontextrestored', handleContextRestored)
+      rendererCanvasRef.current = rendererCanvas
+    }
 
     const syncCanvasElementSize = (width: number, height: number) => {
       if (canvasRef.current == null) {
@@ -99,8 +144,8 @@ export function CanvasArea() {
         cameraSystem.setViewportSize(nextSize.width, nextSize.height)
       }
 
-      if (renderer.isReady()) {
-        renderer.resize(nextSize.width, nextSize.height)
+      if (isRendererReadyRef.current) {
+        activeRenderer.resize(nextSize.width, nextSize.height)
         syncCanvasElementSize(nextSize.width, nextSize.height)
       }
 
@@ -141,16 +186,20 @@ export function CanvasArea() {
 
       void (async () => {
         try {
-          await renderer.destroy()
+          isRendererReadyRef.current = false
+          detachRendererCanvasListeners()
+          await activeRenderer.destroy()
           if (cancelled || canvasRef.current == null) {
             return
           }
 
-          await renderer.init(canvasRef.current)
+          await activeRenderer.init(canvasRef.current)
           if (cancelled) {
             return
           }
 
+          isRendererReadyRef.current = true
+          attachRendererCanvasListeners()
           resizeToAvailableArea()
         } finally {
           isInitializingRef.current = false
@@ -161,7 +210,7 @@ export function CanvasArea() {
     initializeRendererRef.current = initializeRenderer
 
     const handleWindowResize = () => {
-      if (!renderer.isReady()) {
+      if (!isRendererReadyRef.current) {
         initializeRenderer()
         return
       }
@@ -177,19 +226,18 @@ export function CanvasArea() {
       scheduleResize()
 
       const state = getAppState()
-      if (!renderer.isInitialized) {
+      if (!isRendererReadyRef.current) {
         return
       }
 
-      if (renderer.isReady()) {
-        renderer.renderFrame(state.currentTick)
-      }
+      activeRenderer.renderFrame(state.currentTick)
     }
 
     const handleContextLost = (event: Event) => {
       event.preventDefault()
-      console.warn('[Renderer] WebGL context lost')
-      void renderer.destroy()
+      console.warn(`[Renderer] WebGL context lost for ${engine}`)
+      isRendererReadyRef.current = false
+      void activeRenderer.destroy()
     }
 
     const handleContextRestored = () => {
@@ -198,58 +246,60 @@ export function CanvasArea() {
           return
         }
 
-        await renderer.destroy()
+        isRendererReadyRef.current = false
+        detachRendererCanvasListeners()
+        await activeRenderer.destroy()
         if (cancelled || canvasRef.current == null) {
           return
         }
 
-        await renderer.init(canvasRef.current)
+        await activeRenderer.init(canvasRef.current)
         if (cancelled) {
           return
         }
 
+        isRendererReadyRef.current = true
+        attachRendererCanvasListeners()
         scheduleResize()
         const state = getAppState()
-        if (!renderer.isInitialized) {
+        if (!isRendererReadyRef.current) {
           return
         }
 
-        if (renderer.isReady()) {
-          renderer.renderFrame(state.currentTick)
-        }
+        activeRenderer.renderFrame(state.currentTick)
       })()
     }
 
     const handleBeforeUnload = () => {
-      void renderer.destroy()
+      isRendererReadyRef.current = false
+      detachRendererCanvasListeners()
+      void activeRenderer.destroy()
     }
 
     initializeRenderer()
 
     window.addEventListener('resize', handleWindowResize)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    canvasRef.current.addEventListener('webglcontextlost', handleContextLost)
-    canvasRef.current.addEventListener('webglcontextrestored', handleContextRestored)
     window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => {
       cancelled = true
       initializeRendererRef.current = null
       isInitializingRef.current = false
+      isRendererReadyRef.current = false
       window.removeEventListener('resize', handleWindowResize)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      canvasRef.current?.removeEventListener('webglcontextlost', handleContextLost)
-      canvasRef.current?.removeEventListener('webglcontextrestored', handleContextRestored)
+      detachRendererCanvasListeners()
       if (resizeOuterFrameId != null) {
         cancelAnimationFrame(resizeOuterFrameId)
       }
       if (resizeInnerFrameId != null) {
         cancelAnimationFrame(resizeInnerFrameId)
       }
-      void renderer.destroy()
+      void activeRenderer.destroy()
     }
-  }, [])
+  }, [activeRenderer, engine])
 
   useEffect(() => {
     let resizeOuterFrameId: number | null = null
@@ -268,7 +318,7 @@ export function CanvasArea() {
         resizeInnerFrameId = window.requestAnimationFrame(() => {
           resizeInnerFrameId = null
 
-          if (!renderer.isReady()) {
+          if (!isRendererReadyRef.current) {
             initializeRendererRef.current?.()
             return
           }
@@ -297,8 +347,8 @@ export function CanvasArea() {
 
           cameraSystem.setViewportSize(nextSize.width, nextSize.height)
 
-          if (renderer.isReady()) {
-            renderer.resize(nextSize.width, nextSize.height)
+          if (isRendererReadyRef.current) {
+            activeRenderer.resize(nextSize.width, nextSize.height)
             if (canvasRef.current != null) {
               canvasRef.current.style.width = `${nextSize.width}px`
               canvasRef.current.style.height = `${nextSize.height}px`
@@ -327,7 +377,7 @@ export function CanvasArea() {
         cancelAnimationFrame(resizeInnerFrameId)
       }
     }
-  }, [aspectRatio])
+  }, [activeRenderer, aspectRatio])
 
   const handleWindowExpand = async () => {
     const maximizeWindow = window.electronAPI?.window?.maximize

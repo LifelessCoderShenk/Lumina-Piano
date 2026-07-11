@@ -34,8 +34,8 @@ vi.mock('./components/TrackList/TrackList', () => ({
 }))
 
 vi.mock('./components/CanvasArea/CanvasArea', () => ({
-  CanvasArea: () => (
-    <div data-testid="canvas-area" style={{ flex: 1, width: '100%', height: '100%' }}>
+  CanvasArea: ({ engine }: { engine: 'pixi' | 'three' }) => (
+    <div data-testid="canvas-area" data-engine={engine} style={{ flex: 1, width: '100%', height: '100%' }}>
       Canvas Area
     </div>
   ),
@@ -256,6 +256,7 @@ describe('App Create Mode shell', () => {
     expect(screen.getByTestId('create-visualizer-area').style.width).toBe('75%')
     expect(screen.getByTestId('create-visualizer-area').style.flexBasis).toBe('75%')
     expect(screen.getByTestId('canvas-area')).toBeTruthy()
+    expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('three')
     expect((container.firstElementChild as HTMLElement).style.fontFamily).toBe('var(--font-family-base)')
     expect(document.documentElement.style.getPropertyValue('--font-family-base')).toBe('Arial, sans-serif')
   })
@@ -310,6 +311,7 @@ describe('App Create Mode shell', () => {
     expect(screen.getByTestId('edit-panel')).toBeTruthy()
     expect(screen.getByTestId('create-visualizer-area').style.width).toBe('75%')
     expect(screen.getByTestId('canvas-area')).toBeTruthy()
+    expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('three')
     expect(screen.getByTestId('camera-visualizer-slot')).toBeTruthy()
     expect(screen.getByTestId('camera-visualizer-slot').style.transform).toBe('translate3d(0px, 48px, 0)')
     expect(screen.getByTestId('camera-mode')).toBeTruthy()
@@ -351,7 +353,26 @@ describe('App Create Mode shell', () => {
     })
 
     expect(screen.getByTestId('canvas-area')).toBe(originalCanvasArea)
+    expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('three')
     expect(screen.getByTestId('camera-mode')).toBeTruthy()
+  })
+
+  it('uses the Pixi canvas path for Learn session visualizer mounts', () => {
+    useAppStore.setState({
+      appMode: 'learnSession',
+      learnV3: {
+        ...useAppStore.getState().learnV3,
+        sessionConfig: {
+          ...useAppStore.getState().learnV3.sessionConfig,
+          mode: 'listen',
+        },
+      },
+    })
+
+    render(<App />)
+
+    expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('pixi')
+    expect(screen.getByTestId('listen-session')).toBeTruthy()
   })
 
   it('captures alignment clicks across the full right panel in Camera Mode', () => {

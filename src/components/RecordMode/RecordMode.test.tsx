@@ -26,6 +26,9 @@ const mockPlaybackPlay = vi.hoisted(() => vi.fn())
 const mockPlaybackGetCurrentTick = vi.hoisted(() => vi.fn(() => 0))
 const mockCompositeExport = vi.hoisted(() => vi.fn(async () => undefined))
 const mockRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
+const mockActiveVisualizerCanvas = vi.hoisted(() => ({
+  current: null as HTMLCanvasElement | null,
+}))
 
 const midiInput: MidiInputLike = {
   id: 'midi-1',
@@ -56,16 +59,34 @@ vi.mock('../../renderer/Renderer', () => ({
   },
 }))
 
+vi.mock('../../renderer/activeCanvas', () => ({
+  getActiveVisualizerCanvas: () => mockActiveVisualizerCanvas.current,
+}))
+
 vi.mock('../../utils/compositeExport', () => ({
   compositeExport: mockCompositeExport,
 }))
 
 vi.mock('../CanvasArea/CanvasArea', () => ({
-  CanvasArea: () => (
-    <div data-testid="canvas-area">
-      <canvas />
-    </div>
-  ),
+  CanvasArea: ({ engine }: { engine: 'pixi' | 'three' }) => {
+    const canvasRef = React.useRef<HTMLCanvasElement | null>(null)
+
+    React.useEffect(() => {
+      mockActiveVisualizerCanvas.current = canvasRef.current
+
+      return () => {
+        if (mockActiveVisualizerCanvas.current === canvasRef.current) {
+          mockActiveVisualizerCanvas.current = null
+        }
+      }
+    }, [])
+
+    return (
+      <div data-testid="canvas-area" data-engine={engine}>
+        <canvas ref={canvasRef} />
+      </div>
+    )
+  },
 }))
 
 const { RecordMode } = await import('./RecordMode')
@@ -108,6 +129,7 @@ describe('RecordMode', () => {
     mockCompositeExport.mockReset()
     mockCompositeExport.mockImplementation(async () => undefined)
     mockRendererSetKeyboardOpacity.mockReset()
+    mockActiveVisualizerCanvas.current = null
     mediaRecorderStartSpy.mockReset()
     mediaRecorderStopSpy.mockReset()
     midiInput.onmidimessage = null
@@ -274,6 +296,7 @@ describe('RecordMode', () => {
 
     expect(screen.getByTestId('record-mode-review-layout')).toBeTruthy()
     expect(screen.getByTestId('canvas-area')).toBeTruthy()
+    expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('three')
     expect(screen.getByTestId('record-mode-review-video')).toBeTruthy()
     expect(screen.getByTestId('record-mode-control-bar')).toBeTruthy()
   })

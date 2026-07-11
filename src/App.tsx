@@ -130,7 +130,7 @@ export function App() {
                     }
                     : undefined}
                 >
-                  <CanvasArea />
+                  <CanvasArea engine="three" />
                 </div>
                 <div
                   className={styles.cameraModeSlot}
@@ -184,16 +184,16 @@ export function App() {
               learnSessionMode === 'listen' ? (
                 <div className={styles.listenSessionLayout}>
                   <ListenSession />
-                  <CanvasArea />
+                  <CanvasArea engine="pixi" />
                 </div>
               ) : learnSessionMode === 'noteByNote' ? (
                 <div className={styles.listenSessionLayout}>
                   <NoteByNoteSession />
-                  <CanvasArea />
+                  <CanvasArea engine="pixi" />
                 </div>
               ) : learnSessionMode === 'playAlong' ? (
                 <>
-                  <CanvasArea />
+                  <CanvasArea engine="pixi" />
                   <PlayAlongSession />
                 </>
               ) : (
@@ -204,7 +204,7 @@ export function App() {
             ) : appMode === 'learnEnd' ? (
               <EndScreen />
             ) : (
-              <CanvasArea />
+              <CanvasArea engine="pixi" />
             )}
           </div>
         </div>

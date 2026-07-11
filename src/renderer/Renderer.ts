@@ -30,8 +30,17 @@ import {
   WHITE_KEY_SHADOW_COLOR,
   getKeyboardLayoutMetrics,
 } from './layoutConstants'
-import { hexToPixi, pixiToHex, resolveNoteColor, resolveNoteGradientColors } from './colorUtils'
+import {
+  brightenColor,
+  hexToPixi,
+  interpolateColor,
+  pixiToHex,
+  resolveCreateModeNoteColor,
+  resolveNoteColor,
+  resolveNoteGradientColors,
+} from './colorUtils'
 import { getNoteScreenRect, getVisibleTickWindow } from './noteMotion'
+import { getNoteDurationMs } from './noteRendering'
 import {
   PIANO_MAX_PITCH,
   PIANO_MIN_PITCH,
@@ -48,7 +57,6 @@ const LANE_LINE_COLOR = 0xffffff
 const CREATE_MODE_BACKGROUND_COLOR = 0x000000
 const CREATE_MODE_LANE_LINE_COLOR = 0x444444
 const CREATE_MODE_LANE_LINE_ALPHA = 0.4
-const CREATE_MODE_NOTE_COLOR = 0x2e65a2
 const CREATE_MODE_BOUNDARY_OUTER_AURA_COLOR = 0x1a3a6e
 const CREATE_MODE_BOUNDARY_MID_GLOW_COLOR = 0x4a9eff
 const CREATE_MODE_BOUNDARY_CORE_COLOR = 0x7ec8ff
@@ -2124,37 +2132,6 @@ function getChordLevelHeight(chord: IndexedNote[], tempoMap: PrecomputedTempoMap
   return levelHeight
 }
 
-function brightenColor(color: number, brightness: number): number {
-  const red = Math.min(255, Math.round(((color >> 16) & 0xff) * brightness))
-  const green = Math.min(255, Math.round(((color >> 8) & 0xff) * brightness))
-  const blue = Math.min(255, Math.round((color & 0xff) * brightness))
-
-  return (red << 16) | (green << 8) | blue
-}
-
-function getNoteDurationMs(
-  note: { endTick: number; startTick: number },
-  tempoMap: PrecomputedTempoMap,
-): number {
-  return Math.max(100, (tickToSeconds(note.endTick, tempoMap) - tickToSeconds(note.startTick, tempoMap)) * 1000)
-}
-
-function interpolateColor(startColor: number, endColor: number, progress: number): number {
-  const clampedProgress = Math.max(0, Math.min(1, progress))
-  const startRed = (startColor >> 16) & 0xff
-  const startGreen = (startColor >> 8) & 0xff
-  const startBlue = startColor & 0xff
-  const endRed = (endColor >> 16) & 0xff
-  const endGreen = (endColor >> 8) & 0xff
-  const endBlue = endColor & 0xff
-
-  const red = Math.round(startRed + ((endRed - startRed) * clampedProgress))
-  const green = Math.round(startGreen + ((endGreen - startGreen) * clampedProgress))
-  const blue = Math.round(startBlue + ((endBlue - startBlue) * clampedProgress))
-
-  return (red << 16) | (green << 8) | blue
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
@@ -2309,7 +2286,3 @@ function resolveLearnNoteColor(
   return pitch < 60 ? hexToPixi(visuals.leftHandColor) : hexToPixi(visuals.rightHandColor)
 }
 
-function resolveCreateModeNoteColor(pitch: number): number {
-  void pitch
-  return CREATE_MODE_NOTE_COLOR
-}

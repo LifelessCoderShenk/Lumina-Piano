@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { audioScheduler } from '../../audio/AudioScheduler'
 import { playbackEngine } from '../../playback/PlaybackEngine'
+import { getActiveVisualizerCanvas } from '../../renderer/activeCanvas'
 import { useAppStore } from '../../store/store'
 import { compositeExport } from '../../utils/compositeExport'
 import { useCameraAlignment } from '../shared/useCameraAlignment'
@@ -366,7 +367,7 @@ export function CameraMode({
       return
     }
 
-    const pixiCanvas = getVisualizerCanvas(audioWaveformCanvasRef.current)
+    const pixiCanvas = getVisualizerCanvas()
     if (pixiCanvas == null) {
       console.warn('Unable to export camera composite because the visualizer canvas was not found.')
       return
@@ -751,17 +752,8 @@ function resetPlaybackToStart() {
   }
 }
 
-function getVisualizerCanvas(
-  excludedCanvas: HTMLCanvasElement | null,
-): HTMLCanvasElement | null {
-  const preferredCanvas = document.querySelector('[data-testid="canvas-area"] canvas')
-  if (preferredCanvas instanceof HTMLCanvasElement && preferredCanvas !== excludedCanvas) {
-    return preferredCanvas
-  }
-
-  return Array.from(document.querySelectorAll('canvas')).find((canvas) => {
-    return canvas !== excludedCanvas
-  }) ?? null
+function getVisualizerCanvas(): HTMLCanvasElement | null {
+  return getActiveVisualizerCanvas()
 }
 
 async function drawWaveform(blob: Blob, canvas: HTMLCanvasElement): Promise<void> {

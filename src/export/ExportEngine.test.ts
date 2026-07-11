@@ -8,7 +8,7 @@ import { ExportEngine, ExportError, runFFmpeg, validateSettings } from './Export
 
 const mockMkdir = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const mockRm = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const mockGetCanvas = vi.hoisted(() => vi.fn(() => createMockCanvas()))
+const mockGetActiveVisualizerCanvas = vi.hoisted(() => vi.fn(() => createMockCanvas()))
 const mockRenderFrame = vi.hoisted(() => vi.fn())
 const mockResize = vi.hoisted(() => vi.fn())
 const mockGetTempDir = vi.hoisted(() => vi.fn(() => Promise.resolve('C:\\temp\\lumina-export-test')))
@@ -77,11 +77,14 @@ vi.mock('tone', () => ({
 
 vi.mock('../renderer/Renderer', () => ({
   renderer: {
-    getCanvas: mockGetCanvas,
     isReady: vi.fn(() => true),
     renderFrame: mockRenderFrame,
     resize: mockResize,
   },
+}))
+
+vi.mock('../renderer/activeCanvas', () => ({
+  getActiveVisualizerCanvas: mockGetActiveVisualizerCanvas,
 }))
 
 vi.mock('../camera/CameraSystem', () => ({
@@ -265,7 +268,7 @@ describe('ExportEngine', () => {
 
     expect(mockRenderFrame).toHaveBeenCalledTimes(expectedFrames)
     expect(mockRenderFrame.mock.calls[0]?.[0]).toBe(0)
-    expect(mockGetCanvas).toHaveBeenCalled()
+    expect(mockGetActiveVisualizerCanvas).toHaveBeenCalled()
     expect(mockVideoEncoderEncode).toHaveBeenCalledTimes(expectedFrames)
     expect(mockSaveFile).toHaveBeenCalledTimes(1)
     expect(mockMkdir).toHaveBeenCalled()

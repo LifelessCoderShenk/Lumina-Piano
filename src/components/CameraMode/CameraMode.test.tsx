@@ -59,6 +59,9 @@ const mockRevokeObjectURL = vi.hoisted(() => vi.fn())
 const mockAnchorClick = vi.hoisted(() => vi.fn())
 const mockDecodeAudioData = vi.hoisted(() => vi.fn())
 const mockAudioContextClose = vi.hoisted(() => vi.fn(async () => undefined))
+const mockActiveVisualizerCanvas = vi.hoisted(() => ({
+  current: null as HTMLCanvasElement | null,
+}))
 
 vi.mock('../../audio/AudioScheduler', () => ({
   audioScheduler: {
@@ -73,6 +76,10 @@ vi.mock('../../renderer/Renderer', () => ({
     getKeyboardY: mockRendererGetKeyboardY,
     setKeyboardOpacity: mockRendererSetKeyboardOpacity,
   },
+}))
+
+vi.mock('../../renderer/activeCanvas', () => ({
+  getActiveVisualizerCanvas: () => mockActiveVisualizerCanvas.current,
 }))
 
 vi.mock('../../playback/PlaybackEngine', () => ({
@@ -137,6 +144,7 @@ describe('CameraMode', () => {
     })
     mockAudioContextClose.mockReset()
     mockAudioContextClose.mockImplementation(async () => undefined)
+    mockActiveVisualizerCanvas.current = null
     createdVideoElements = []
     animationFrameCallbacks = []
 
@@ -886,6 +894,7 @@ function CameraModeHarness({
 }: {
   onAlignClick?: (event: React.MouseEvent<HTMLDivElement>) => void
 }) {
+  const visualizerCanvasRef = React.useRef<HTMLCanvasElement | null>(null)
   const [isTimelineVisible, setIsTimelineVisible] = React.useState(false)
   const visualizerHeight = isTimelineVisible
     ? `calc(60% - ${TIMELINE_HEIGHT_PX}px)`
@@ -894,10 +903,20 @@ function CameraModeHarness({
     ? `calc(40% + ${TIMELINE_HEIGHT_PX}px)`
     : '40%'
 
+  React.useEffect(() => {
+    mockActiveVisualizerCanvas.current = visualizerCanvasRef.current
+
+    return () => {
+      if (mockActiveVisualizerCanvas.current === visualizerCanvasRef.current) {
+        mockActiveVisualizerCanvas.current = null
+      }
+    }
+  }, [])
+
   return (
     <div data-testid="camera-layout" style={{ width: '100%', height: '100%' }}>
       <div data-testid="camera-visualizer-slot" style={{ height: visualizerHeight }}>
-        <canvas data-testid="pixi-canvas" />
+        <canvas ref={visualizerCanvasRef} data-testid="pixi-canvas" />
       </div>
       <div data-testid="camera-mode-panel-slot" style={{ height: cameraModeHeight }}>
         <CameraMode

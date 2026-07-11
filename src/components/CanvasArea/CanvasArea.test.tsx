@@ -2,12 +2,24 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockRendererDestroy = vi.hoisted(() => vi.fn(async () => undefined))
-const mockRendererInit = vi.hoisted(() => vi.fn(async () => undefined))
-const mockRendererIsReady = vi.hoisted(() => vi.fn(() => false))
-const mockRendererIsInitialized = vi.hoisted(() => ({ value: true }))
-const mockRendererRenderFrame = vi.hoisted(() => vi.fn())
-const mockRendererResize = vi.hoisted(() => vi.fn())
+const mockPixiRendererCanvas = vi.hoisted(() => ({ current: null as HTMLCanvasElement | null }))
+const mockPixiRendererDestroy = vi.hoisted(() => vi.fn(async () => {
+  mockPixiRendererCanvas.current = null
+}))
+const mockPixiRendererInit = vi.hoisted(() => vi.fn(async (canvas: HTMLCanvasElement) => {
+  mockPixiRendererCanvas.current = canvas
+}))
+const mockPixiRendererRenderFrame = vi.hoisted(() => vi.fn())
+const mockPixiRendererResize = vi.hoisted(() => vi.fn())
+const mockThreeRendererCanvas = vi.hoisted(() => ({ current: null as HTMLCanvasElement | null }))
+const mockThreeRendererDestroy = vi.hoisted(() => vi.fn(async () => {
+  mockThreeRendererCanvas.current = null
+}))
+const mockThreeRendererInit = vi.hoisted(() => vi.fn(async (canvas: HTMLCanvasElement) => {
+  mockThreeRendererCanvas.current = canvas
+}))
+const mockThreeRendererRenderFrame = vi.hoisted(() => vi.fn())
+const mockThreeRendererResize = vi.hoisted(() => vi.fn())
 const mockCameraInit = vi.hoisted(() => vi.fn())
 const mockCameraIsInitialized = vi.hoisted(() => vi.fn(() => false))
 const mockCameraSetViewportSize = vi.hoisted(() => vi.fn())
@@ -26,14 +38,33 @@ const mockStoreState = vi.hoisted(() => ({
 
 vi.mock('../../renderer/Renderer', () => ({
   renderer: {
-    destroy: mockRendererDestroy,
-    init: mockRendererInit,
-    get isInitialized() {
-      return mockRendererIsInitialized.value
+    destroy: mockPixiRendererDestroy,
+    getCanvas: () => {
+      if (mockPixiRendererCanvas.current == null) {
+        throw new Error('Pixi renderer canvas was requested before initialization.')
+      }
+
+      return mockPixiRendererCanvas.current
     },
-    isReady: mockRendererIsReady,
-    renderFrame: mockRendererRenderFrame,
-    resize: mockRendererResize,
+    init: mockPixiRendererInit,
+    renderFrame: mockPixiRendererRenderFrame,
+    resize: mockPixiRendererResize,
+  },
+}))
+
+vi.mock('../../renderer/ThreeRenderer', () => ({
+  threeRenderer: {
+    destroy: mockThreeRendererDestroy,
+    getCanvas: () => {
+      if (mockThreeRendererCanvas.current == null) {
+        throw new Error('Three renderer canvas was requested before initialization.')
+      }
+
+      return mockThreeRendererCanvas.current
+    },
+    init: mockThreeRendererInit,
+    renderFrame: mockThreeRendererRenderFrame,
+    resize: mockThreeRendererResize,
   },
 }))
 
@@ -54,15 +85,28 @@ const { CanvasArea } = await import('./CanvasArea')
 
 describe('CanvasArea', () => {
   beforeEach(() => {
-    mockRendererDestroy.mockReset()
-    mockRendererDestroy.mockImplementation(async () => undefined)
-    mockRendererInit.mockReset()
-    mockRendererInit.mockImplementation(async () => undefined)
-    mockRendererIsReady.mockReset()
-    mockRendererIsReady.mockReturnValue(false)
-    mockRendererIsInitialized.value = true
-    mockRendererRenderFrame.mockReset()
-    mockRendererResize.mockReset()
+    mockPixiRendererCanvas.current = null
+    mockPixiRendererDestroy.mockReset()
+    mockPixiRendererDestroy.mockImplementation(async () => {
+      mockPixiRendererCanvas.current = null
+    })
+    mockPixiRendererInit.mockReset()
+    mockPixiRendererInit.mockImplementation(async (canvas: HTMLCanvasElement) => {
+      mockPixiRendererCanvas.current = canvas
+    })
+    mockPixiRendererRenderFrame.mockReset()
+    mockPixiRendererResize.mockReset()
+    mockThreeRendererCanvas.current = null
+    mockThreeRendererDestroy.mockReset()
+    mockThreeRendererDestroy.mockImplementation(async () => {
+      mockThreeRendererCanvas.current = null
+    })
+    mockThreeRendererInit.mockReset()
+    mockThreeRendererInit.mockImplementation(async (canvas: HTMLCanvasElement) => {
+      mockThreeRendererCanvas.current = canvas
+    })
+    mockThreeRendererRenderFrame.mockReset()
+    mockThreeRendererResize.mockReset()
     mockCameraInit.mockReset()
     mockCameraIsInitialized.mockReset()
     mockCameraIsInitialized.mockReturnValue(false)
@@ -119,100 +163,100 @@ describe('CanvasArea', () => {
   })
 
   it('always calls destroy() before init() on mount', async () => {
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(1)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
     })
 
-    expect(mockRendererDestroy).toHaveBeenCalledTimes(1)
-    expect(mockRendererDestroy.mock.invocationCallOrder[0]).toBeLessThan(mockRendererInit.mock.invocationCallOrder[0])
+    expect(mockPixiRendererDestroy).toHaveBeenCalledTimes(1)
+    expect(mockPixiRendererDestroy.mock.invocationCallOrder[0]).toBeLessThan(mockPixiRendererInit.mock.invocationCallOrder[0])
   })
 
   it('tears down and re-initializes again on remount', async () => {
-    const firstRender = render(<CanvasArea />)
+    const firstRender = render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(1)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
     })
 
     firstRender.unmount()
 
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(2)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(2)
     })
 
-    expect(mockRendererDestroy).toHaveBeenCalledTimes(3)
-    expect(mockRendererDestroy.mock.invocationCallOrder[2]).toBeLessThan(mockRendererInit.mock.invocationCallOrder[1])
+    expect(mockPixiRendererDestroy).toHaveBeenCalledTimes(3)
+    expect(mockPixiRendererDestroy.mock.invocationCallOrder[2]).toBeLessThan(mockPixiRendererInit.mock.invocationCallOrder[1])
   })
 
   it('cancels a pending init if the component unmounts before destroy resolves', async () => {
     let resolveDestroy: (() => void) | null = null
-    mockRendererDestroy.mockImplementationOnce(
+    mockPixiRendererDestroy.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           resolveDestroy = resolve
         }),
     )
 
-    const view = render(<CanvasArea />)
+    const view = render(<CanvasArea engine="pixi" />)
 
     view.unmount()
     resolveDestroy?.()
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(mockRendererInit).not.toHaveBeenCalled()
+    expect(mockPixiRendererInit).not.toHaveBeenCalled()
   })
 
   it('rapid mount/unmount/mount cycles only initialize the last active mount', async () => {
     let resolveFirstDestroy: (() => void) | null = null
-    mockRendererDestroy.mockImplementationOnce(
+    mockPixiRendererDestroy.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           resolveFirstDestroy = resolve
         }),
     )
 
-    const firstView = render(<CanvasArea />)
+    const firstView = render(<CanvasArea engine="pixi" />)
     firstView.unmount()
 
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
     resolveFirstDestroy?.()
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(1)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
     })
 
-    expect(mockRendererDestroy).toHaveBeenCalledTimes(3)
-    expect(mockRendererDestroy.mock.invocationCallOrder[1]).toBeLessThan(mockRendererInit.mock.invocationCallOrder[0])
+    expect(mockPixiRendererDestroy).toHaveBeenCalledTimes(3)
+    expect(mockPixiRendererDestroy.mock.invocationCallOrder[1]).toBeLessThan(mockPixiRendererInit.mock.invocationCallOrder[0])
   })
 
   it('initializes once the canvas area gains non-zero dimensions after mounting at 0x0', async () => {
     mockClientSize.width = 0
     mockClientSize.height = 0
 
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     await Promise.resolve()
-    expect(mockRendererInit).not.toHaveBeenCalled()
+    expect(mockPixiRendererInit).not.toHaveBeenCalled()
 
     mockClientSize.width = 800
     mockClientSize.height = 600
     mockResizeObserverCallback.current?.([], {} as ResizeObserver)
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(1)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
     })
   })
 
   it('fills the available space with a full-size canvas container', async () => {
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(1)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
     })
 
     const canvasArea = screen.getByTestId('canvas-area')
@@ -228,27 +272,25 @@ describe('CanvasArea', () => {
   })
 
   it('renders a window expand button in Create Mode', async () => {
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
-      expect(mockRendererInit).toHaveBeenCalledTimes(1)
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
     })
 
     expect(screen.getByRole('button', { name: 'Expand window' })).toBeTruthy()
   })
 
   it('resizes the renderer to the container clientWidth and clientHeight with no offsets', async () => {
-    mockRendererIsReady.mockReturnValueOnce(false).mockReturnValue(true)
-
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
-      expect(mockRendererResize).toHaveBeenCalledWith(800, 600)
+      expect(mockPixiRendererResize).toHaveBeenCalledWith(800, 600)
     })
   })
 
   it('uses the top-right button to maximize the app window instead of entering fullscreen', async () => {
-    render(<CanvasArea />)
+    render(<CanvasArea engine="pixi" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand window' }))
 
@@ -258,9 +300,11 @@ describe('CanvasArea', () => {
   })
 
   it('re-renders on visibility restore even when no project is loaded', async () => {
-    mockRendererIsReady.mockReturnValue(true)
+    render(<CanvasArea engine="pixi" />)
 
-    render(<CanvasArea />)
+    await waitFor(() => {
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
+    })
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -270,15 +314,14 @@ describe('CanvasArea', () => {
     document.dispatchEvent(new Event('visibilitychange'))
 
     await waitFor(() => {
-      expect(mockRendererRenderFrame).toHaveBeenCalledWith(0)
+      expect(mockPixiRendererRenderFrame).toHaveBeenCalledWith(0)
     })
   })
 
   it('recomputes constrained dimensions when the aspect ratio changes', async () => {
-    mockRendererIsReady.mockReturnValue(true)
     mockCameraIsInitialized.mockReturnValue(true)
 
-    const view = render(<CanvasArea />)
+    const view = render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
       expect(screen.getByTestId('canvas-preview-frame').style.width).toBe('800px')
@@ -286,21 +329,50 @@ describe('CanvasArea', () => {
     })
 
     mockStoreState.visualizerSettings.aspectRatio = '16:9'
-    view.rerender(<CanvasArea />)
+    view.rerender(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
       expect(screen.getByTestId('canvas-preview-frame').style.width).toBe('800px')
       expect(screen.getByTestId('canvas-preview-frame').style.height).toBe('450px')
-      expect(mockRendererResize).toHaveBeenCalledWith(800, 450)
+      expect(mockPixiRendererResize).toHaveBeenCalledWith(800, 450)
     })
 
     mockStoreState.visualizerSettings.aspectRatio = '1:1'
-    view.rerender(<CanvasArea />)
+    view.rerender(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
       expect(screen.getByTestId('canvas-preview-frame').style.width).toBe('600px')
       expect(screen.getByTestId('canvas-preview-frame').style.height).toBe('600px')
-      expect(mockRendererResize).toHaveBeenCalledWith(600, 600)
+      expect(mockPixiRendererResize).toHaveBeenCalledWith(600, 600)
     })
+  })
+
+  it('drives the three renderer when engine is set to three', async () => {
+    render(<CanvasArea engine="three" />)
+
+    await waitFor(() => {
+      expect(mockThreeRendererInit).toHaveBeenCalledTimes(1)
+    })
+
+    expect(mockPixiRendererInit).not.toHaveBeenCalled()
+    expect(mockThreeRendererDestroy).toHaveBeenCalledTimes(1)
+    expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600)
+    expect(mockThreeRendererCanvas.current).toBeInstanceOf(HTMLCanvasElement)
+  })
+
+  it('re-initializes with the other engine when the prop changes on the same mount', async () => {
+    const view = render(<CanvasArea engine="pixi" />)
+
+    await waitFor(() => {
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
+    })
+
+    view.rerender(<CanvasArea engine="three" />)
+
+    await waitFor(() => {
+      expect(mockThreeRendererInit).toHaveBeenCalledTimes(1)
+    })
+
+    expect(mockPixiRendererDestroy).toHaveBeenCalled()
   })
 })

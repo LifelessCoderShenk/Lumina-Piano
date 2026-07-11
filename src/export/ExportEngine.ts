@@ -6,6 +6,7 @@ import { writeAudioBufferToWav } from './wavWriter'
 import * as Tone from 'tone'
 
 import { cameraSystem } from '../camera/CameraSystem'
+import { getActiveVisualizerCanvas } from '../renderer/activeCanvas'
 import { playbackEngine } from '../playback/PlaybackEngine'
 import { renderer } from '../renderer/Renderer'
 import type { AppState } from '../store/store'
@@ -238,7 +239,10 @@ export class ExportEngine {
 
     const ticksPerFrame = Math.max(1, secondsToTick(1 / settings.fps, tempoMap))
     const target = new ArrayBufferTarget()
-    const canvas = renderer.getCanvas()
+    const canvas = getActiveVisualizerCanvas()
+    if (canvas == null) {
+      throw new ExportError('Renderer has not been initialized.', 'NOT_INITIALIZED')
+    }
     const muxer = new Muxer({
       firstTimestampBehavior: 'offset',
       target,

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 
 import { audioScheduler } from '../../audio/AudioScheduler'
 import { playbackEngine } from '../../playback/PlaybackEngine'
+import { getActiveVisualizerCanvas } from '../../renderer/activeCanvas'
 import { renderer } from '../../renderer/Renderer'
 import { useAppStore } from '../../store/store'
 import { compositeExport } from '../../utils/compositeExport'
@@ -803,7 +804,7 @@ export function RecordMode() {
             data-testid="record-mode-review-visualizer"
             style={{ transform: `translate3d(0px, ${cameraOverlay.offsetY}px, 0)` }}
           >
-            <CanvasArea />
+            <CanvasArea engine="three" />
           </div>
 
           <div className={styles.reviewVideoSlot} data-testid="record-mode-review-video-slot">
@@ -1093,12 +1094,7 @@ function resetPlaybackToStart() {
 }
 
 function getVisualizerCanvas(): HTMLCanvasElement | null {
-  const preferredCanvas = document.querySelector('[data-testid="canvas-area"] canvas')
-  if (preferredCanvas instanceof HTMLCanvasElement) {
-    return preferredCanvas
-  }
-
-  return document.querySelector('canvas')
+  return getActiveVisualizerCanvas()
 }
 
 function formatClock(value: number): string {

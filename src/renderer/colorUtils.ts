@@ -4,6 +4,7 @@ import { isBlackKey } from './pianoMath'
 
 const DEFAULT_COLOR = '#4f8ef7'
 const DEFAULT_TOP_COLOR = '#ffffff'
+const CREATE_MODE_NOTE_COLOR = 0x2e65a2
 
 export interface NoteGradientColors {
   topColor: string
@@ -97,6 +98,35 @@ export function hexToPixi(hex: string): number {
 export function pixiToHex(color: number): string {
   const normalized = Math.max(0, Math.min(0xffffff, Math.round(color)))
   return `#${normalized.toString(16).padStart(6, '0')}`
+}
+
+export function brightenColor(color: number, brightness: number): number {
+  const red = Math.min(255, Math.round(((color >> 16) & 0xff) * brightness))
+  const green = Math.min(255, Math.round(((color >> 8) & 0xff) * brightness))
+  const blue = Math.min(255, Math.round((color & 0xff) * brightness))
+
+  return (red << 16) | (green << 8) | blue
+}
+
+export function interpolateColor(startColor: number, endColor: number, progress: number): number {
+  const clampedProgress = Math.max(0, Math.min(1, progress))
+  const startRed = (startColor >> 16) & 0xff
+  const startGreen = (startColor >> 8) & 0xff
+  const startBlue = startColor & 0xff
+  const endRed = (endColor >> 16) & 0xff
+  const endGreen = (endColor >> 8) & 0xff
+  const endBlue = endColor & 0xff
+
+  const red = Math.round(startRed + ((endRed - startRed) * clampedProgress))
+  const green = Math.round(startGreen + ((endGreen - startGreen) * clampedProgress))
+  const blue = Math.round(startBlue + ((endBlue - startBlue) * clampedProgress))
+
+  return (red << 16) | (green << 8) | blue
+}
+
+export function resolveCreateModeNoteColor(pitch: number): number {
+  void pitch
+  return CREATE_MODE_NOTE_COLOR
 }
 
 function resolveSplitGradientBottomColor(pitch: number, state: AppState): string {

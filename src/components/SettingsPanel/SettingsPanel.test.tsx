@@ -3,9 +3,10 @@ import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockRendererDestroy = vi.hoisted(() => vi.fn(async () => undefined))
-const mockRendererInit = vi.hoisted(() => vi.fn(async () => undefined))
-const mockRendererIsReady = vi.hoisted(() => vi.fn(() => false))
-const mockRendererIsInitialized = vi.hoisted(() => ({ value: true }))
+const mockRendererCanvas = vi.hoisted(() => ({ current: null as HTMLCanvasElement | null }))
+const mockRendererInit = vi.hoisted(() => vi.fn(async (canvas: HTMLCanvasElement) => {
+  mockRendererCanvas.current = canvas
+}))
 const mockRendererRenderFrame = vi.hoisted(() => vi.fn())
 const mockRendererResize = vi.hoisted(() => vi.fn())
 const mockCameraInit = vi.hoisted(() => vi.fn())
@@ -15,11 +16,14 @@ const mockCameraSetViewportSize = vi.hoisted(() => vi.fn())
 vi.mock('../../renderer/Renderer', () => ({
   renderer: {
     destroy: mockRendererDestroy,
-    init: mockRendererInit,
-    get isInitialized() {
-      return mockRendererIsInitialized.value
+    getCanvas: () => {
+      if (mockRendererCanvas.current == null) {
+        throw new Error('Renderer canvas requested before initialization.')
+      }
+
+      return mockRendererCanvas.current
     },
-    isReady: mockRendererIsReady,
+    init: mockRendererInit,
     renderFrame: mockRendererRenderFrame,
     resize: mockRendererResize,
   },
@@ -42,13 +46,15 @@ describe('SettingsPanel', () => {
   beforeEach(() => {
     resetStore()
     applyDesignTokens()
+    mockRendererCanvas.current = null
     mockRendererDestroy.mockReset()
-    mockRendererDestroy.mockImplementation(async () => undefined)
+    mockRendererDestroy.mockImplementation(async () => {
+      mockRendererCanvas.current = null
+    })
     mockRendererInit.mockReset()
-    mockRendererInit.mockImplementation(async () => undefined)
-    mockRendererIsReady.mockReset()
-    mockRendererIsReady.mockReturnValue(false)
-    mockRendererIsInitialized.value = true
+    mockRendererInit.mockImplementation(async (canvas: HTMLCanvasElement) => {
+      mockRendererCanvas.current = canvas
+    })
     mockRendererRenderFrame.mockReset()
     mockRendererResize.mockReset()
     mockCameraInit.mockReset()
@@ -125,7 +131,7 @@ describe('SettingsPanel', () => {
     render(
       <>
         <SettingsPanel onClose={() => undefined} />
-        <CanvasArea />
+        <CanvasArea engine="pixi" />
       </>,
     )
 
