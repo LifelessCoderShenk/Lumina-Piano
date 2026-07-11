@@ -14,7 +14,7 @@ import { LearnOptionsPanel } from './components/LearnOptionsPanel/LearnOptionsPa
 import { ListenSession } from './components/LearnSession/ListenSession'
 import { NoteByNoteSession } from './components/LearnSession/NoteByNoteSession'
 import { PlayAlongSession } from './components/LearnSession/PlayAlongSession'
-import { renderer } from './renderer/Renderer'
+import { getActiveVisualizerRenderer } from './renderer/activeVisualizerRenderer'
 import { SongPage } from './components/SongPage/SongPage'
 import { useCommandShortcuts } from './commands/useCommandShortcuts'
 import { useAppStore } from './store/store'
@@ -79,13 +79,18 @@ export function App() {
       return
     }
 
-    const fakeAX = renderer.getKeyX(21)
-    const fakeCX = renderer.getKeyX(108)
+    const activeRenderer = getActiveVisualizerRenderer()
+    if (activeRenderer == null) {
+      return
+    }
+
+    const fakeAX = activeRenderer.getKeyX(21)
+    const fakeCX = activeRenderer.getKeyX(108)
     const realWidth = Math.max(1, x - state.lowAPoint.x)
     const fakeWidth = Math.max(1, fakeCX - fakeAX)
     const scale = Math.max(0.05, realWidth / fakeWidth)
     const offsetX = state.lowAPoint.x - (fakeAX * scale)
-    const offsetY = state.lowAPoint.y - renderer.getKeyboardY()
+    const offsetY = state.lowAPoint.y - activeRenderer.getKeyboardY()
 
     state.setHighCPoint({ x, y })
     state.setCameraOverlay({
@@ -93,7 +98,7 @@ export function App() {
       offsetY,
       scale,
     })
-    renderer.setKeyboardOpacity(1)
+    activeRenderer.setKeyboardOpacity(1)
     state.setAlignStep('complete')
   }
 

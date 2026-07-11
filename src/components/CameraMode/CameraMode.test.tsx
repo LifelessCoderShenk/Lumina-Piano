@@ -13,6 +13,13 @@ const mockSetMuted = vi.hoisted(() => vi.fn())
 const mockRendererGetKeyX = vi.hoisted(() => vi.fn((pitch: number) => (pitch === 21 ? 100 : 900)))
 const mockRendererGetKeyboardY = vi.hoisted(() => vi.fn(() => 120))
 const mockRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
+const mockActiveVisualizerRenderer = vi.hoisted(() => ({
+  current: null as null | {
+    getKeyX: (pitch: number) => number
+    getKeyboardY: () => number
+    setKeyboardOpacity: (opacity: number) => void
+  },
+}))
 const mockPlaybackPlay = vi.hoisted(() => vi.fn())
 const mockPlayWithPreRoll = vi.hoisted(() => vi.fn())
 const mockPlaybackPause = vi.hoisted(() => vi.fn())
@@ -70,12 +77,8 @@ vi.mock('../../audio/AudioScheduler', () => ({
   },
 }))
 
-vi.mock('../../renderer/Renderer', () => ({
-  renderer: {
-    getKeyX: mockRendererGetKeyX,
-    getKeyboardY: mockRendererGetKeyboardY,
-    setKeyboardOpacity: mockRendererSetKeyboardOpacity,
-  },
+vi.mock('../../renderer/activeVisualizerRenderer', () => ({
+  getActiveVisualizerRenderer: () => mockActiveVisualizerRenderer.current,
 }))
 
 vi.mock('../../renderer/activeCanvas', () => ({
@@ -107,6 +110,11 @@ describe('CameraMode', () => {
     mockRendererGetKeyX.mockClear()
     mockRendererGetKeyboardY.mockClear()
     mockRendererSetKeyboardOpacity.mockReset()
+    mockActiveVisualizerRenderer.current = {
+      getKeyX: mockRendererGetKeyX,
+      getKeyboardY: mockRendererGetKeyboardY,
+      setKeyboardOpacity: mockRendererSetKeyboardOpacity,
+    }
     mockPlaybackPlay.mockReset()
     mockPlayWithPreRoll.mockReset()
     mockPlaybackPause.mockReset()

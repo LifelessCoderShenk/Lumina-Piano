@@ -5,11 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetStore, useAppStore } from '../../store/store'
 
 const mockSetKeyboardOpacity = vi.hoisted(() => vi.fn())
-
-vi.mock('../../renderer/Renderer', () => ({
-  renderer: {
-    setKeyboardOpacity: mockSetKeyboardOpacity,
+const mockActiveRenderer = vi.hoisted(() => ({
+  current: null as null | {
+    getKeyX: (pitch: number) => number
+    getKeyboardY: () => number
+    setKeyboardOpacity: (opacity: number) => void
   },
+}))
+
+vi.mock('../../renderer/activeVisualizerRenderer', () => ({
+  getActiveVisualizerRenderer: () => mockActiveRenderer.current,
 }))
 
 const { CameraControlsPanel } = await import('./CameraControlsPanel')
@@ -18,6 +23,11 @@ describe('CameraControlsPanel', () => {
   beforeEach(() => {
     resetStore()
     mockSetKeyboardOpacity.mockReset()
+    mockActiveRenderer.current = {
+      getKeyX: () => 0,
+      getKeyboardY: () => 0,
+      setKeyboardOpacity: mockSetKeyboardOpacity,
+    }
   })
 
   afterEach(() => {
@@ -72,6 +82,17 @@ describe('CameraControlsPanel', () => {
     expect(useAppStore.getState().alignStep).toBe('waiting-low-a')
     expect(screen.getByText('Click the lowest A key on your piano in the camera feed')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+  })
+
+  it('still starts alignment safely when no active visualizer renderer is mounted', () => {
+    mockActiveRenderer.current = null
+
+    render(<CameraControlsPanel onBack={() => undefined} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'ALIGN' }))
+
+    expect(mockSetKeyboardOpacity).not.toHaveBeenCalled()
+    expect(useAppStore.getState().alignStep).toBe('waiting-low-a')
   })
 
   it('shows the second-step instruction and completed message from shared align state', () => {

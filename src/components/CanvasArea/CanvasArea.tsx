@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 
 import { cameraSystem } from '../../camera/CameraSystem'
 import { clearActiveVisualizerCanvas, registerActiveVisualizerCanvas } from '../../renderer/activeCanvas'
+import { clearActiveVisualizerRenderer, registerActiveVisualizerRenderer } from '../../renderer/activeVisualizerRenderer'
 import { renderer } from '../../renderer/Renderer'
 import { threeRenderer } from '../../renderer/ThreeRenderer'
 import type { VisualizerEngine, VisualizerRenderer } from '../../renderer/VisualizerRenderer'
@@ -74,6 +75,14 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
       clearActiveVisualizerCanvas(canvas)
     }
   }, [])
+
+  useEffect(() => {
+    registerActiveVisualizerRenderer(activeRenderer)
+
+    return () => {
+      clearActiveVisualizerRenderer(activeRenderer)
+    }
+  }, [activeRenderer])
 
   useEffect(() => {
     if (canvasRef.current == null || availableAreaRef.current == null) {

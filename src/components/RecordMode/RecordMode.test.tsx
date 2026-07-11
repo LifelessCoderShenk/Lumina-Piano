@@ -26,6 +26,13 @@ const mockPlaybackPlay = vi.hoisted(() => vi.fn())
 const mockPlaybackGetCurrentTick = vi.hoisted(() => vi.fn(() => 0))
 const mockCompositeExport = vi.hoisted(() => vi.fn(async () => undefined))
 const mockRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
+const mockActiveVisualizerRenderer = vi.hoisted(() => ({
+  current: null as null | {
+    getKeyX: (pitch: number) => number
+    getKeyboardY: () => number
+    setKeyboardOpacity: (opacity: number) => void
+  },
+}))
 const mockActiveVisualizerCanvas = vi.hoisted(() => ({
   current: null as HTMLCanvasElement | null,
 }))
@@ -53,10 +60,8 @@ vi.mock('../../playback/PlaybackEngine', () => ({
   },
 }))
 
-vi.mock('../../renderer/Renderer', () => ({
-  renderer: {
-    setKeyboardOpacity: mockRendererSetKeyboardOpacity,
-  },
+vi.mock('../../renderer/activeVisualizerRenderer', () => ({
+  getActiveVisualizerRenderer: () => mockActiveVisualizerRenderer.current,
 }))
 
 vi.mock('../../renderer/activeCanvas', () => ({
@@ -129,6 +134,11 @@ describe('RecordMode', () => {
     mockCompositeExport.mockReset()
     mockCompositeExport.mockImplementation(async () => undefined)
     mockRendererSetKeyboardOpacity.mockReset()
+    mockActiveVisualizerRenderer.current = {
+      getKeyX: () => 0,
+      getKeyboardY: () => 0,
+      setKeyboardOpacity: mockRendererSetKeyboardOpacity,
+    }
     mockActiveVisualizerCanvas.current = null
     mediaRecorderStartSpy.mockReset()
     mediaRecorderStopSpy.mockReset()

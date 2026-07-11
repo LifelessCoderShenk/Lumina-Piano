@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 
-import { renderer } from '../../renderer/Renderer'
+import { getActiveVisualizerRenderer } from '../../renderer/activeVisualizerRenderer'
 import { useAppStore } from '../../store/store'
 import styles from './CameraControlsPanel.module.css'
 
@@ -24,7 +24,7 @@ export function CameraControlsPanel({ onBack }: CameraControlsPanelProps) {
       setAlignStep('idle')
       setLowAPoint(null)
       setHighCPoint(null)
-      renderer.setKeyboardOpacity(1)
+      getActiveVisualizerRenderer()?.setKeyboardOpacity(1)
     }
   }, [setAlignStep, setHighCPoint, setLowAPoint])
 
@@ -32,13 +32,13 @@ export function CameraControlsPanel({ onBack }: CameraControlsPanelProps) {
     setLowAPoint(null)
     setHighCPoint(null)
     setAlignStep('idle')
-    renderer.setKeyboardOpacity(1)
+    getActiveVisualizerRenderer()?.setKeyboardOpacity(1)
   }
 
   const startAlignment = () => {
     setLowAPoint(null)
     setHighCPoint(null)
-    renderer.setKeyboardOpacity(0.3)
+    getActiveVisualizerRenderer()?.setKeyboardOpacity(0.3)
     setAlignStep('waiting-low-a')
   }
 

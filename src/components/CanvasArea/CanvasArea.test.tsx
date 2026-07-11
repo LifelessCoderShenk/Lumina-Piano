@@ -11,6 +11,9 @@ const mockPixiRendererInit = vi.hoisted(() => vi.fn(async (canvas: HTMLCanvasEle
 }))
 const mockPixiRendererRenderFrame = vi.hoisted(() => vi.fn())
 const mockPixiRendererResize = vi.hoisted(() => vi.fn())
+const mockPixiRendererGetKeyX = vi.hoisted(() => vi.fn(() => 100))
+const mockPixiRendererGetKeyboardY = vi.hoisted(() => vi.fn(() => 120))
+const mockPixiRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
 const mockThreeRendererCanvas = vi.hoisted(() => ({ current: null as HTMLCanvasElement | null }))
 const mockThreeRendererDestroy = vi.hoisted(() => vi.fn(async () => {
   mockThreeRendererCanvas.current = null
@@ -20,6 +23,9 @@ const mockThreeRendererInit = vi.hoisted(() => vi.fn(async (canvas: HTMLCanvasEl
 }))
 const mockThreeRendererRenderFrame = vi.hoisted(() => vi.fn())
 const mockThreeRendererResize = vi.hoisted(() => vi.fn())
+const mockThreeRendererGetKeyX = vi.hoisted(() => vi.fn(() => 200))
+const mockThreeRendererGetKeyboardY = vi.hoisted(() => vi.fn(() => 220))
+const mockThreeRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
 const mockCameraInit = vi.hoisted(() => vi.fn())
 const mockCameraIsInitialized = vi.hoisted(() => vi.fn(() => false))
 const mockCameraSetViewportSize = vi.hoisted(() => vi.fn())
@@ -47,8 +53,11 @@ vi.mock('../../renderer/Renderer', () => ({
       return mockPixiRendererCanvas.current
     },
     init: mockPixiRendererInit,
+    getKeyX: mockPixiRendererGetKeyX,
+    getKeyboardY: mockPixiRendererGetKeyboardY,
     renderFrame: mockPixiRendererRenderFrame,
     resize: mockPixiRendererResize,
+    setKeyboardOpacity: mockPixiRendererSetKeyboardOpacity,
   },
 }))
 
@@ -63,8 +72,11 @@ vi.mock('../../renderer/ThreeRenderer', () => ({
       return mockThreeRendererCanvas.current
     },
     init: mockThreeRendererInit,
+    getKeyX: mockThreeRendererGetKeyX,
+    getKeyboardY: mockThreeRendererGetKeyboardY,
     renderFrame: mockThreeRendererRenderFrame,
     resize: mockThreeRendererResize,
+    setKeyboardOpacity: mockThreeRendererSetKeyboardOpacity,
   },
 }))
 
@@ -82,6 +94,7 @@ vi.mock('../../store/store', () => ({
 }))
 
 const { CanvasArea } = await import('./CanvasArea')
+const { getActiveVisualizerRenderer } = await import('../../renderer/activeVisualizerRenderer')
 
 describe('CanvasArea', () => {
   beforeEach(() => {
@@ -96,6 +109,9 @@ describe('CanvasArea', () => {
     })
     mockPixiRendererRenderFrame.mockReset()
     mockPixiRendererResize.mockReset()
+    mockPixiRendererGetKeyX.mockReset()
+    mockPixiRendererGetKeyboardY.mockReset()
+    mockPixiRendererSetKeyboardOpacity.mockReset()
     mockThreeRendererCanvas.current = null
     mockThreeRendererDestroy.mockReset()
     mockThreeRendererDestroy.mockImplementation(async () => {
@@ -107,6 +123,9 @@ describe('CanvasArea', () => {
     })
     mockThreeRendererRenderFrame.mockReset()
     mockThreeRendererResize.mockReset()
+    mockThreeRendererGetKeyX.mockReset()
+    mockThreeRendererGetKeyboardY.mockReset()
+    mockThreeRendererSetKeyboardOpacity.mockReset()
     mockCameraInit.mockReset()
     mockCameraIsInitialized.mockReset()
     mockCameraIsInitialized.mockReturnValue(false)
@@ -358,6 +377,7 @@ describe('CanvasArea', () => {
     expect(mockThreeRendererDestroy).toHaveBeenCalledTimes(1)
     expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600)
     expect(mockThreeRendererCanvas.current).toBeInstanceOf(HTMLCanvasElement)
+    expect(getActiveVisualizerRenderer()?.setKeyboardOpacity).toBe(mockThreeRendererSetKeyboardOpacity)
   })
 
   it('re-initializes with the other engine when the prop changes on the same mount', async () => {
@@ -374,5 +394,20 @@ describe('CanvasArea', () => {
     })
 
     expect(mockPixiRendererDestroy).toHaveBeenCalled()
+    expect(getActiveVisualizerRenderer()?.setKeyboardOpacity).toBe(mockThreeRendererSetKeyboardOpacity)
+  })
+
+  it('registers the active renderer on mount and clears it on unmount', async () => {
+    const view = render(<CanvasArea engine="pixi" />)
+
+    await waitFor(() => {
+      expect(mockPixiRendererInit).toHaveBeenCalledTimes(1)
+    })
+
+    expect(getActiveVisualizerRenderer()?.setKeyboardOpacity).toBe(mockPixiRendererSetKeyboardOpacity)
+
+    view.unmount()
+
+    expect(getActiveVisualizerRenderer()).toBeNull()
   })
 })

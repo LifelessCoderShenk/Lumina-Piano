@@ -1,4 +1,4 @@
-import { renderer } from '../../renderer/Renderer'
+import { getActiveVisualizerRenderer } from '../../renderer/activeVisualizerRenderer'
 import { cameraOverlayInitial, useAppStore } from '../../store/store'
 
 export function useCameraAlignment() {
@@ -25,7 +25,7 @@ export function useCameraAlignment() {
   const startAlignment = () => {
     setLowAPoint(null)
     setHighCPoint(null)
-    renderer.setKeyboardOpacity(0.3)
+    getActiveVisualizerRenderer()?.setKeyboardOpacity(0.3)
     setAlignStep('waiting-low-a')
   }
 
@@ -33,7 +33,7 @@ export function useCameraAlignment() {
     setLowAPoint(null)
     setHighCPoint(null)
     setAlignStep('idle')
-    renderer.setKeyboardOpacity(1)
+    getActiveVisualizerRenderer()?.setKeyboardOpacity(1)
   }
 
   const resetCameraOverlay = () => {

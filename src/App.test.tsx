@@ -14,6 +14,13 @@ const mockRendererRenderFrame = vi.hoisted(() => vi.fn())
 const mockRendererGetKeyX = vi.hoisted(() => vi.fn((pitch: number) => (pitch === 21 ? 100 : 900)))
 const mockRendererGetKeyboardY = vi.hoisted(() => vi.fn(() => 120))
 const mockRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
+const mockActiveVisualizerRenderer = vi.hoisted(() => ({
+  current: null as null | {
+    getKeyX: (pitch: number) => number
+    getKeyboardY: () => number
+    setKeyboardOpacity: (opacity: number) => void
+  },
+}))
 const mockSpatialBuild = vi.hoisted(() => vi.fn())
 const mockParseMidi = vi.hoisted(() => vi.fn())
 
@@ -107,6 +114,10 @@ vi.mock('./renderer/Renderer', () => ({
   },
 }))
 
+vi.mock('./renderer/activeVisualizerRenderer', () => ({
+  getActiveVisualizerRenderer: () => mockActiveVisualizerRenderer.current,
+}))
+
 vi.mock('./spatial/SpatialIndex', () => ({
   spatialIndex: {
     build: mockSpatialBuild,
@@ -156,6 +167,11 @@ describe('App Create Mode shell', () => {
     mockRendererGetKeyX.mockClear()
     mockRendererGetKeyboardY.mockClear()
     mockRendererSetKeyboardOpacity.mockReset()
+    mockActiveVisualizerRenderer.current = {
+      getKeyX: mockRendererGetKeyX,
+      getKeyboardY: mockRendererGetKeyboardY,
+      setKeyboardOpacity: mockRendererSetKeyboardOpacity,
+    }
     mockSpatialBuild.mockReset()
     mockParseMidi.mockReset()
     mockParseMidi.mockReturnValue({
@@ -422,6 +438,53 @@ describe('App Create Mode shell', () => {
     expect(useAppStore.getState().cameraOverlay.offsetY).toBe(-20)
     expect(useAppStore.getState().cameraOverlay.scale).toBe(1)
     expect(mockRendererSetKeyboardOpacity).toHaveBeenCalledWith(1)
+  })
+
+  it('keeps alignment in progress when no active visualizer renderer is mounted', () => {
+    useAppStore.setState({
+      alignStep: 'waiting-low-a',
+      appMode: 'createCamera',
+      currentPieceId: 'piece-1',
+      isProjectLoaded: true,
+      pieces: [
+        {
+          createdAt: Date.now(),
+          filePath: 'C:/music/demo.mid',
+          id: 'piece-1',
+          name: 'Demo',
+          type: 'midi',
+        },
+      ],
+    })
+    mockActiveVisualizerRenderer.current = null
+
+    render(<App />)
+
+    const rightPanel = screen.getByTestId('create-visualizer-area')
+    vi.spyOn(rightPanel, 'getBoundingClientRect').mockReturnValue({
+      bottom: 720,
+      height: 700,
+      left: 300,
+      right: 1200,
+      toJSON: () => undefined,
+      top: 20,
+      width: 900,
+      x: 300,
+      y: 20,
+    })
+
+    const overlay = screen.getByTestId('full-panel-align-overlay')
+
+    fireEvent.click(overlay, { clientX: 450, clientY: 120 })
+
+    expect(useAppStore.getState().lowAPoint).toEqual({ x: 150, y: 100 })
+    expect(useAppStore.getState().alignStep).toBe('waiting-high-c')
+
+    fireEvent.click(overlay, { clientX: 1250, clientY: 130 })
+
+    expect(useAppStore.getState().highCPoint).toBeNull()
+    expect(useAppStore.getState().alignStep).toBe('waiting-high-c')
+    expect(mockRendererSetKeyboardOpacity).not.toHaveBeenCalled()
   })
 })
 

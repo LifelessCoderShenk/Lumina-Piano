@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { audioScheduler } from '../../audio/AudioScheduler'
 import { playbackEngine } from '../../playback/PlaybackEngine'
 import { getActiveVisualizerCanvas } from '../../renderer/activeCanvas'
-import { renderer } from '../../renderer/Renderer'
+import { getActiveVisualizerRenderer } from '../../renderer/activeVisualizerRenderer'
 import { useAppStore } from '../../store/store'
 import { compositeExport } from '../../utils/compositeExport'
 import { CanvasArea } from '../CanvasArea/CanvasArea'
@@ -124,7 +124,7 @@ export function RecordMode() {
       clearCountdown()
       clearMidiTest()
       resetPlaybackToStart()
-      renderer.setKeyboardOpacity(1)
+      getActiveVisualizerRenderer()?.setKeyboardOpacity(1)
       clearPreviewSource()
       stopMediaStream(setupPreviewStreamRef.current)
       stopMediaStream(recordingStreamRef.current)
