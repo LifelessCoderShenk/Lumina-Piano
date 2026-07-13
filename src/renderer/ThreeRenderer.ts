@@ -1,22 +1,27 @@
 import {
-  CanvasTexture,
+  AmbientLight,
   Color,
   Group,
+  LinearToneMapping,
   Mesh,
   MeshBasicMaterial,
+  MeshLambertMaterial,
   OrthographicCamera,
   PlaneGeometry,
   Scene,
-  Sprite,
-  SpriteMaterial,
+  Vector2,
   WebGLRenderer,
 } from 'three'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
 import { getAppState } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
 import { resolveCreateModeNoteColor } from './colorUtils'
-import { getNoteLabel } from './labelUtils'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
   BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
@@ -72,24 +77,45 @@ const WHITE_KEY_SHADOW_ALPHA = 0.3
 const BLACK_KEY_HIGHLIGHT_ALPHA = 0.6
 const BLACK_KEY_NOTE_INSET = 2
 const BLACK_KEY_VERTICAL_INSET = 3
-const KEY_LABEL_FONT_SIZE = 12
-const NOTE_LABEL_FONT_SIZE = 12
-const TEXT_FONT_FAMILY = 'Arial, sans-serif'
-const KEY_LABEL_BASELINE_OFFSET = 8
 const LANE_GUIDE_Z = 0
 const WHITE_KEY_Z = 1
 const BLACK_KEY_Z = 2
-const KEY_LABEL_Z = 3
 const BLACK_NOTE_Z = 4
-const BLACK_NOTE_LABEL_Z = 5
 const WHITE_NOTE_Z = 6
-const WHITE_NOTE_LABEL_Z = 7
 const WAVE_OUTER_Z = 8
 const WAVE_MID_Z = 9
 const WAVE_CORE_Z = 10
+const NOTE_AMBIENT_LIGHT_COLOR = 0xffffff
+const NOTE_AMBIENT_LIGHT_INTENSITY = 1
+const NOTE_ROUNDED_CORNER_RATIO = 0.18
+const NOTE_MAX_CORNER_RADIUS = 6
+const BLOOM_LAYER = 1
+const BLOOM_STRENGTH = 1
+const BLOOM_RADIUS = 0.1
+const BLOOM_THRESHOLD = 0
+const SHOW_BLOOM_DEBUG_VIEW = false
+const SHOW_BLOOM_CLIP_DEBUG_LINE = false
+const BLOOM_CLIP_FEATHER_PIXELS = 3
+const BLOOM_CLIP_DEBUG_LINE_ALPHA = SHOW_BLOOM_CLIP_DEBUG_LINE ? 0.85 : 0
+const BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS = 3
+const NOTE_BLOOM_EMISSIVE_INTENSITY = 3
+const WAVE_OUTER_AURA_EMISSIVE_INTENSITY = 0
+const WAVE_MID_GLOW_EMISSIVE_INTENSITY = 2
+const WAVE_CORE_EMISSIVE_INTENSITY = 1.5
+
+type GlowMaterial = MeshLambertMaterial
+
+interface RoundedNoteUniforms {
+  roundedRectRadius: {
+    value: number
+  }
+  roundedRectSize: {
+    value: Vector2
+  }
+}
 
 interface KeyboardMaterialState {
-  material: MeshBasicMaterial | SpriteMaterial
+  material: MeshBasicMaterial
   baseOpacity: number
 }
 
@@ -99,15 +125,9 @@ interface KeyHighlightState {
   color: number
 }
 
-interface TextSpriteAsset {
-  material: SpriteMaterial
-  texture: CanvasTexture | null
-  width: number
-  height: number
-}
-
 interface WaveLayerDefinition {
   color: number
+  emissiveIntensity: number
   lineWidth: number
   opacity: number
   renderOrder: number
@@ -116,15 +136,23 @@ interface WaveLayerDefinition {
 
 interface WaveLayerState {
   definition: WaveLayerDefinition
-  material: MeshBasicMaterial
-  segments: Array<Mesh<PlaneGeometry, MeshBasicMaterial>>
+  material: GlowMaterial
+  segments: Array<Mesh<PlaneGeometry, GlowMaterial>>
 }
 
 export class ThreeRenderer implements VisualizerRenderer {
   private canvas: HTMLCanvasElement | null = null
   private renderer: WebGLRenderer | null = null
+  private bloomComposer: EffectComposer | null = null
+  private finalComposer: EffectComposer | null = null
+  private bloomRenderPass: RenderPass | null = null
+  private finalRenderPass: RenderPass | null = null
+  private bloomPass: UnrealBloomPass | null = null
+  private bloomCompositePass: ShaderPass | null = null
+  private outputPass: OutputPass | null = null
   private scene: Scene | null = null
   private camera: OrthographicCamera | null = null
+  private ambientLight: AmbientLight | null = null
   private rectGeometry: PlaneGeometry | null = null
   private laneGroup: Group | null = null
   private keyboardGroup: Group | null = null
@@ -141,10 +169,8 @@ export class ThreeRenderer implements VisualizerRenderer {
   private viewportHeight = 1
   private currentTick = 0
   private boundaryWaveTime = 0
-  private noteMeshes: Array<Mesh<PlaneGeometry, MeshBasicMaterial>> = []
-  private noteLabelSprites: Sprite[] = []
-  private noteMaterialCache = new Map<number, MeshBasicMaterial>()
-  private noteLabelAssets = new Map<string, TextSpriteAsset>()
+  private noteMeshes: Array<Mesh<PlaneGeometry, GlowMaterial>> = []
+  private noteMaterialCache = new Map<number, GlowMaterial>()
   private waveLayers: WaveLayerState[] = []
   private waveSamplePoints: number[] = []
   private notesDirty = true
@@ -189,17 +215,21 @@ export class ThreeRenderer implements VisualizerRenderer {
     })
     this.renderer.setClearColor(CREATE_MODE_BACKGROUND_COLOR, 1)
     this.renderer.setPixelRatio(getDevicePixelRatio())
+    this.renderer.toneMapping = LinearToneMapping
+    this.renderer.toneMappingExposure = 1
 
     this.rectGeometry = new PlaneGeometry(1, 1)
     this.laneGroup = new Group()
     this.keyboardGroup = new Group()
     this.noteGroup = new Group()
     this.waveGroup = new Group()
+    this.ambientLight = new AmbientLight(NOTE_AMBIENT_LIGHT_COLOR, NOTE_AMBIENT_LIGHT_INTENSITY)
 
     this.scene.add(this.laneGroup)
     this.scene.add(this.keyboardGroup)
     this.scene.add(this.noteGroup)
     this.scene.add(this.waveGroup)
+    this.scene.add(this.ambientLight)
 
     this.initWaveLayers()
 
@@ -208,6 +238,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       Math.max(1, canvas.clientHeight || canvas.height || 1),
     )
 
+    this.initPostprocessing()
     this.renderer.setAnimationLoop(this.handleAnimationFrame)
     this.renderFrame(this.currentTick)
   }
@@ -236,6 +267,9 @@ export class ThreeRenderer implements VisualizerRenderer {
     if (this.waveGroup != null && this.scene != null) {
       this.scene.remove(this.waveGroup)
     }
+    if (this.ambientLight != null && this.scene != null) {
+      this.scene.remove(this.ambientLight)
+    }
 
     for (const resource of this.persistentResources) {
       resource.dispose()
@@ -258,7 +292,15 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.waveGroup = null
     this.rectGeometry = null
     this.camera = null
+    this.ambientLight = null
     this.scene = null
+    this.bloomComposer = null
+    this.finalComposer = null
+    this.bloomRenderPass = null
+    this.finalRenderPass = null
+    this.bloomPass = null
+    this.bloomCompositePass = null
+    this.outputPass = null
     this.renderer = null
     this.canvas = null
     this.explicitActiveKeyPitches.clear()
@@ -275,9 +317,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.lastRenderedProjectData = null
     this.lastRenderedTempoMap = null
     this.noteMeshes = []
-    this.noteLabelSprites = []
     this.noteMaterialCache.clear()
-    this.noteLabelAssets.clear()
     this.waveLayers = []
     this.waveSamplePoints = []
     this.persistentResources = []
@@ -293,6 +333,11 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.renderer.setPixelRatio(getDevicePixelRatio())
     this.renderer.setSize(this.viewportWidth, this.viewportHeight, false)
+    this.bloomComposer?.setPixelRatio(getDevicePixelRatio())
+    this.bloomComposer?.setSize(this.viewportWidth, this.viewportHeight)
+    this.finalComposer?.setPixelRatio(getDevicePixelRatio())
+    this.finalComposer?.setSize(this.viewportWidth, this.viewportHeight)
+    this.updateBloomCompositeUniforms()
 
     this.camera.left = 0
     this.camera.right = this.viewportWidth
@@ -519,21 +564,6 @@ export class ThreeRenderer implements VisualizerRenderer {
         color: resolveCreateModeNoteColor(pitch),
         material: highlight.material,
       })
-
-      const label = this.createTextSprite(getNoteLabel(pitch, 'name'), {
-        color: '#000000',
-        fontSize: KEY_LABEL_FONT_SIZE,
-        trackKeyboardOpacity: true,
-      })
-      if (label != null) {
-        label.position.set(
-          whiteKeyBounds.x + (whiteKeyBounds.width / 2),
-          this.toScenePointY(this.viewportHeight - KEY_LABEL_BASELINE_OFFSET),
-          KEY_LABEL_Z,
-        )
-        label.renderOrder = Math.round(KEY_LABEL_Z * 10)
-        keyboardGroup.add(label)
-      }
     }
 
     for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
@@ -600,7 +630,6 @@ export class ThreeRenderer implements VisualizerRenderer {
     const noteGroup = this.requireNoteGroup()
     if (state.projectData == null || state.precomputedTempoMap == null || !this.isSpatialIndexReady()) {
       hideObjects(this.noteMeshes)
-      hideObjects(this.noteLabelSprites)
       return
     }
 
@@ -622,8 +651,6 @@ export class ThreeRenderer implements VisualizerRenderer {
     const nextNotesById = this.getNextNotesById(visibleNotes)
 
     let noteMeshIndex = 0
-    let noteLabelIndex = 0
-
     for (const indexedNote of visibleNotes) {
       if (!isBlackKey(indexedNote.note.pitch)) {
         continue
@@ -637,10 +664,8 @@ export class ThreeRenderer implements VisualizerRenderer {
         currentSeconds,
         state,
         noteMeshIndex,
-        noteLabelIndex,
       )
       noteMeshIndex = nextIndices.noteMeshIndex
-      noteLabelIndex = nextIndices.noteLabelIndex
     }
 
     for (const indexedNote of visibleNotes) {
@@ -656,14 +681,11 @@ export class ThreeRenderer implements VisualizerRenderer {
         currentSeconds,
         state,
         noteMeshIndex,
-        noteLabelIndex,
       )
       noteMeshIndex = nextIndices.noteMeshIndex
-      noteLabelIndex = nextIndices.noteLabelIndex
     }
 
     hideObjects(this.noteMeshes, noteMeshIndex)
-    hideObjects(this.noteLabelSprites, noteLabelIndex)
   }
 
   private renderCreateModeNote(
@@ -674,10 +696,8 @@ export class ThreeRenderer implements VisualizerRenderer {
     currentSeconds: number,
     state: AppState,
     noteMeshIndex: number,
-    noteLabelIndex: number,
   ): {
     noteMeshIndex: number
-    noteLabelIndex: number
   } {
     const rect = getNoteScreenRect(
       indexedNote.note,
@@ -695,7 +715,6 @@ export class ThreeRenderer implements VisualizerRenderer {
     if (rect == null) {
       return {
         noteMeshIndex,
-        noteLabelIndex,
       }
     }
 
@@ -721,21 +740,8 @@ export class ThreeRenderer implements VisualizerRenderer {
     noteMesh.renderOrder = Math.round((noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z) * 10)
     noteMesh.visible = true
 
-    const labelAsset = this.getOrCreateNoteLabelAsset(getNoteLabel(indexedNote.note.pitch, 'nameOctave'))
-    const noteLabel = this.getOrCreateNoteLabelSprite(group, noteLabelIndex)
-    noteLabel.material = labelAsset.material
-    noteLabel.scale.set(labelAsset.width, labelAsset.height, 1)
-    noteLabel.position.set(
-      adjustedRect.x + (adjustedRect.w / 2),
-      this.toScenePointY(adjustedRect.y + (adjustedRect.h / 2)),
-      noteIsBlack ? BLACK_NOTE_LABEL_Z : WHITE_NOTE_LABEL_Z,
-    )
-    noteLabel.renderOrder = Math.round((noteIsBlack ? BLACK_NOTE_LABEL_Z : WHITE_NOTE_LABEL_Z) * 10)
-    noteLabel.visible = true
-
     return {
       noteMeshIndex: noteMeshIndex + 1,
-      noteLabelIndex: noteLabelIndex + 1,
     }
   }
 
@@ -767,6 +773,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.waveLayers = [
       this.createWaveLayerState({
         color: CREATE_MODE_BOUNDARY_OUTER_AURA_COLOR,
+        emissiveIntensity: WAVE_OUTER_AURA_EMISSIVE_INTENSITY,
         lineWidth: CREATE_MODE_BOUNDARY_OUTER_AURA_THICKNESS,
         opacity: CREATE_MODE_BOUNDARY_OUTER_AURA_ALPHA,
         renderOrder: Math.round(WAVE_OUTER_Z * 10),
@@ -774,6 +781,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       }),
       this.createWaveLayerState({
         color: CREATE_MODE_BOUNDARY_MID_GLOW_COLOR,
+        emissiveIntensity: WAVE_MID_GLOW_EMISSIVE_INTENSITY,
         lineWidth: CREATE_MODE_BOUNDARY_MID_GLOW_THICKNESS,
         opacity: CREATE_MODE_BOUNDARY_MID_GLOW_ALPHA,
         renderOrder: Math.round(WAVE_MID_Z * 10),
@@ -781,6 +789,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       }),
       this.createWaveLayerState({
         color: CREATE_MODE_BOUNDARY_CORE_COLOR,
+        emissiveIntensity: WAVE_CORE_EMISSIVE_INTENSITY,
         lineWidth: CREATE_MODE_BOUNDARY_CORE_THICKNESS,
         opacity: CREATE_MODE_BOUNDARY_CORE_ALPHA,
         renderOrder: Math.round(WAVE_CORE_Z * 10),
@@ -790,10 +799,12 @@ export class ThreeRenderer implements VisualizerRenderer {
   }
 
   private createWaveLayerState(definition: WaveLayerDefinition): WaveLayerState {
-    const material = new MeshBasicMaterial({
+    const material = new MeshLambertMaterial({
       color: definition.color,
       depthTest: false,
       depthWrite: false,
+      emissive: definition.color,
+      emissiveIntensity: definition.emissiveIntensity,
       opacity: definition.opacity,
       transparent: true,
     })
@@ -818,6 +829,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       for (let index = 0; index < this.waveSamplePoints.length - 1; index += 1) {
         const mesh = new Mesh(this.requireRectGeometry(), layer.material)
         mesh.renderOrder = layer.definition.renderOrder
+        mesh.layers.enable(BLOOM_LAYER)
         waveGroup.add(mesh)
         layer.segments.push(mesh)
       }
@@ -894,89 +906,81 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     return mesh
   }
-
-  private createTextSprite(
-    text: string,
-    options: {
-      color: string
-      fontSize: number
-      trackKeyboardOpacity: boolean
-    },
-  ): Sprite | null {
-    const asset = createTextSpriteAsset(text, options.color, options.fontSize)
-    if (asset == null) {
-      return null
-    }
-
-    const sprite = new Sprite(asset.material)
-    sprite.scale.set(asset.width, asset.height, 1)
-
-    this.staticResources.push(asset.material)
-    if (asset.texture != null) {
-      this.staticResources.push(asset.texture)
-    }
-    if (options.trackKeyboardOpacity) {
-      this.keyboardMaterialStates.push({
-        baseOpacity: 1,
-        material: asset.material,
-      })
-    }
-
-    return sprite
-  }
-
-  private getOrCreateNoteMaterial(color: number): MeshBasicMaterial {
+  private getOrCreateNoteMaterial(color: number): GlowMaterial {
     const existing = this.noteMaterialCache.get(color)
     if (existing != null) {
       return existing
     }
 
-    const material = new MeshBasicMaterial({
+    const material = new MeshLambertMaterial({
       color,
       depthTest: false,
       depthWrite: false,
+      emissive: color,
+      emissiveIntensity: NOTE_BLOOM_EMISSIVE_INTENSITY,
       opacity: 1,
       transparent: true,
     })
+    const roundedNoteUniforms: RoundedNoteUniforms = {
+      roundedRectRadius: { value: getPillNoteCornerRadius(1, 1) },
+      roundedRectSize: { value: new Vector2(1, 1) },
+    }
+
+    material.userData.roundedNoteUniforms = roundedNoteUniforms
+    material.onBeforeCompile = (shader: {
+      fragmentShader: string
+      uniforms: Record<string, { value: unknown }>
+      vertexShader: string
+    }) => {
+      shader.uniforms.roundedRectRadius = roundedNoteUniforms.roundedRectRadius
+      shader.uniforms.roundedRectSize = roundedNoteUniforms.roundedRectSize
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec2 vRoundedRectUv;`,
+        )
+        .replace(
+          '#include <uv_vertex>',
+          `#include <uv_vertex>
+vRoundedRectUv = uv;`,
+        )
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float roundedRectRadius;
+uniform vec2 roundedRectSize;
+varying vec2 vRoundedRectUv;
+
+float roundedRectSignedDistance(vec2 point, vec2 halfSize, float radius) {
+  vec2 q = abs(point) - (halfSize - vec2(radius));
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}`,
+        )
+        .replace(
+          'vec4 diffuseColor = vec4( diffuse, opacity );',
+          `vec4 diffuseColor = vec4( diffuse, opacity );
+vec2 roundedRectHalfSize = roundedRectSize * 0.5;
+vec2 roundedRectPoint = (vRoundedRectUv - 0.5) * roundedRectSize;
+float roundedRectDistance = roundedRectSignedDistance(roundedRectPoint, roundedRectHalfSize, roundedRectRadius);
+float roundedRectEdge = 1.0;
+float roundedRectMask = 1.0 - smoothstep(0.0, roundedRectEdge, roundedRectDistance);
+if (roundedRectMask <= 0.0) {
+  discard;
+}
+diffuseColor.a *= roundedRectMask;`,
+        )
+    }
+    material.customProgramCacheKey = () => 'rounded-note-pill-v1'
     this.noteMaterialCache.set(color, material)
     this.persistentResources.push(material)
     return material
   }
 
-  private getOrCreateNoteLabelAsset(text: string): TextSpriteAsset {
-    const existing = this.noteLabelAssets.get(text)
-    if (existing != null) {
-      return existing
-    }
-
-    const asset = createTextSpriteAsset(text, '#ffffff', NOTE_LABEL_FONT_SIZE)
-    if (asset == null) {
-      const fallbackMaterial = new SpriteMaterial({
-        depthTest: false,
-        depthWrite: false,
-        opacity: 0,
-        transparent: true,
-      })
-      const fallbackAsset = {
-        material: fallbackMaterial,
-        texture: null,
-        width: 1,
-        height: 1,
-      }
-      this.noteLabelAssets.set(text, fallbackAsset)
-      this.persistentResources.push(fallbackMaterial)
-      return fallbackAsset
-    }
-
-    this.noteLabelAssets.set(text, asset)
-    this.persistentResources.push(asset.material)
-    if (asset.texture != null) {
-      this.persistentResources.push(asset.texture)
-    }
-    return asset
-  }
-
-  private getOrCreateNoteMesh(group: Group, index: number): Mesh<PlaneGeometry, MeshBasicMaterial> {
+  private getOrCreateNoteMesh(group: Group, index: number): Mesh<PlaneGeometry, GlowMaterial> {
     const existing = this.noteMeshes[index]
     if (existing != null) {
       return existing
@@ -985,23 +989,21 @@ export class ThreeRenderer implements VisualizerRenderer {
     const material = this.getOrCreateNoteMaterial(resolveCreateModeNoteColor(PIANO_MIN_PITCH))
     const mesh = new Mesh(this.requireRectGeometry(), material)
     mesh.visible = false
+    mesh.layers.enable(BLOOM_LAYER)
+    mesh.onBeforeRender = (_renderer, _scene, _camera, _geometry, noteMaterial) => {
+      const roundedNoteUniforms = noteMaterial.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
+      if (roundedNoteUniforms == null) {
+        return
+      }
+
+      const noteWidth = Math.max(1, mesh.scale.x)
+      const noteHeight = Math.max(1, mesh.scale.y)
+      roundedNoteUniforms.roundedRectSize.value.set(noteWidth, noteHeight)
+      roundedNoteUniforms.roundedRectRadius.value = getPillNoteCornerRadius(noteWidth, noteHeight)
+    }
     group.add(mesh)
     this.noteMeshes.push(mesh)
     return mesh
-  }
-
-  private getOrCreateNoteLabelSprite(group: Group, index: number): Sprite {
-    const existing = this.noteLabelSprites[index]
-    if (existing != null) {
-      return existing
-    }
-
-    const fallbackAsset = this.getOrCreateNoteLabelAsset('')
-    const sprite = new Sprite(fallbackAsset.material)
-    sprite.visible = false
-    group.add(sprite)
-    this.noteLabelSprites.push(sprite)
-    return sprite
   }
 
   private applyKeyboardOpacity(): void {
@@ -1057,8 +1059,137 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
   }
 
+  private initPostprocessing(): void {
+    if (this.renderer == null || this.scene == null || this.camera == null) {
+      return
+    }
+
+    this.bloomComposer = new EffectComposer(this.renderer)
+    this.bloomComposer.renderToScreen = false
+    this.bloomComposer.setPixelRatio(getDevicePixelRatio())
+    this.bloomComposer.setSize(this.viewportWidth, this.viewportHeight)
+
+    this.bloomRenderPass = new RenderPass(this.scene, this.camera)
+    this.bloomPass = new UnrealBloomPass(
+      new Vector2(this.viewportWidth, this.viewportHeight),
+      BLOOM_STRENGTH,
+      BLOOM_RADIUS,
+      BLOOM_THRESHOLD,
+    )
+    this.bloomComposer.addPass(this.bloomRenderPass)
+    this.bloomComposer.addPass(this.bloomPass)
+
+    this.finalComposer = new EffectComposer(this.renderer)
+    this.finalComposer.setPixelRatio(getDevicePixelRatio())
+    this.finalComposer.setSize(this.viewportWidth, this.viewportHeight)
+
+    this.finalRenderPass = new RenderPass(this.scene, this.camera)
+    this.bloomCompositePass = new ShaderPass({
+      uniforms: {
+        baseTexture: { value: null },
+        bloomClipY: { value: 0 },
+        bloomClipFeather: { value: 0 },
+        bloomDebugLineAlpha: { value: BLOOM_CLIP_DEBUG_LINE_ALPHA },
+        bloomDebugLineHalfThickness: { value: 0 },
+        bloomDebugView: { value: SHOW_BLOOM_DEBUG_VIEW ? 1 : 0 },
+        bloomTexture: { value: null },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D baseTexture;
+        uniform float bloomClipY;
+        uniform float bloomClipFeather;
+        uniform float bloomDebugLineAlpha;
+        uniform float bloomDebugLineHalfThickness;
+        uniform float bloomDebugView;
+        uniform sampler2D bloomTexture;
+
+        varying vec2 vUv;
+
+        void main() {
+          vec4 baseColor = texture2D(baseTexture, vUv);
+          vec4 bloomColor = texture2D(bloomTexture, vUv);
+
+          if (bloomDebugView > 0.5) {
+            gl_FragColor = vec4(bloomColor.rgb, 1.0);
+            return;
+          }
+
+          float bloomMask = smoothstep(bloomClipY - bloomClipFeather, bloomClipY + bloomClipFeather, vUv.y);
+          float clipDebugLine = 1.0 - smoothstep(
+            bloomDebugLineHalfThickness,
+            bloomDebugLineHalfThickness * 2.0,
+            abs(vUv.y - bloomClipY)
+          );
+          vec3 composedColor = baseColor.rgb + (bloomColor.rgb * bloomMask);
+          vec3 debugColor = mix(composedColor, vec3(1.0, 0.0, 1.0), clipDebugLine * bloomDebugLineAlpha);
+
+          gl_FragColor = vec4(debugColor, baseColor.a);
+        }
+      `,
+    }, 'baseTexture')
+    this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
+    this.outputPass = new OutputPass()
+
+    this.finalComposer.addPass(this.finalRenderPass)
+    this.finalComposer.addPass(this.bloomCompositePass)
+    this.finalComposer.addPass(this.outputPass)
+
+    this.updateBloomCompositeUniforms()
+    this.persistentResources.push(
+      this.bloomPass,
+      this.bloomComposer,
+      this.bloomCompositePass,
+      this.outputPass,
+      this.finalComposer,
+    )
+  }
+
+  private updateBloomCompositeUniforms(): void {
+    if (this.bloomCompositePass == null || this.bloomComposer == null || this.viewportHeight <= 0) {
+      return
+    }
+
+    this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
+    this.bloomCompositePass.uniforms.bloomClipY.value = 1 - (this.getBloomClipTopDownY() / this.viewportHeight)
+    this.bloomCompositePass.uniforms.bloomClipFeather.value = BLOOM_CLIP_FEATHER_PIXELS / this.viewportHeight
+    this.bloomCompositePass.uniforms.bloomDebugLineHalfThickness.value = 0.5 / this.viewportHeight
+  }
+
+  private getBloomClipTopDownY(): number {
+    const { keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
+    const widestWaveLineWidth = this.waveLayers.reduce(
+      (widest, layer) => Math.max(widest, layer.definition.lineWidth),
+      CREATE_MODE_BOUNDARY_CORE_THICKNESS,
+    )
+
+    // Keep the full wave thickness above the cutoff, plus a small safety buffer,
+    // so the keyboard region is the first area that actually gets clipped.
+    return Math.min(
+      this.viewportHeight,
+      keyboardY + (widestWaveLineWidth / 2) + BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS,
+    )
+  }
+
   private renderScene(): void {
     if (this.renderer == null || this.scene == null || this.camera == null) {
+      return
+    }
+
+    if (this.bloomComposer != null && this.finalComposer != null) {
+      const originalLayerMask = this.camera.layers.mask
+
+      this.camera.layers.set(BLOOM_LAYER)
+      this.bloomComposer.render()
+      this.camera.layers.mask = originalLayerMask
+      this.finalComposer.render()
       return
     }
 
@@ -1157,59 +1288,6 @@ function hideObjects(objects: Array<{ visible: boolean }>, startIndex = 0): void
   }
 }
 
-function createTextSpriteAsset(
-  text: string,
-  fillColor: string,
-  fontSize: number,
-): null | TextSpriteAsset {
-  if (typeof document === 'undefined') {
-    return null
-  }
-
-  const labelCanvas = document.createElement('canvas')
-  const measuringContext = labelCanvas.getContext('2d')
-  if (measuringContext == null) {
-    return null
-  }
-
-  measuringContext.font = `bold ${fontSize}px ${TEXT_FONT_FAMILY}`
-  const paddingX = 6
-  const paddingY = 4
-  const width = Math.max(1, Math.ceil(measuringContext.measureText(text).width) + (paddingX * 2))
-  const height = Math.max(1, fontSize + (paddingY * 2))
-
-  labelCanvas.width = width
-  labelCanvas.height = height
-
-  const drawingContext = labelCanvas.getContext('2d')
-  if (drawingContext == null) {
-    return null
-  }
-
-  drawingContext.clearRect(0, 0, width, height)
-  drawingContext.font = `bold ${fontSize}px ${TEXT_FONT_FAMILY}`
-  drawingContext.fillStyle = fillColor
-  drawingContext.textAlign = 'center'
-  drawingContext.textBaseline = 'middle'
-  drawingContext.fillText(text, width / 2, height / 2)
-
-  const texture = new CanvasTexture(labelCanvas)
-  const material = new SpriteMaterial({
-    depthTest: false,
-    depthWrite: false,
-    map: texture,
-    opacity: 1,
-    transparent: true,
-  })
-
-  return {
-    material,
-    texture,
-    width,
-    height,
-  }
-}
-
 function createWaveSamplePoints(width: number): number[] {
   const points: number[] = [0]
 
@@ -1226,6 +1304,11 @@ function createWaveSamplePoints(width: number): number[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function getPillNoteCornerRadius(width: number, height: number): number {
+  const minDimension = Math.max(1, Math.min(width, height))
+  return Math.min(minDimension * NOTE_ROUNDED_CORNER_RATIO, NOTE_MAX_CORNER_RADIUS)
 }
 
 function getDevicePixelRatio(): number {

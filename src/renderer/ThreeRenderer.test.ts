@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mockCanvasTextureDispose = vi.hoisted(() => vi.fn())
 const mockMaterialColorSetHex = vi.hoisted(() => vi.fn())
 const mockMeshBasicMaterialDispose = vi.hoisted(() => vi.fn())
+const mockMeshLambertMaterialDispose = vi.hoisted(() => vi.fn())
 const mockSpriteMaterialDispose = vi.hoisted(() => vi.fn())
 const mockGroupAdd = vi.hoisted(() => vi.fn())
 const mockGroupRemove = vi.hoisted(() => vi.fn())
@@ -20,9 +21,34 @@ const mockRendererRender = vi.hoisted(() => vi.fn())
 const mockRendererSetAnimationLoop = vi.hoisted(() => vi.fn())
 const mockRendererDispose = vi.hoisted(() => vi.fn())
 const mockRendererForceContextLoss = vi.hoisted(() => vi.fn())
+const mockEffectComposerAddPass = vi.hoisted(() => vi.fn())
+const mockEffectComposerSetPixelRatio = vi.hoisted(() => vi.fn())
+const mockEffectComposerSetSize = vi.hoisted(() => vi.fn())
+const mockEffectComposerRender = vi.hoisted(() => vi.fn())
+const mockEffectComposerDispose = vi.hoisted(() => vi.fn())
+const mockLayersEnable = vi.hoisted(() => vi.fn())
+const mockLayersSet = vi.hoisted(() => vi.fn())
+const mockOutputPassDispose = vi.hoisted(() => vi.fn())
+const mockShaderPassDispose = vi.hoisted(() => vi.fn())
+const mockUnrealBloomPassDispose = vi.hoisted(() => vi.fn())
 const createdMeshMaterials = vi.hoisted(() => [] as Array<{ opacity: number }>)
 
 vi.mock('three', () => {
+  const LinearToneMapping = 'LinearToneMapping'
+
+  class AmbientLight {
+    layers = {
+      enable: mockLayersEnable,
+      mask: 1,
+      set: mockLayersSet,
+    }
+
+    constructor(
+      public color: number,
+      public intensity: number,
+    ) {}
+  }
+
   class CanvasTexture {
     constructor(_canvas: HTMLCanvasElement) {}
 
@@ -64,9 +90,40 @@ vi.mock('three', () => {
     dispose = mockMeshBasicMaterialDispose
   }
 
+  class MeshLambertMaterial {
+    color = {
+      setHex: mockMaterialColorSetHex,
+    }
+    emissive = {
+      setHex: mockMaterialColorSetHex,
+    }
+    emissiveIntensity: number
+    needsUpdate = false
+    opacity: number
+    transparent: boolean
+    userData: Record<string, unknown> = {}
+
+    constructor(options: { emissiveIntensity?: number; opacity?: number; transparent?: boolean }) {
+      this.emissiveIntensity = options.emissiveIntensity ?? 1
+      this.opacity = options.opacity ?? 1
+      this.transparent = options.transparent ?? false
+      createdMeshMaterials.push(this)
+    }
+
+    dispose = mockMeshLambertMaterialDispose
+  }
+
   class OrthographicCamera {
     bottom = 1
     left = 0
+    layers = {
+      enable: mockLayersEnable,
+      mask: 1,
+      set: vi.fn((channel: number) => {
+        this.layers.mask = 1 << channel
+        mockLayersSet(channel)
+      }),
+    }
     right = 1
     top = 0
     position = {
@@ -121,6 +178,11 @@ vi.mock('three', () => {
   }
 
   class Mesh {
+    layers = {
+      enable: mockLayersEnable,
+      mask: 1,
+      set: mockLayersSet,
+    }
     position = {
       set: vi.fn(),
     }
@@ -129,7 +191,14 @@ vi.mock('three', () => {
     }
     renderOrder = 0
     scale = {
-      set: vi.fn(),
+      x: 1,
+      y: 1,
+      z: 1,
+      set: vi.fn((x: number, y: number, z: number) => {
+        this.scale.x = x
+        this.scale.y = y
+        this.scale.z = z
+      }),
     }
     visible = true
 
@@ -140,6 +209,11 @@ vi.mock('three', () => {
   }
 
   class Sprite {
+    layers = {
+      enable: mockLayersEnable,
+      mask: 1,
+      set: mockLayersSet,
+    }
     position = {
       set: vi.fn(),
     }
@@ -148,14 +222,36 @@ vi.mock('three', () => {
     }
     renderOrder = 0
     scale = {
-      set: vi.fn(),
+      x: 1,
+      y: 1,
+      z: 1,
+      set: vi.fn((x: number, y: number, z: number) => {
+        this.scale.x = x
+        this.scale.y = y
+        this.scale.z = z
+      }),
     }
     visible = true
 
     constructor(public material: SpriteMaterial) {}
   }
 
+  class Vector2 {
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+
+    set(x: number, y: number) {
+      this.x = x
+      this.y = y
+      return this
+    }
+  }
+
   class WebGLRenderer {
+    toneMapping: unknown = null
+    toneMappingExposure = 1
     setClearColor = mockRendererSetClearColor
     setPixelRatio = mockRendererSetPixelRatio
     setSize = mockRendererSetSize
@@ -170,18 +266,90 @@ vi.mock('three', () => {
   }
 
   return {
+    AmbientLight,
     CanvasTexture,
     Color,
     Group,
+    LinearToneMapping,
     Mesh,
     MeshBasicMaterial,
+    MeshLambertMaterial,
     OrthographicCamera,
     PlaneGeometry,
     Scene,
     Sprite,
     SpriteMaterial,
+    Vector2,
     WebGLRenderer,
   }
+})
+
+vi.mock('three/examples/jsm/postprocessing/EffectComposer.js', () => {
+  class EffectComposer {
+    addPass = mockEffectComposerAddPass
+    dispose = mockEffectComposerDispose
+    render = mockEffectComposerRender
+    renderToScreen = true
+    renderTarget2 = {
+      texture: {},
+    }
+    setPixelRatio = mockEffectComposerSetPixelRatio
+    setSize = mockEffectComposerSetSize
+
+    constructor(_renderer: unknown) {}
+  }
+
+  return { EffectComposer }
+})
+
+vi.mock('three/examples/jsm/postprocessing/OutputPass.js', () => {
+  class OutputPass {
+    dispose = mockOutputPassDispose
+  }
+
+  return { OutputPass }
+})
+
+vi.mock('three/examples/jsm/postprocessing/RenderPass.js', () => {
+  class RenderPass {
+    constructor(
+      public scene: unknown,
+      public camera: unknown,
+    ) {}
+  }
+
+  return { RenderPass }
+})
+
+vi.mock('three/examples/jsm/postprocessing/ShaderPass.js', () => {
+  class ShaderPass {
+    dispose = mockShaderPassDispose
+    uniforms: Record<string, { value: unknown }>
+
+    constructor(
+      public shader: { uniforms?: Record<string, { value: unknown }> },
+      public textureID?: string,
+    ) {
+      this.uniforms = shader.uniforms ?? {}
+    }
+  }
+
+  return { ShaderPass }
+})
+
+vi.mock('three/examples/jsm/postprocessing/UnrealBloomPass.js', () => {
+  class UnrealBloomPass {
+    dispose = mockUnrealBloomPassDispose
+
+    constructor(
+      public resolution: unknown,
+      public strength: number,
+      public radius: number,
+      public threshold: number,
+    ) {}
+  }
+
+  return { UnrealBloomPass }
 })
 
 const { ThreeRenderer } = await import('./ThreeRenderer')
@@ -191,6 +359,7 @@ describe('ThreeRenderer', () => {
     mockCanvasTextureDispose.mockReset()
     mockMaterialColorSetHex.mockReset()
     mockMeshBasicMaterialDispose.mockReset()
+    mockMeshLambertMaterialDispose.mockReset()
     mockSpriteMaterialDispose.mockReset()
     mockGroupAdd.mockReset()
     mockGroupRemove.mockReset()
@@ -208,6 +377,16 @@ describe('ThreeRenderer', () => {
     mockRendererSetAnimationLoop.mockReset()
     mockRendererDispose.mockReset()
     mockRendererForceContextLoss.mockReset()
+    mockEffectComposerAddPass.mockReset()
+    mockEffectComposerSetPixelRatio.mockReset()
+    mockEffectComposerSetSize.mockReset()
+    mockEffectComposerRender.mockReset()
+    mockEffectComposerDispose.mockReset()
+    mockLayersEnable.mockReset()
+    mockLayersSet.mockReset()
+    mockOutputPassDispose.mockReset()
+    mockShaderPassDispose.mockReset()
+    mockUnrealBloomPassDispose.mockReset()
     createdMeshMaterials.length = 0
 
     Object.defineProperty(window, 'devicePixelRatio', {
@@ -255,9 +434,13 @@ describe('ThreeRenderer', () => {
     expect(mockRendererSetClearColor).toHaveBeenCalledWith(0x000000, 1)
     expect(mockRendererSetPixelRatio).toHaveBeenCalledWith(2)
     expect(mockRendererSetSize).toHaveBeenCalledWith(640, 360, false)
+    expect(mockEffectComposerAddPass).toHaveBeenCalledTimes(5)
+    expect(mockEffectComposerSetPixelRatio).toHaveBeenCalledWith(2)
+    expect(mockEffectComposerSetSize).toHaveBeenCalledWith(640, 360)
     expect(mockCameraUpdateProjectionMatrix).toHaveBeenCalled()
-    expect(mockSceneAdd).toHaveBeenCalledTimes(4)
+    expect(mockSceneAdd).toHaveBeenCalledTimes(5)
     expect(mockGroupAdd).toHaveBeenCalled()
+    expect(mockLayersEnable).toHaveBeenCalled()
     expect(renderer.getCanvas()).toBe(canvas)
     expect(renderer.getKeyX(60)).toBeGreaterThan(0)
     expect(renderer.getKeyboardY()).toBeGreaterThan(0)
@@ -265,9 +448,47 @@ describe('ThreeRenderer', () => {
     renderer.setKeyboardOpacity(0.4)
     renderer.setActiveKeyPitches([60])
 
+    expect((renderer as any).bloomPass.radius).toBe(0.1)
+    expect((renderer as any).bloomCompositePass.uniforms.bloomTexture.value).toBe((renderer as any).bloomComposer.renderTarget2.texture)
+    expect((renderer as any).bloomComposer.renderToScreen).toBe(false)
+    expect((renderer as any).bloomCompositePass.uniforms.bloomDebugView.value).toBe(0)
+    expect((renderer as any).bloomCompositePass.uniforms.bloomClipY.value).toBeCloseTo(1 - (101 / 360))
+    expect((renderer as any).bloomCompositePass.uniforms.bloomClipFeather.value).toBeCloseTo(3 / 360)
+    expect((renderer as any).bloomCompositePass.uniforms.bloomDebugLineHalfThickness.value).toBeCloseTo(0.5 / 360)
     expect(mockMaterialColorSetHex).toHaveBeenCalled()
     expect(createdMeshMaterials.some((material) => Math.abs(material.opacity - 0.18) < 0.001)).toBe(true)
-    expect(mockRendererRender).toHaveBeenCalled()
+    expect(mockLayersSet).toHaveBeenCalled()
+    expect(mockEffectComposerRender).toHaveBeenCalled()
+  })
+
+  it('updates rounded note uniforms from the current note dimensions', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    await renderer.init(canvas)
+
+    const noteGroup = (renderer as any).requireNoteGroup()
+    const noteMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 0)
+    noteMesh.scale.set(12, 6, 1)
+    noteMesh.onBeforeRender?.(null, null, null, null, noteMesh.material)
+
+    const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as {
+      roundedRectRadius: { value: number }
+      roundedRectSize: { value: { x: number; y: number } }
+    }
+
+    expect(roundedNoteUniforms.roundedRectSize.value.x).toBe(12)
+    expect(roundedNoteUniforms.roundedRectSize.value.y).toBe(6)
+    expect(roundedNoteUniforms.roundedRectRadius.value).toBeCloseTo(1.08)
   })
 
   it('disposes static scene resources and releases the WebGL context on destroy', async () => {
@@ -287,11 +508,16 @@ describe('ThreeRenderer', () => {
     await renderer.destroy()
 
     expect(mockGroupRemove).toHaveBeenCalled()
-    expect(mockCanvasTextureDispose).toHaveBeenCalled()
+    expect(mockCanvasTextureDispose).not.toHaveBeenCalled()
     expect(mockMeshBasicMaterialDispose).toHaveBeenCalled()
-    expect(mockSpriteMaterialDispose).toHaveBeenCalled()
+    expect(mockMeshLambertMaterialDispose).toHaveBeenCalled()
+    expect(mockSpriteMaterialDispose).not.toHaveBeenCalled()
+    expect(mockUnrealBloomPassDispose).toHaveBeenCalledTimes(1)
+    expect(mockOutputPassDispose).toHaveBeenCalledTimes(1)
+    expect(mockShaderPassDispose).toHaveBeenCalledTimes(1)
+    expect(mockEffectComposerDispose).toHaveBeenCalledTimes(2)
     expect(mockPlaneGeometryDispose).toHaveBeenCalledTimes(1)
-    expect(mockSceneRemove).toHaveBeenCalledTimes(4)
+    expect(mockSceneRemove).toHaveBeenCalledTimes(5)
     expect(mockRendererSetAnimationLoop).toHaveBeenCalledWith(null)
     expect(mockRendererForceContextLoss).toHaveBeenCalledTimes(1)
     expect(mockRendererDispose).toHaveBeenCalledTimes(1)
