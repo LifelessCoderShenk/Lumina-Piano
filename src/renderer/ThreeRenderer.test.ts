@@ -461,6 +461,82 @@ describe('ThreeRenderer', () => {
     expect(mockEffectComposerRender).toHaveBeenCalled()
   })
 
+  it('keeps playback-driven active keys from changing keyboard highlight opacity', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    await renderer.init(canvas)
+
+    const highlightState = (renderer as any).keyHighlightStates.get(60) as {
+      material: { opacity: number }
+    }
+
+    expect(highlightState.material.opacity).toBe(0)
+
+    ;(renderer as any).playbackActiveKeyPitches = new Set([60])
+    ;(renderer as any).applyActiveKeyHighlights()
+
+    expect(highlightState.material.opacity).toBe(0)
+
+    renderer.setActiveKeyPitches([60])
+
+    expect(highlightState.material.opacity).toBeCloseTo(0.45)
+  })
+
+  it('gives each note mesh its own rounded note size uniforms while sharing animation time', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    await renderer.init(canvas)
+
+    const noteGroup = (renderer as any).requireNoteGroup()
+    const firstMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 0)
+    const secondMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 1)
+    const firstUniforms = firstMesh.material.userData.roundedNoteUniforms as {
+      noteMaterialTime: { value: number }
+      roundedRectRadius: { value: number }
+      roundedRectSize: { value: { x: number; y: number } }
+    }
+    const secondUniforms = secondMesh.material.userData.roundedNoteUniforms as {
+      noteMaterialTime: { value: number }
+      roundedRectRadius: { value: number }
+      roundedRectSize: { value: { x: number; y: number } }
+    }
+
+    expect(firstMesh.material).not.toBe(secondMesh.material)
+    expect(firstUniforms.noteMaterialTime).toBe(secondUniforms.noteMaterialTime)
+
+    firstMesh.scale.set(12, 6, 1)
+    secondMesh.scale.set(20, 10, 1)
+    firstMesh.onBeforeRender?.(null, null, null, null, firstMesh.material)
+    secondMesh.onBeforeRender?.(null, null, null, null, secondMesh.material)
+
+    expect(firstUniforms.roundedRectSize.value.x).toBe(12)
+    expect(firstUniforms.roundedRectSize.value.y).toBe(6)
+    expect(firstUniforms.roundedRectRadius.value).toBeCloseTo(1.08)
+    expect(secondUniforms.roundedRectSize.value.x).toBe(20)
+    expect(secondUniforms.roundedRectSize.value.y).toBe(10)
+    expect(secondUniforms.roundedRectRadius.value).toBeCloseTo(1.8)
+  })
+
   it('updates rounded note uniforms from the current note dimensions', async () => {
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
@@ -482,13 +558,53 @@ describe('ThreeRenderer', () => {
     noteMesh.onBeforeRender?.(null, null, null, null, noteMesh.material)
 
     const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as {
+      noteCoreDiffuseColor: { value: unknown }
+      noteCoreEmissiveColor: { value: unknown }
+      noteCoreEmissiveStrength: { value: number }
+      noteHaloDiffuseColor: { value: unknown }
+      noteHaloEmissiveColor: { value: unknown }
+      noteHaloEmissiveStrength: { value: number }
+      noteMaterialTime: { value: number }
       roundedRectRadius: { value: number }
       roundedRectSize: { value: { x: number; y: number } }
     }
 
+    expect(roundedNoteUniforms.noteMaterialTime.value).toBe(0)
+    expect(roundedNoteUniforms.noteCoreDiffuseColor.value).toBeDefined()
+    expect(roundedNoteUniforms.noteHaloDiffuseColor.value).toBeDefined()
+    expect(roundedNoteUniforms.noteCoreEmissiveColor.value).toBeDefined()
+    expect(roundedNoteUniforms.noteHaloEmissiveColor.value).toBeDefined()
+    expect(roundedNoteUniforms.noteCoreEmissiveStrength.value).toBeCloseTo(2.35)
+    expect(roundedNoteUniforms.noteHaloEmissiveStrength.value).toBeCloseTo(3.3)
     expect(roundedNoteUniforms.roundedRectSize.value.x).toBe(12)
     expect(roundedNoteUniforms.roundedRectSize.value.y).toBe(6)
     expect(roundedNoteUniforms.roundedRectRadius.value).toBeCloseTo(1.08)
+  })
+
+  it('updates the shared note material animation time from real-time frames', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    await renderer.init(canvas)
+
+    const noteGroup = (renderer as any).requireNoteGroup()
+    const noteMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 0)
+    const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as {
+      noteMaterialTime: { value: number }
+    }
+
+    ;(renderer as any).handleAnimationFrame(2500)
+
+    expect(roundedNoteUniforms.noteMaterialTime.value).toBeCloseTo(2.5)
   })
 
   it('disposes static scene resources and releases the WebGL context on destroy', async () => {

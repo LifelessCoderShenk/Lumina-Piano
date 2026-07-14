@@ -21,7 +21,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
 import { getAppState } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
-import { resolveCreateModeNoteColor } from './colorUtils'
+import { brightenColor, interpolateColor, resolveCreateModeNoteColor } from './colorUtils'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
   BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
@@ -112,6 +112,27 @@ interface RoundedNoteUniforms {
   roundedRectSize: {
     value: Vector2
   }
+  noteMaterialTime: {
+    value: number
+  }
+  noteCoreDiffuseColor: {
+    value: Color
+  }
+  noteHaloDiffuseColor: {
+    value: Color
+  }
+  noteCoreEmissiveColor: {
+    value: Color
+  }
+  noteHaloEmissiveColor: {
+    value: Color
+  }
+  noteCoreEmissiveStrength: {
+    value: number
+  }
+  noteHaloEmissiveStrength: {
+    value: number
+  }
 }
 
 interface KeyboardMaterialState {
@@ -138,6 +159,19 @@ interface WaveLayerState {
   definition: WaveLayerDefinition
   material: GlowMaterial
   segments: Array<Mesh<PlaneGeometry, GlowMaterial>>
+}
+
+interface NoteMaterialPalette {
+  coreDiffuseColor: number
+  haloDiffuseColor: number
+  coreEmissiveColor: number
+  haloEmissiveColor: number
+  coreEmissiveStrength: number
+  haloEmissiveStrength: number
+}
+
+interface SharedFloatUniform {
+  value: number
 }
 
 export class ThreeRenderer implements VisualizerRenderer {
@@ -170,10 +204,12 @@ export class ThreeRenderer implements VisualizerRenderer {
   private currentTick = 0
   private boundaryWaveTime = 0
   private noteMeshes: Array<Mesh<PlaneGeometry, GlowMaterial>> = []
-  private noteMaterialCache = new Map<number, GlowMaterial>()
+  private sharedNoteMaterialTimeUniform: SharedFloatUniform = { value: 0 }
   private waveLayers: WaveLayerState[] = []
   private waveSamplePoints: number[] = []
   private notesDirty = true
+  private noteMaterialTimeSeconds = 0
+  private visibleNoteMeshCount = 0
   private lastRenderedTick = Number.NaN
   private lastRenderedWorldZoom = Number.NaN
   private lastRenderedLearnActive: boolean | null = null
@@ -310,14 +346,16 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.viewportHeight = 1
     this.currentTick = 0
     this.boundaryWaveTime = 0
+    this.noteMaterialTimeSeconds = 0
+    this.sharedNoteMaterialTimeUniform.value = 0
     this.notesDirty = true
+    this.visibleNoteMeshCount = 0
     this.lastRenderedTick = Number.NaN
     this.lastRenderedWorldZoom = Number.NaN
     this.lastRenderedLearnActive = null
     this.lastRenderedProjectData = null
     this.lastRenderedTempoMap = null
     this.noteMeshes = []
-    this.noteMaterialCache.clear()
     this.waveLayers = []
     this.waveSamplePoints = []
     this.persistentResources = []
@@ -394,7 +432,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.renderScene()
   }
 
-  private readonly handleAnimationFrame = (): void => {
+  private readonly handleAnimationFrame = (frameTimeMs?: number): void => {
     if (this.renderer == null || this.scene == null || this.camera == null) {
       return
     }
@@ -405,7 +443,9 @@ export class ThreeRenderer implements VisualizerRenderer {
       this.notesDirty = true
     }
 
+    this.syncNoteMaterialAnimationTime(frameTimeMs)
     const notesChanged = this.renderDynamicState(this.currentTick, state, false)
+    const shouldAnimateNotes = this.visibleNoteMeshCount > 0
 
     if (!state.learnV3.isActive) {
       this.boundaryWaveTime += CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
@@ -414,7 +454,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       return
     }
 
-    if (notesChanged) {
+    if (notesChanged || shouldAnimateNotes) {
       this.renderScene()
     }
   }
@@ -630,6 +670,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     const noteGroup = this.requireNoteGroup()
     if (state.projectData == null || state.precomputedTempoMap == null || !this.isSpatialIndexReady()) {
       hideObjects(this.noteMeshes)
+      this.visibleNoteMeshCount = 0
       return
     }
 
@@ -686,6 +727,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
 
     hideObjects(this.noteMeshes, noteMeshIndex)
+    this.visibleNoteMeshCount = noteMeshIndex
   }
 
   private renderCreateModeNote(
@@ -730,7 +772,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     const noteColor = resolveCreateModeNoteColor(indexedNote.note.pitch)
     const noteMesh = this.getOrCreateNoteMesh(group, noteMeshIndex)
 
-    noteMesh.material = this.getOrCreateNoteMaterial(noteColor)
+    this.assignNoteMaterial(noteMesh, noteColor)
     noteMesh.position.set(
       adjustedRect.x + (adjustedRect.w / 2),
       this.toSceneRectY(adjustedRect.y, adjustedRect.h),
@@ -906,12 +948,8 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     return mesh
   }
-  private getOrCreateNoteMaterial(color: number): GlowMaterial {
-    const existing = this.noteMaterialCache.get(color)
-    if (existing != null) {
-      return existing
-    }
-
+  private createNoteMaterial(color: number): GlowMaterial {
+    const notePalette = createNoteMaterialPalette(color)
     const material = new MeshLambertMaterial({
       color,
       depthTest: false,
@@ -922,16 +960,31 @@ export class ThreeRenderer implements VisualizerRenderer {
       transparent: true,
     })
     const roundedNoteUniforms: RoundedNoteUniforms = {
+      noteCoreDiffuseColor: { value: new Color(notePalette.coreDiffuseColor) },
+      noteCoreEmissiveColor: { value: new Color(notePalette.coreEmissiveColor) },
+      noteCoreEmissiveStrength: { value: notePalette.coreEmissiveStrength },
+      noteHaloDiffuseColor: { value: new Color(notePalette.haloDiffuseColor) },
+      noteHaloEmissiveColor: { value: new Color(notePalette.haloEmissiveColor) },
+      noteHaloEmissiveStrength: { value: notePalette.haloEmissiveStrength },
+      noteMaterialTime: this.sharedNoteMaterialTimeUniform,
       roundedRectRadius: { value: getPillNoteCornerRadius(1, 1) },
       roundedRectSize: { value: new Vector2(1, 1) },
     }
 
+    material.userData.noteMaterialColor = color
     material.userData.roundedNoteUniforms = roundedNoteUniforms
     material.onBeforeCompile = (shader: {
       fragmentShader: string
       uniforms: Record<string, { value: unknown }>
       vertexShader: string
     }) => {
+      shader.uniforms.noteCoreDiffuseColor = roundedNoteUniforms.noteCoreDiffuseColor
+      shader.uniforms.noteCoreEmissiveColor = roundedNoteUniforms.noteCoreEmissiveColor
+      shader.uniforms.noteCoreEmissiveStrength = roundedNoteUniforms.noteCoreEmissiveStrength
+      shader.uniforms.noteHaloDiffuseColor = roundedNoteUniforms.noteHaloDiffuseColor
+      shader.uniforms.noteHaloEmissiveColor = roundedNoteUniforms.noteHaloEmissiveColor
+      shader.uniforms.noteHaloEmissiveStrength = roundedNoteUniforms.noteHaloEmissiveStrength
+      shader.uniforms.noteMaterialTime = roundedNoteUniforms.noteMaterialTime
       shader.uniforms.roundedRectRadius = roundedNoteUniforms.roundedRectRadius
       shader.uniforms.roundedRectSize = roundedNoteUniforms.roundedRectSize
 
@@ -951,6 +1004,13 @@ vRoundedRectUv = uv;`,
         .replace(
           '#include <common>',
           `#include <common>
+uniform vec3 noteCoreDiffuseColor;
+uniform vec3 noteHaloDiffuseColor;
+uniform vec3 noteCoreEmissiveColor;
+uniform vec3 noteHaloEmissiveColor;
+uniform float noteCoreEmissiveStrength;
+uniform float noteHaloEmissiveStrength;
+uniform float noteMaterialTime;
 uniform float roundedRectRadius;
 uniform vec2 roundedRectSize;
 varying vec2 vRoundedRectUv;
@@ -971,12 +1031,42 @@ float roundedRectMask = 1.0 - smoothstep(0.0, roundedRectEdge, roundedRectDistan
 if (roundedRectMask <= 0.0) {
   discard;
 }
-diffuseColor.a *= roundedRectMask;`,
+diffuseColor.a *= roundedRectMask;
+
+float roundedRectMinDimension = max(1.0, min(roundedRectSize.x, roundedRectSize.y));
+float noteEdgeBand = clamp(roundedRectMinDimension * 0.22, 1.75, 4.5);
+float noteDistanceToEdge = max(0.0, -roundedRectDistance);
+float noteEdgeMix = 1.0 - smoothstep(0.0, noteEdgeBand, noteDistanceToEdge);
+
+vec2 noteHighlightUv = (vRoundedRectUv - vec2(0.5)) / vec2(0.8, 1.35);
+float noteHighlightMask = exp(-dot(noteHighlightUv, noteHighlightUv) * 2.6);
+noteHighlightMask *= 1.0 - (noteEdgeMix * 0.5);
+
+float noteShimmerField = sin((vRoundedRectUv.x * 3.4) + (noteMaterialTime * 0.52))
+  * sin((vRoundedRectUv.y * 2.8) - (noteMaterialTime * 0.31));
+float noteShimmer = 1.0 + (noteShimmerField * 0.05);
+float noteBreathing = 1.0 + (sin(noteMaterialTime * 0.4) * 0.04);
+float noteAnimatedHighlight = noteHighlightMask * noteShimmer;
+
+vec3 noteFaceColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix);
+noteFaceColor = mix(noteFaceColor, noteHaloDiffuseColor, noteAnimatedHighlight * 0.08);
+diffuseColor.rgb = noteFaceColor;
+
+vec3 roundedNoteEmissiveRadiance = mix(
+  noteCoreEmissiveColor * noteCoreEmissiveStrength,
+  noteHaloEmissiveColor * noteHaloEmissiveStrength,
+  noteEdgeMix
+);
+roundedNoteEmissiveRadiance *= noteBreathing;
+roundedNoteEmissiveRadiance += noteHaloEmissiveColor * (noteAnimatedHighlight * 0.12 * noteHaloEmissiveStrength);
+roundedNoteEmissiveRadiance *= roundedRectMask;`,
+        )
+        .replace(
+          'vec3 totalEmissiveRadiance = emissive;',
+          'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v1'
-    this.noteMaterialCache.set(color, material)
-    this.persistentResources.push(material)
+    material.customProgramCacheKey = () => 'rounded-note-pill-v2'
     return material
   }
 
@@ -986,7 +1076,7 @@ diffuseColor.a *= roundedRectMask;`,
       return existing
     }
 
-    const material = this.getOrCreateNoteMaterial(resolveCreateModeNoteColor(PIANO_MIN_PITCH))
+    const material = this.createNoteMaterial(resolveCreateModeNoteColor(PIANO_MIN_PITCH))
     const mesh = new Mesh(this.requireRectGeometry(), material)
     mesh.visible = false
     mesh.layers.enable(BLOOM_LAYER)
@@ -1006,6 +1096,21 @@ diffuseColor.a *= roundedRectMask;`,
     return mesh
   }
 
+  private assignNoteMaterial(noteMesh: Mesh<PlaneGeometry, GlowMaterial>, color: number): void {
+    const currentColor = noteMesh.material.userData.noteMaterialColor as number | undefined
+    if (currentColor === color) {
+      return
+    }
+
+    noteMesh.material.dispose()
+    noteMesh.material = this.createNoteMaterial(color)
+  }
+
+  private syncNoteMaterialAnimationTime(frameTimeMs?: number): void {
+    this.noteMaterialTimeSeconds = getAnimationTimeSeconds(frameTimeMs)
+    this.sharedNoteMaterialTimeUniform.value = this.noteMaterialTimeSeconds
+  }
+
   private applyKeyboardOpacity(): void {
     for (const { baseOpacity, material } of this.keyboardMaterialStates) {
       material.opacity = clamp(baseOpacity * this.keyboardOpacity, 0, 1)
@@ -1015,7 +1120,7 @@ diffuseColor.a *= roundedRectMask;`,
 
   private applyActiveKeyHighlights(): void {
     for (const [pitch, state] of this.keyHighlightStates) {
-      const isActive = this.explicitActiveKeyPitches.has(pitch) || this.playbackActiveKeyPitches.has(pitch)
+      const isActive = this.explicitActiveKeyPitches.has(pitch)
       state.material.color.setHex(state.color)
       state.material.opacity = isActive
         ? clamp(state.baseOpacity * this.keyboardOpacity, 0, 1)
@@ -1056,6 +1161,10 @@ diffuseColor.a *= roundedRectMask;`,
   private clearDynamicNoteObjects(): void {
     if (this.noteGroup != null) {
       clearGroup(this.noteGroup)
+    }
+
+    for (const noteMesh of this.noteMeshes) {
+      noteMesh.material.dispose()
     }
   }
 
@@ -1306,9 +1415,59 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+function createNoteMaterialPalette(color: number): NoteMaterialPalette {
+  const saturatedBase = adjustColorSaturation(color, 1.12)
+  const softenedBase = adjustColorSaturation(color, 0.72)
+  const coreDiffuseColor = brightenColor(saturatedBase, 0.92)
+  const haloDiffuseColor = interpolateColor(brightenColor(softenedBase, 1.08), 0xffffff, 0.18)
+  const coreEmissiveColor = interpolateColor(coreDiffuseColor, 0xffffff, 0.08)
+  const haloEmissiveColor = interpolateColor(haloDiffuseColor, 0xffffff, 0.16)
+
+  return {
+    coreDiffuseColor,
+    coreEmissiveColor,
+    coreEmissiveStrength: 2.35,
+    haloDiffuseColor,
+    haloEmissiveColor,
+    haloEmissiveStrength: 3.3,
+  }
+}
+
+function adjustColorSaturation(color: number, saturation: number): number {
+  const red = (color >> 16) & 0xff
+  const green = (color >> 8) & 0xff
+  const blue = color & 0xff
+  const luminance = (red * 0.299) + (green * 0.587) + (blue * 0.114)
+
+  return (
+    (clampChannel(luminance + ((red - luminance) * saturation)) << 16)
+    | (clampChannel(luminance + ((green - luminance) * saturation)) << 8)
+    | clampChannel(luminance + ((blue - luminance) * saturation))
+  )
+}
+
+function clampChannel(value: number): number {
+  return Math.round(clamp(value, 0, 0xff))
+}
+
 function getPillNoteCornerRadius(width: number, height: number): number {
   const minDimension = Math.max(1, Math.min(width, height))
   return Math.min(minDimension * NOTE_ROUNDED_CORNER_RATIO, NOTE_MAX_CORNER_RADIUS)
+}
+
+function getAnimationTimeSeconds(frameTimeMs?: number): number {
+  if (Number.isFinite(frameTimeMs)) {
+    return (frameTimeMs as number) / 1000
+  }
+
+  if (typeof performance !== 'undefined') {
+    const performanceNow = performance.now()
+    if (Number.isFinite(performanceNow)) {
+      return performanceNow / 1000
+    }
+  }
+
+  return Date.now() / 1000
 }
 
 function getDevicePixelRatio(): number {
