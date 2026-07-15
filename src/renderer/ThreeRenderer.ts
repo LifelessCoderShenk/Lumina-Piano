@@ -1,5 +1,8 @@
 import {
+  AdditiveBlending,
   AmbientLight,
+  BufferAttribute,
+  BufferGeometry,
   Color,
   Group,
   LinearToneMapping,
@@ -8,7 +11,9 @@ import {
   MeshLambertMaterial,
   OrthographicCamera,
   PlaneGeometry,
+  Points,
   Scene,
+  ShaderMaterial,
   Vector2,
   WebGLRenderer,
 } from 'three'
@@ -18,6 +23,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
+import { type PlaybackEventMap, playbackEngine } from '../playback/PlaybackEngine'
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
 import { getAppState } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
@@ -90,9 +96,9 @@ const NOTE_AMBIENT_LIGHT_INTENSITY = 1
 const NOTE_ROUNDED_CORNER_RATIO = 0.18
 const NOTE_MAX_CORNER_RADIUS = 6
 const BLOOM_LAYER = 1
-const BLOOM_STRENGTH = 1
-const BLOOM_RADIUS = 0.1
-const BLOOM_THRESHOLD = 0
+const BLOOM_STRENGTH = 0.7
+const BLOOM_RADIUS = 0.025
+const BLOOM_THRESHOLD = 0.25
 const SHOW_BLOOM_DEBUG_VIEW = false
 const SHOW_BLOOM_CLIP_DEBUG_LINE = false
 const BLOOM_CLIP_FEATHER_PIXELS = 3
@@ -100,10 +106,50 @@ const BLOOM_CLIP_DEBUG_LINE_ALPHA = SHOW_BLOOM_CLIP_DEBUG_LINE ? 0.85 : 0
 const BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS = 3
 const NOTE_BLOOM_EMISSIVE_INTENSITY = 3
 const WAVE_OUTER_AURA_EMISSIVE_INTENSITY = 0
-const WAVE_MID_GLOW_EMISSIVE_INTENSITY = 2
-const WAVE_CORE_EMISSIVE_INTENSITY = 1.5
+const WAVE_MID_GLOW_EMISSIVE_INTENSITY = 1.6
+const WAVE_CORE_EMISSIVE_INTENSITY = 1.2
+const KEY_HIGHLIGHT_FADE_IN_SECONDS = 0.06
+const KEY_HIGHLIGHT_FADE_OUT_SECONDS = 0.18
+const PARTICLE_POOL_CAPACITY = 4_096
+const PARTICLE_Z = WAVE_MID_Z
+const PARTICLE_RENDER_ORDER = Math.round((WAVE_CORE_Z + 1) * 10)
+const PARTICLE_MIN_COUNT = 24
+const PARTICLE_MAX_COUNT = 60
+const PARTICLE_MIN_LIFETIME_SECONDS = 0.55
+const PARTICLE_MAX_LIFETIME_SECONDS = 1
+const PARTICLE_LIFETIME_VARIANCE = 0.18
+const PARTICLE_MIN_SIZE = 2.5
+const PARTICLE_MAX_SIZE = 5
+const PARTICLE_SIZE_VARIANCE = 0.22
+const PARTICLE_MIN_ALPHA = 0.45
+const PARTICLE_MAX_ALPHA = 1
+const PARTICLE_ALPHA_VARIANCE = 0.12
+const PARTICLE_MIN_BRIGHTNESS = 0.6
+const PARTICLE_MAX_BRIGHTNESS = 1.15
+const PARTICLE_BRIGHTNESS_VARIANCE = 0.16
+const PARTICLE_MIN_SPEED = 130
+const PARTICLE_MAX_SPEED = 300
+const PARTICLE_SPEED_VARIANCE = 0.28
+const PARTICLE_MIN_UPWARD_RATIO = 0.25
+const PARTICLE_MAX_UPWARD_RATIO = 0.8
+const PARTICLE_SIDEWAYS_RATIO = 0.95
+const PARTICLE_DRAG_MIN = 0.65
+const PARTICLE_DRAG_MAX = 1.2
+const PARTICLE_GRAVITY = 90
+const PARTICLE_SPAWN_LATERAL_JITTER = 18
+const PARTICLE_FLOW_SCALE = 28
+const PARTICLE_FLOW_STRENGTH_X = 175
+const PARTICLE_FLOW_STRENGTH_Y = 42
+const PARTICLE_FLOW_TIME_SCROLL = 0.52
+const PARTICLE_BURST_WIND_BIAS_X = 60
+const PARTICLE_FLOW_SAMPLE_EPSILON = 8
+const PARTICLE_FLOW_VARIATION_MIN = 0.85
+const PARTICLE_FLOW_VARIATION_MAX = 1.3
+const PARTICLE_MAX_NOTES_PER_DETECTION = 64
+const PARTICLE_MAX_PHYSICS_STEP_SECONDS = 0.05
 
 type GlowMaterial = MeshLambertMaterial
+type ParticleMaterial = ShaderMaterial
 
 interface RoundedNoteUniforms {
   roundedRectRadius: {
@@ -141,9 +187,13 @@ interface KeyboardMaterialState {
 }
 
 interface KeyHighlightState {
+  currentStrength: number
+  fromStrength: number
   material: MeshBasicMaterial
   baseOpacity: number
-  color: number
+  targetStrength: number
+  transitionDurationSeconds: number
+  transitionStartSeconds: number
 }
 
 interface WaveLayerDefinition {
@@ -174,6 +224,44 @@ interface SharedFloatUniform {
   value: number
 }
 
+interface ParticleUniforms {
+  particleTime: {
+    value: number
+  }
+  pixelRatio: {
+    value: number
+  }
+}
+
+interface ParticleSystemState {
+  activeCount: number
+  ages: Float32Array
+  alphaAttribute: BufferAttribute
+  alphas: Float32Array
+  baseAlphas: Float32Array
+  baseBrightnesses: Float32Array
+  baseSizes: Float32Array
+  brightnessAttribute: BufferAttribute
+  brightnesses: Float32Array
+  colorAttribute: BufferAttribute
+  colors: Float32Array
+  drag: Float32Array
+  flowBiasX: Float32Array
+  flowStrengths: Float32Array
+  geometry: BufferGeometry
+  lifetimes: Float32Array
+  material: ParticleMaterial
+  points: Points<BufferGeometry, ParticleMaterial>
+  positionAttribute: BufferAttribute
+  positions: Float32Array
+  seedAttribute: BufferAttribute
+  seeds: Float32Array
+  sizeAttribute: BufferAttribute
+  sizes: Float32Array
+  uniforms: ParticleUniforms
+  velocities: Float32Array
+}
+
 export class ThreeRenderer implements VisualizerRenderer {
   private canvas: HTMLCanvasElement | null = null
   private renderer: WebGLRenderer | null = null
@@ -191,6 +279,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   private laneGroup: Group | null = null
   private keyboardGroup: Group | null = null
   private noteGroup: Group | null = null
+  private particleGroup: Group | null = null
   private waveGroup: Group | null = null
   private staticResources: Array<{ dispose(): void }> = []
   private persistentResources: Array<{ dispose(): void }> = []
@@ -215,6 +304,16 @@ export class ThreeRenderer implements VisualizerRenderer {
   private lastRenderedLearnActive: boolean | null = null
   private lastRenderedProjectData: AppState['projectData'] | null = null
   private lastRenderedTempoMap: AppState['precomputedTempoMap'] | null = null
+  private particleSystem: ParticleSystemState | null = null
+  private lastParticleUpdateTimeSeconds = Number.NaN
+  private lastBurstDetectionTick = Number.NaN
+  private hasPendingSeekSuppression = false
+  private particleBurstSerial = 0
+
+  private readonly handlePlaybackSeek: PlaybackEventMap['onSeek'] = (currentTick) => {
+    this.hasPendingSeekSuppression = true
+    this.resetBurstDetectionState(currentTick)
+  }
 
   async init(canvas: HTMLCanvasElement): Promise<void> {
     if (!(canvas instanceof HTMLCanvasElement)) {
@@ -258,16 +357,19 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.laneGroup = new Group()
     this.keyboardGroup = new Group()
     this.noteGroup = new Group()
+    this.particleGroup = new Group()
     this.waveGroup = new Group()
     this.ambientLight = new AmbientLight(NOTE_AMBIENT_LIGHT_COLOR, NOTE_AMBIENT_LIGHT_INTENSITY)
 
     this.scene.add(this.laneGroup)
     this.scene.add(this.keyboardGroup)
     this.scene.add(this.noteGroup)
+    this.scene.add(this.particleGroup)
     this.scene.add(this.waveGroup)
     this.scene.add(this.ambientLight)
 
     this.initWaveLayers()
+    this.initParticleSystem()
 
     this.resize(
       Math.max(1, canvas.clientWidth || canvas.width || 1),
@@ -275,17 +377,23 @@ export class ThreeRenderer implements VisualizerRenderer {
     )
 
     this.initPostprocessing()
+    playbackEngine.on('onSeek', this.handlePlaybackSeek)
     this.renderer.setAnimationLoop(this.handleAnimationFrame)
     this.renderFrame(this.currentTick)
   }
 
   async destroy(): Promise<void> {
+    playbackEngine.off('onSeek', this.handlePlaybackSeek)
     this.clearDynamicNoteObjects()
+    this.clearParticleSystem(true)
     this.disposeStaticScene()
     this.disposeWaveMeshes()
 
     if (this.noteGroup != null) {
       clearGroup(this.noteGroup)
+    }
+    if (this.particleGroup != null) {
+      clearGroup(this.particleGroup)
     }
     if (this.waveGroup != null) {
       clearGroup(this.waveGroup)
@@ -299,6 +407,9 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
     if (this.noteGroup != null && this.scene != null) {
       this.scene.remove(this.noteGroup)
+    }
+    if (this.particleGroup != null && this.scene != null) {
+      this.scene.remove(this.particleGroup)
     }
     if (this.waveGroup != null && this.scene != null) {
       this.scene.remove(this.waveGroup)
@@ -325,6 +436,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.laneGroup = null
     this.keyboardGroup = null
     this.noteGroup = null
+    this.particleGroup = null
     this.waveGroup = null
     this.rectGeometry = null
     this.camera = null
@@ -355,6 +467,11 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.lastRenderedLearnActive = null
     this.lastRenderedProjectData = null
     this.lastRenderedTempoMap = null
+    this.particleSystem = null
+    this.lastParticleUpdateTimeSeconds = Number.NaN
+    this.lastBurstDetectionTick = Number.NaN
+    this.hasPendingSeekSuppression = false
+    this.particleBurstSerial = 0
     this.noteMeshes = []
     this.waveLayers = []
     this.waveSamplePoints = []
@@ -385,6 +502,8 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.rebuildStaticScene()
     this.rebuildWaveMeshes()
+    this.clearParticleSystem(false)
+    this.resetBurstDetectionState(this.currentTick)
     this.notesDirty = true
     this.renderDynamicState(this.currentTick)
   }
@@ -422,13 +541,13 @@ export class ThreeRenderer implements VisualizerRenderer {
   setKeyboardOpacity(opacity: number): void {
     this.keyboardOpacity = clamp(opacity, 0, 1)
     this.applyKeyboardOpacity()
-    this.applyActiveKeyHighlights()
+    this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
     this.renderScene()
   }
 
   setActiveKeyPitches(pitches: Iterable<number>): void {
     this.explicitActiveKeyPitches = new Set(Array.from(pitches, (pitch) => Math.round(pitch)))
-    this.applyActiveKeyHighlights()
+    this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
     this.renderScene()
   }
 
@@ -444,8 +563,12 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
 
     this.syncNoteMaterialAnimationTime(frameTimeMs)
+    this.syncParticleMaterialAnimationTime()
+    this.updateParticleSystem(getAnimationTimeSeconds(frameTimeMs))
     const notesChanged = this.renderDynamicState(this.currentTick, state, false)
     const shouldAnimateNotes = this.visibleNoteMeshCount > 0
+    const shouldAnimateHighlights = this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    this.detectNoteBursts(this.currentTick, state)
 
     if (!state.learnV3.isActive) {
       this.boundaryWaveTime += CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
@@ -454,7 +577,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       return
     }
 
-    if (notesChanged || shouldAnimateNotes) {
+    if (notesChanged || shouldAnimateNotes || shouldAnimateHighlights) {
       this.renderScene()
     }
   }
@@ -464,13 +587,16 @@ export class ThreeRenderer implements VisualizerRenderer {
     state = getAppState(),
     shouldRender = true,
   ): boolean {
+    const projectOrTempoChanged =
+      this.lastRenderedProjectData !== state.projectData ||
+      this.lastRenderedTempoMap !== state.precomputedTempoMap
+    const learnStateChanged = this.lastRenderedLearnActive !== state.learnV3.isActive
     const shouldRefreshNotes =
       this.notesDirty ||
       this.lastRenderedTick !== currentTick ||
       this.lastRenderedWorldZoom !== state.worldZoom ||
-      this.lastRenderedLearnActive !== state.learnV3.isActive ||
-      this.lastRenderedProjectData !== state.projectData ||
-      this.lastRenderedTempoMap !== state.precomputedTempoMap
+      learnStateChanged ||
+      projectOrTempoChanged
 
     if (!shouldRefreshNotes) {
       if (shouldRender) {
@@ -481,8 +607,14 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.updateNoteLayer(currentTick, state)
     this.updatePlaybackActiveKeys(currentTick, state)
-    this.applyActiveKeyHighlights()
     this.syncWaveVisibility(state.learnV3.isActive)
+    this.syncParticleVisibility(state.learnV3.isActive)
+
+    if (projectOrTempoChanged || learnStateChanged) {
+      this.clearParticleSystem(false)
+      this.particleBurstSerial = 0
+      this.resetBurstDetectionState(currentTick)
+    }
 
     this.notesDirty = false
     this.lastRenderedTick = currentTick
@@ -507,7 +639,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.buildLaneGuides()
     this.buildKeyboard()
     this.applyKeyboardOpacity()
-    this.applyActiveKeyHighlights()
+    this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
   }
 
   private buildLaneGuides(): void {
@@ -599,10 +731,15 @@ export class ThreeRenderer implements VisualizerRenderer {
         0,
         WHITE_KEY_Z,
       )
+      highlight.layers.enable(BLOOM_LAYER)
       this.keyHighlightStates.set(pitch, {
         baseOpacity: WHITE_KEY_ACTIVE_ALPHA,
-        color: resolveCreateModeNoteColor(pitch),
+        currentStrength: 0,
+        fromStrength: 0,
         material: highlight.material,
+        targetStrength: 0,
+        transitionDurationSeconds: 0,
+        transitionStartSeconds: 0,
       })
     }
 
@@ -658,10 +795,15 @@ export class ThreeRenderer implements VisualizerRenderer {
         0,
         BLACK_KEY_Z,
       )
+      highlight.layers.enable(BLOOM_LAYER)
       this.keyHighlightStates.set(pitch, {
         baseOpacity: BLACK_KEY_ACTIVE_ALPHA,
-        color: resolveCreateModeNoteColor(pitch),
+        currentStrength: 0,
+        fromStrength: 0,
         material: highlight.material,
+        targetStrength: 0,
+        transitionDurationSeconds: 0,
+        transitionStartSeconds: 0,
       })
     }
   }
@@ -914,6 +1056,473 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
   }
 
+  private syncParticleVisibility(isLearnModeActive: boolean): void {
+    if (this.particleGroup != null) {
+      this.particleGroup.visible = !isLearnModeActive
+    }
+  }
+
+  private initParticleSystem(): void {
+    const particleGroup = this.requireParticleGroup()
+    const positions = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
+    const velocities = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
+    const lifetimes = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const ages = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const baseSizes = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const sizes = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const baseAlphas = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const alphas = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const baseBrightnesses = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const brightnesses = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const seeds = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const colors = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
+    const drag = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const flowBiasX = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const flowStrengths = new Float32Array(PARTICLE_POOL_CAPACITY)
+    const geometry = new BufferGeometry()
+    const positionAttribute = new BufferAttribute(positions, 3)
+    const sizeAttribute = new BufferAttribute(sizes, 1)
+    const alphaAttribute = new BufferAttribute(alphas, 1)
+    const seedAttribute = new BufferAttribute(seeds, 1)
+    const brightnessAttribute = new BufferAttribute(brightnesses, 1)
+    const colorAttribute = new BufferAttribute(colors, 3)
+    const uniforms: ParticleUniforms = {
+      particleTime: { value: 0 },
+      pixelRatio: { value: getDevicePixelRatio() },
+    }
+
+    geometry.setAttribute('position', positionAttribute)
+    geometry.setAttribute('aSize', sizeAttribute)
+    geometry.setAttribute('aAlpha', alphaAttribute)
+    geometry.setAttribute('aSeed', seedAttribute)
+    geometry.setAttribute('aBrightness', brightnessAttribute)
+    geometry.setAttribute('aColor', colorAttribute)
+    geometry.setDrawRange(0, 0)
+
+    const material = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: `
+uniform float particleTime;
+varying float vAlpha;
+varying float vBrightness;
+varying vec3 vColor;
+
+void main() {
+  vec2 centered = gl_PointCoord - vec2(0.5);
+  float distanceFromCenter = length(centered);
+  if (distanceFromCenter > 0.5) {
+    discard;
+  }
+
+  float halo = 1.0 - smoothstep(0.08, 0.32, distanceFromCenter);
+  float core = 1.0 - smoothstep(0.0, 0.18, distanceFromCenter);
+  float shimmer = 1.0 + (sin((particleTime * 7.0) + (distanceFromCenter * 16.0)) * 0.03);
+  float alpha = halo * halo * vAlpha;
+  vec3 color = vColor * (0.95 + (vBrightness * 1.35) + (core * 0.75));
+
+  gl_FragColor = vec4(color * shimmer, alpha);
+}`,
+      transparent: true,
+      uniforms,
+      vertexShader: `
+uniform float particleTime;
+uniform float pixelRatio;
+attribute float aAlpha;
+attribute float aBrightness;
+attribute vec3 aColor;
+attribute float aSeed;
+attribute float aSize;
+varying float vAlpha;
+varying float vBrightness;
+varying vec3 vColor;
+
+void main() {
+  vAlpha = aAlpha;
+  vBrightness = aBrightness;
+  vColor = aColor;
+
+  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  gl_PointSize = aSize * pixelRatio * (1.0 + (sin((particleTime * 6.0) + (aSeed * 11.0)) * 0.06));
+}`,
+    })
+    const points = new Points(geometry, material)
+    points.frustumCulled = false
+    points.renderOrder = PARTICLE_RENDER_ORDER
+    points.layers.enable(BLOOM_LAYER)
+    particleGroup.add(points)
+
+    this.persistentResources.push(geometry, material)
+    this.particleSystem = {
+      activeCount: 0,
+      ages,
+      alphaAttribute,
+      alphas,
+      baseAlphas,
+      baseBrightnesses,
+      baseSizes,
+      brightnessAttribute,
+      brightnesses,
+      colorAttribute,
+      colors,
+      drag,
+      flowBiasX,
+      flowStrengths,
+      geometry,
+      lifetimes,
+      material,
+      points,
+      positionAttribute,
+      positions,
+      seedAttribute,
+      seeds,
+      sizeAttribute,
+      sizes,
+      uniforms,
+      velocities,
+    }
+  }
+
+  private clearParticleSystem(resetUpdateClock: boolean): void {
+    const particleSystem = this.particleSystem
+    if (particleSystem != null) {
+      particleSystem.activeCount = 0
+      particleSystem.geometry.setDrawRange(0, 0)
+      this.markParticleAttributesDirty(particleSystem)
+    }
+
+    if (resetUpdateClock) {
+      this.lastParticleUpdateTimeSeconds = Number.NaN
+    }
+  }
+
+  private detectNoteBursts(currentTick: number, state: AppState): void {
+    if (
+      state.learnV3.isActive ||
+      !state.isPlaying ||
+      state.projectData == null ||
+      state.precomputedTempoMap == null ||
+      !this.isSpatialIndexReady() ||
+      !Number.isFinite(currentTick)
+    ) {
+      this.hasPendingSeekSuppression = false
+      this.resetBurstDetectionState(currentTick)
+      return
+    }
+
+    if (!Number.isFinite(this.lastBurstDetectionTick)) {
+      this.hasPendingSeekSuppression = false
+      this.resetBurstDetectionState(currentTick)
+      return
+    }
+
+    if (this.hasPendingSeekSuppression) {
+      this.hasPendingSeekSuppression = false
+      this.resetBurstDetectionState(currentTick)
+      return
+    }
+
+    const tickDelta = currentTick - this.lastBurstDetectionTick
+    if (tickDelta <= 0) {
+      this.hasPendingSeekSuppression = false
+      this.resetBurstDetectionState(currentTick)
+      return
+    }
+
+    this.emitBurstsForTickRange(this.lastBurstDetectionTick, currentTick, state)
+    this.hasPendingSeekSuppression = false
+    this.resetBurstDetectionState(currentTick)
+  }
+
+  private emitBurstsForTickRange(
+    minExclusiveTick: number,
+    maxInclusiveTick: number,
+    state: AppState,
+  ): void {
+    const particleSystem = this.particleSystem
+    if (
+      particleSystem == null ||
+      state.projectData == null ||
+      state.precomputedTempoMap == null ||
+      maxInclusiveTick <= minExclusiveTick
+    ) {
+      return
+    }
+
+    const candidates = spatialIndex.getNotesInRegion(
+      PIANO_MIN_PITCH,
+      Math.floor(minExclusiveTick),
+      PIANO_MAX_PITCH,
+      Math.floor(maxInclusiveTick) + 1,
+    )
+    const emittedNoteIds = new Set<string>()
+    const maxBurstsThisPass = Math.min(
+      PARTICLE_MAX_NOTES_PER_DETECTION,
+      Math.floor((PARTICLE_POOL_CAPACITY - particleSystem.activeCount) / PARTICLE_MIN_COUNT),
+    )
+    let emittedBurstCount = 0
+    let particlesChanged = false
+
+    for (const indexedNote of candidates) {
+      const { note } = indexedNote
+      if (
+        emittedBurstCount >= maxBurstsThisPass ||
+        (PARTICLE_POOL_CAPACITY - particleSystem.activeCount) < PARTICLE_MIN_COUNT ||
+        emittedNoteIds.has(note.id) ||
+        note.startTick <= minExclusiveTick ||
+        note.startTick > maxInclusiveTick
+      ) {
+        continue
+      }
+
+      emittedNoteIds.add(note.id)
+      const didEmitBurst = this.emitBurstForNote(indexedNote)
+      particlesChanged = didEmitBurst || particlesChanged
+      if (didEmitBurst) {
+        emittedBurstCount += 1
+      }
+    }
+
+    if (particlesChanged) {
+      particleSystem.geometry.setDrawRange(0, particleSystem.activeCount)
+      this.markParticleAttributesDirty(particleSystem)
+    }
+  }
+
+  private emitBurstForNote(indexedNote: IndexedNote): boolean {
+    const particleSystem = this.particleSystem
+    if (particleSystem == null) {
+      return false
+    }
+
+    const availableSlots = PARTICLE_POOL_CAPACITY - particleSystem.activeCount
+    if (availableSlots <= 0) {
+      return false
+    }
+
+    const intensity = clamp(indexedNote.note.velocity / 127, 0, 1)
+    const targetParticleCount = Math.round(lerp(PARTICLE_MIN_COUNT, PARTICLE_MAX_COUNT, intensity))
+    const particleCount = Math.min(availableSlots, targetParticleCount)
+    if (particleCount <= 0) {
+      return false
+    }
+
+    const burstX = this.getKeyX(indexedNote.note.pitch)
+    const burstTopDownY = this.getBoundaryTopDownY(burstX)
+    const burstSceneY = this.toScenePointY(burstTopDownY)
+    const [red, green, blue] = colorToNormalizedRgb(resolveCreateModeNoteColor(indexedNote.note.pitch))
+    const burstSeed = createDeterministicSeed(indexedNote.note.id, this.particleBurstSerial)
+    const burstWindBiasX = randomBetweenFromSeed(
+      -PARTICLE_BURST_WIND_BIAS_X,
+      PARTICLE_BURST_WIND_BIAS_X,
+      burstSeed,
+      0,
+    )
+    this.particleBurstSerial += 1
+
+    for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
+      const slot = particleSystem.activeCount
+      const positionOffset = slot * 3
+      const lifetimeBase = lerp(PARTICLE_MIN_LIFETIME_SECONDS, PARTICLE_MAX_LIFETIME_SECONDS, intensity)
+      const speedBase = lerp(PARTICLE_MIN_SPEED, PARTICLE_MAX_SPEED, intensity)
+      const sizeBase = lerp(PARTICLE_MIN_SIZE, PARTICLE_MAX_SIZE, intensity)
+      const alphaBase = lerp(PARTICLE_MIN_ALPHA, PARTICLE_MAX_ALPHA, intensity)
+      const brightnessBase = lerp(PARTICLE_MIN_BRIGHTNESS, PARTICLE_MAX_BRIGHTNESS, intensity)
+      const particleSeed = createDeterministicSeed(indexedNote.note.id, burstSeed, particleIndex)
+      const speed = applyVarianceFromSeed(speedBase, PARTICLE_SPEED_VARIANCE, particleSeed, 1)
+      const upwardRatio = lerp(
+        PARTICLE_MIN_UPWARD_RATIO,
+        PARTICLE_MAX_UPWARD_RATIO,
+        randomFromSeed(particleSeed, 2),
+      )
+      let velocityX =
+        randomBetweenFromSeed(-PARTICLE_SIDEWAYS_RATIO, PARTICLE_SIDEWAYS_RATIO, particleSeed, 3) * speed
+      let velocityY = speed * upwardRatio
+
+      velocityX += randomBetweenFromSeed(
+        -PARTICLE_SPAWN_LATERAL_JITTER,
+        PARTICLE_SPAWN_LATERAL_JITTER,
+        particleSeed,
+        4,
+      ) * (0.35 + (intensity * 0.5))
+
+      particleSystem.positions[positionOffset] = burstX
+      particleSystem.positions[positionOffset + 1] = burstSceneY
+      particleSystem.positions[positionOffset + 2] = PARTICLE_Z
+      particleSystem.velocities[positionOffset] = velocityX
+      particleSystem.velocities[positionOffset + 1] = velocityY
+      particleSystem.velocities[positionOffset + 2] = 0
+      particleSystem.ages[slot] = 0
+      particleSystem.lifetimes[slot] = applyVarianceFromSeed(lifetimeBase, PARTICLE_LIFETIME_VARIANCE, particleSeed, 5)
+      particleSystem.baseSizes[slot] = Math.max(
+        1,
+        applyVarianceFromSeed(sizeBase, PARTICLE_SIZE_VARIANCE, particleSeed, 6),
+      )
+      particleSystem.sizes[slot] = particleSystem.baseSizes[slot]
+      particleSystem.baseAlphas[slot] = clamp(
+        applyVarianceFromSeed(alphaBase, PARTICLE_ALPHA_VARIANCE, particleSeed, 7),
+        0.08,
+        1.2,
+      )
+      particleSystem.alphas[slot] = particleSystem.baseAlphas[slot]
+      particleSystem.baseBrightnesses[slot] = Math.max(
+        0.15,
+        applyVarianceFromSeed(brightnessBase, PARTICLE_BRIGHTNESS_VARIANCE, particleSeed, 8),
+      )
+      particleSystem.brightnesses[slot] = particleSystem.baseBrightnesses[slot]
+      particleSystem.seeds[slot] = randomFromSeed(particleSeed, 9)
+      particleSystem.colors[positionOffset] = red
+      particleSystem.colors[positionOffset + 1] = green
+      particleSystem.colors[positionOffset + 2] = blue
+      particleSystem.drag[slot] = lerp(PARTICLE_DRAG_MIN, PARTICLE_DRAG_MAX, randomFromSeed(particleSeed, 10))
+      particleSystem.flowBiasX[slot] = burstWindBiasX + randomBetweenFromSeed(-14, 14, particleSeed, 11)
+      particleSystem.flowStrengths[slot] = lerp(
+        PARTICLE_FLOW_VARIATION_MIN,
+        PARTICLE_FLOW_VARIATION_MAX,
+        randomFromSeed(particleSeed, 12),
+      ) * (0.85 + (intensity * 0.3))
+
+      particleSystem.activeCount += 1
+    }
+
+    return true
+  }
+
+  private updateParticleSystem(currentTimeSeconds: number): void {
+    const particleSystem = this.particleSystem
+    if (particleSystem == null) {
+      return
+    }
+
+    if (!Number.isFinite(currentTimeSeconds)) {
+      return
+    }
+
+    if (!Number.isFinite(this.lastParticleUpdateTimeSeconds)) {
+      this.lastParticleUpdateTimeSeconds = currentTimeSeconds
+      return
+    }
+
+    const deltaSeconds = currentTimeSeconds - this.lastParticleUpdateTimeSeconds
+    this.lastParticleUpdateTimeSeconds = currentTimeSeconds
+
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0 || particleSystem.activeCount === 0) {
+      return
+    }
+
+    const physicsDeltaSeconds = Math.min(deltaSeconds, PARTICLE_MAX_PHYSICS_STEP_SECONDS)
+    let particleIndex = 0
+
+    while (particleIndex < particleSystem.activeCount) {
+      const ageSeconds = particleSystem.ages[particleIndex] + deltaSeconds
+      if (ageSeconds >= particleSystem.lifetimes[particleIndex]) {
+        this.releaseParticleSlot(particleIndex)
+        continue
+      }
+
+      particleSystem.ages[particleIndex] = ageSeconds
+      const lifeProgress = ageSeconds / particleSystem.lifetimes[particleIndex]
+      const remainingLife = 1 - lifeProgress
+      const positionOffset = particleIndex * 3
+      const currentX = particleSystem.positions[positionOffset]
+      const currentY = particleSystem.positions[positionOffset + 1]
+      const seed = particleSystem.seeds[particleIndex]
+      const flowStrength = particleSystem.flowStrengths[particleIndex]
+      const flowTop = this.sampleParticleFlowNoise(currentX, currentY + PARTICLE_FLOW_SAMPLE_EPSILON, ageSeconds, seed)
+      const flowBottom = this.sampleParticleFlowNoise(currentX, currentY - PARTICLE_FLOW_SAMPLE_EPSILON, ageSeconds, seed)
+      const flowLeft = this.sampleParticleFlowNoise(currentX - PARTICLE_FLOW_SAMPLE_EPSILON, currentY, ageSeconds, seed)
+      const flowRight = this.sampleParticleFlowNoise(currentX + PARTICLE_FLOW_SAMPLE_EPSILON, currentY, ageSeconds, seed)
+      const flowEnvelope = 0.75 + (remainingLife * 0.35)
+      const lateralAcceleration =
+        ((flowTop - flowBottom) * PARTICLE_FLOW_STRENGTH_X * flowStrength * flowEnvelope) +
+        particleSystem.flowBiasX[particleIndex]
+      const verticalAcceleration =
+        ((flowLeft - flowRight) * PARTICLE_FLOW_STRENGTH_Y * flowStrength * flowEnvelope) -
+        (PARTICLE_GRAVITY * (0.55 + (lifeProgress * 0.45)))
+      const dragMultiplier = Math.max(0, 1 - (particleSystem.drag[particleIndex] * physicsDeltaSeconds))
+
+      particleSystem.velocities[positionOffset] += lateralAcceleration * physicsDeltaSeconds
+      particleSystem.velocities[positionOffset + 1] += verticalAcceleration * physicsDeltaSeconds
+      particleSystem.velocities[positionOffset] *= dragMultiplier
+      particleSystem.velocities[positionOffset + 1] *= dragMultiplier
+      particleSystem.positions[positionOffset] += particleSystem.velocities[positionOffset] * physicsDeltaSeconds
+      particleSystem.positions[positionOffset + 1] += particleSystem.velocities[positionOffset + 1] * physicsDeltaSeconds
+      particleSystem.sizes[particleIndex] = particleSystem.baseSizes[particleIndex] * (0.9 + (remainingLife * 0.25))
+      particleSystem.alphas[particleIndex] = particleSystem.baseAlphas[particleIndex] * remainingLife * remainingLife
+      particleSystem.brightnesses[particleIndex] =
+        particleSystem.baseBrightnesses[particleIndex] * (0.85 + (remainingLife * 0.35))
+      particleIndex += 1
+    }
+
+    particleSystem.geometry.setDrawRange(0, particleSystem.activeCount)
+    this.markParticleAttributesDirty(particleSystem)
+  }
+
+  private releaseParticleSlot(index: number): void {
+    const particleSystem = this.particleSystem
+    if (particleSystem == null || index < 0 || index >= particleSystem.activeCount) {
+      return
+    }
+
+    const lastIndex = particleSystem.activeCount - 1
+    if (index !== lastIndex) {
+      copyParticleScalar(particleSystem.ages, lastIndex, index)
+      copyParticleScalar(particleSystem.alphas, lastIndex, index)
+      copyParticleScalar(particleSystem.baseAlphas, lastIndex, index)
+      copyParticleScalar(particleSystem.baseBrightnesses, lastIndex, index)
+      copyParticleScalar(particleSystem.baseSizes, lastIndex, index)
+      copyParticleScalar(particleSystem.brightnesses, lastIndex, index)
+      copyParticleScalar(particleSystem.drag, lastIndex, index)
+      copyParticleScalar(particleSystem.flowBiasX, lastIndex, index)
+      copyParticleScalar(particleSystem.flowStrengths, lastIndex, index)
+      copyParticleScalar(particleSystem.lifetimes, lastIndex, index)
+      copyParticleScalar(particleSystem.seeds, lastIndex, index)
+      copyParticleScalar(particleSystem.sizes, lastIndex, index)
+      copyParticleVector3(particleSystem.colors, lastIndex, index)
+      copyParticleVector3(particleSystem.positions, lastIndex, index)
+      copyParticleVector3(particleSystem.velocities, lastIndex, index)
+    }
+
+    particleSystem.activeCount = lastIndex
+  }
+
+  private markParticleAttributesDirty(particleSystem: ParticleSystemState): void {
+    particleSystem.positionAttribute.needsUpdate = true
+    particleSystem.sizeAttribute.needsUpdate = true
+    particleSystem.alphaAttribute.needsUpdate = true
+    particleSystem.seedAttribute.needsUpdate = true
+    particleSystem.brightnessAttribute.needsUpdate = true
+    particleSystem.colorAttribute.needsUpdate = true
+  }
+
+  private syncParticleMaterialAnimationTime(): void {
+    const particleSystem = this.particleSystem
+    if (particleSystem == null) {
+      return
+    }
+
+    particleSystem.uniforms.particleTime.value = this.noteMaterialTimeSeconds
+    particleSystem.uniforms.pixelRatio.value = getDevicePixelRatio()
+  }
+
+  private resetBurstDetectionState(currentTick: number): void {
+    this.lastBurstDetectionTick = currentTick
+  }
+
+  private sampleParticleFlowNoise(positionX: number, positionY: number, ageSeconds: number, seed: number): number {
+    const flowTime = ageSeconds * PARTICLE_FLOW_TIME_SCROLL
+    const sampleX = (positionX / PARTICLE_FLOW_SCALE) + (seed * 17.13) + flowTime
+    const sampleY = (positionY / PARTICLE_FLOW_SCALE) + (seed * 29.71) - (flowTime * 0.7)
+    return sampleValueNoise2D(sampleX, sampleY, mixUint32(Math.floor(seed * 0xffff_ffff)))
+  }
+
+  private getBoundaryTopDownY(x: number): number {
+    const { keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
+    return keyboardY + Math.sin((x / CREATE_MODE_BOUNDARY_WAVE_LENGTH) + this.boundaryWaveTime) * CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE
+  }
+
   private createStaticRectMesh(
     group: Group,
     x: number,
@@ -1118,15 +1727,56 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     }
   }
 
-  private applyActiveKeyHighlights(): void {
+  private applyActiveKeyHighlights(currentTimeSeconds = this.noteMaterialTimeSeconds): boolean {
+    const activePitches = new Set([
+      ...this.explicitActiveKeyPitches,
+      ...this.playbackActiveKeyPitches,
+    ])
+    let hasAnimatingHighlights = false
+
     for (const [pitch, state] of this.keyHighlightStates) {
-      const isActive = this.explicitActiveKeyPitches.has(pitch)
-      state.material.color.setHex(state.color)
-      state.material.opacity = isActive
-        ? clamp(state.baseOpacity * this.keyboardOpacity, 0, 1)
-        : 0
+      const desiredStrength = activePitches.has(pitch) ? 1 : 0
+      const resolvedCurrentStrength = this.getKeyHighlightStrength(state, currentTimeSeconds)
+
+      if (desiredStrength !== state.targetStrength) {
+        state.currentStrength = resolvedCurrentStrength
+        state.fromStrength = resolvedCurrentStrength
+        state.targetStrength = desiredStrength
+        state.transitionDurationSeconds = desiredStrength > resolvedCurrentStrength
+          ? KEY_HIGHLIGHT_FADE_IN_SECONDS
+          : KEY_HIGHLIGHT_FADE_OUT_SECONDS
+        state.transitionStartSeconds = currentTimeSeconds
+      }
+
+      const nextStrength = this.getKeyHighlightStrength(state, currentTimeSeconds)
+      state.currentStrength = nextStrength
+      if (Math.abs(nextStrength - state.targetStrength) > 0.001) {
+        hasAnimatingHighlights = true
+      } else {
+        state.currentStrength = state.targetStrength
+        state.fromStrength = state.targetStrength
+      }
+
+      state.material.color.setHex(resolveCreateModeNoteColor(pitch))
+      state.material.opacity = clamp(state.baseOpacity * state.currentStrength * this.keyboardOpacity, 0, 1)
       state.material.needsUpdate = true
     }
+
+    return hasAnimatingHighlights
+  }
+
+  private getKeyHighlightStrength(state: KeyHighlightState, currentTimeSeconds: number): number {
+    if (!Number.isFinite(currentTimeSeconds) || state.transitionDurationSeconds <= 0) {
+      return state.targetStrength
+    }
+
+    const elapsedSeconds = Math.max(0, currentTimeSeconds - state.transitionStartSeconds)
+    const progress = clamp(elapsedSeconds / state.transitionDurationSeconds, 0, 1)
+    const easedProgress = state.targetStrength >= state.fromStrength
+      ? easeOutCubic(progress)
+      : easeOutQuad(progress)
+
+    return lerp(state.fromStrength, state.targetStrength, easedProgress)
   }
 
   private disposeStaticScene(): void {
@@ -1345,6 +1995,14 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     return this.noteGroup
   }
 
+  private requireParticleGroup(): Group {
+    if (this.particleGroup == null) {
+      throw new Error('ThreeRenderer particle group has not been initialized.')
+    }
+
+    return this.particleGroup
+  }
+
   private requireWaveGroup(): Group {
     if (this.waveGroup == null) {
       throw new Error('ThreeRenderer wave group has not been initialized.')
@@ -1415,6 +2073,100 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+function lerp(start: number, end: number, progress: number): number {
+  return start + ((end - start) * clamp(progress, 0, 1))
+}
+
+function easeOutCubic(progress: number): number {
+  const clampedProgress = clamp(progress, 0, 1)
+  return 1 - Math.pow(1 - clampedProgress, 3)
+}
+
+function easeOutQuad(progress: number): number {
+  const clampedProgress = clamp(progress, 0, 1)
+  return 1 - ((1 - clampedProgress) * (1 - clampedProgress))
+}
+
+function randomBetweenFromSeed(min: number, max: number, seed: number, stream: number): number {
+  return min + ((max - min) * randomFromSeed(seed, stream))
+}
+
+function applyVarianceFromSeed(baseValue: number, variance: number, seed: number, stream: number): number {
+  return baseValue * (1 + randomBetweenFromSeed(-variance, variance, seed, stream))
+}
+
+function createDeterministicSeed(noteId: string, ...components: number[]): number {
+  let seed = hashString(noteId)
+  for (const component of components) {
+    seed = mixUint32(seed ^ mixUint32(component))
+  }
+
+  return seed
+}
+
+function randomFromSeed(seed: number, stream: number): number {
+  return mixUint32(seed ^ Math.imul(stream + 1, 0x9e3779b9)) / 0xffff_ffff
+}
+
+function sampleValueNoise2D(x: number, y: number, seed: number): number {
+  const xFloor = Math.floor(x)
+  const yFloor = Math.floor(y)
+  const xFraction = smoothInterpolation(x - xFloor)
+  const yFraction = smoothInterpolation(y - yFloor)
+  const topLeft = randomFromGrid(xFloor, yFloor, seed)
+  const topRight = randomFromGrid(xFloor + 1, yFloor, seed)
+  const bottomLeft = randomFromGrid(xFloor, yFloor + 1, seed)
+  const bottomRight = randomFromGrid(xFloor + 1, yFloor + 1, seed)
+  const top = lerp(topLeft, topRight, xFraction)
+  const bottom = lerp(bottomLeft, bottomRight, xFraction)
+  return (lerp(top, bottom, yFraction) * 2) - 1
+}
+
+function randomFromGrid(x: number, y: number, seed: number): number {
+  return mixUint32(seed ^ Math.imul(x, 374_761_393) ^ Math.imul(y, 668_265_263)) / 0xffff_ffff
+}
+
+function smoothInterpolation(value: number): number {
+  return value * value * (3 - (2 * value))
+}
+
+function hashString(value: string): number {
+  let hash = 2_166_136_261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16_777_619)
+  }
+
+  return hash >>> 0
+}
+
+function mixUint32(value: number): number {
+  let mixed = (value >>> 0) + 0x6D2B79F5
+  mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1)
+  mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61)
+  return (mixed ^ (mixed >>> 14)) >>> 0
+}
+
+function copyParticleScalar(values: Float32Array, sourceIndex: number, targetIndex: number): void {
+  values[targetIndex] = values[sourceIndex]
+}
+
+function copyParticleVector3(values: Float32Array, sourceIndex: number, targetIndex: number): void {
+  const sourceOffset = sourceIndex * 3
+  const targetOffset = targetIndex * 3
+  values[targetOffset] = values[sourceOffset]
+  values[targetOffset + 1] = values[sourceOffset + 1]
+  values[targetOffset + 2] = values[sourceOffset + 2]
+}
+
+function colorToNormalizedRgb(color: number): [number, number, number] {
+  return [
+    ((color >> 16) & 0xff) / 0xff,
+    ((color >> 8) & 0xff) / 0xff,
+    (color & 0xff) / 0xff,
+  ]
+}
+
 function createNoteMaterialPalette(color: number): NoteMaterialPalette {
   const saturatedBase = adjustColorSaturation(color, 1.12)
   const softenedBase = adjustColorSaturation(color, 0.72)
@@ -1426,10 +2178,10 @@ function createNoteMaterialPalette(color: number): NoteMaterialPalette {
   return {
     coreDiffuseColor,
     coreEmissiveColor,
-    coreEmissiveStrength: 2.35,
+    coreEmissiveStrength: 2.0,
     haloDiffuseColor,
     haloEmissiveColor,
-    haloEmissiveStrength: 3.3,
+    haloEmissiveStrength: 2.8,
   }
 }
 
