@@ -695,6 +695,82 @@ describe('ThreeRenderer', () => {
     expect(secondUniforms.roundedRectRadius.value).toBeCloseTo(1.8)
   })
 
+  it('assigns each visible note a stable independent travel phase offset', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    loadProjectWithNotes([
+      {
+        endTick: 720,
+        id: 'phase-c',
+        pitch: 60,
+        startTick: 240,
+        velocity: 112,
+        visualEndTick: 720,
+      },
+      {
+        endTick: 720,
+        id: 'phase-e',
+        pitch: 64,
+        startTick: 240,
+        velocity: 112,
+        visualEndTick: 720,
+      },
+      {
+        endTick: 720,
+        id: 'phase-g',
+        pitch: 67,
+        startTick: 240,
+        velocity: 112,
+        visualEndTick: 720,
+      },
+    ])
+
+    await renderer.init(canvas)
+
+    useAppStore.setState({ currentTick: 0 })
+    ;(renderer as any).handleAnimationFrame(1000)
+
+    const noteMeshes = (renderer as any).noteMeshes as Array<{
+      material: {
+        userData: {
+          roundedNoteUniforms: {
+            noteTravelPhaseOffset: { value: number }
+          }
+        }
+      }
+      visible: boolean
+    }>
+    const firstPassOffsets = noteMeshes
+      .filter((noteMesh) => noteMesh.visible)
+      .slice(0, 3)
+      .map((noteMesh) => noteMesh.material.userData.roundedNoteUniforms.noteTravelPhaseOffset.value)
+
+    expect(firstPassOffsets).toHaveLength(3)
+    expect(new Set(firstPassOffsets.map((offset) => offset.toFixed(6))).size).toBe(3)
+    for (const offset of firstPassOffsets) {
+      expect(offset).toBeGreaterThanOrEqual(0)
+      expect(offset).toBeLessThan(1)
+    }
+
+    ;(renderer as any).handleAnimationFrame(1016)
+    const secondPassOffsets = noteMeshes
+      .filter((noteMesh) => noteMesh.visible)
+      .slice(0, 3)
+      .map((noteMesh) => noteMesh.material.userData.roundedNoteUniforms.noteTravelPhaseOffset.value)
+
+    expect(secondPassOffsets).toEqual(firstPassOffsets)
+  })
+
   it('updates rounded note uniforms from the current note dimensions', async () => {
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
@@ -732,8 +808,8 @@ describe('ThreeRenderer', () => {
     expect(roundedNoteUniforms.noteHaloDiffuseColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteCoreEmissiveColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteHaloEmissiveColor.value).toBeDefined()
-    expect(roundedNoteUniforms.noteCoreEmissiveStrength.value).toBeCloseTo(2)
-    expect(roundedNoteUniforms.noteHaloEmissiveStrength.value).toBeCloseTo(2.8)
+    expect(roundedNoteUniforms.noteCoreEmissiveStrength.value).toBeCloseTo(1.35)
+    expect(roundedNoteUniforms.noteHaloEmissiveStrength.value).toBeCloseTo(1.45)
     expect(roundedNoteUniforms.roundedRectSize.value.x).toBe(12)
     expect(roundedNoteUniforms.roundedRectSize.value.y).toBe(6)
     expect(roundedNoteUniforms.roundedRectRadius.value).toBeCloseTo(1.08)

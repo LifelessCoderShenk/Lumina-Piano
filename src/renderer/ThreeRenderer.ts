@@ -23,6 +23,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
+import type { Note } from '../midi/types'
 import { type PlaybackEventMap, playbackEngine } from '../playback/PlaybackEngine'
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
 import { getAppState } from '../store/store'
@@ -105,6 +106,20 @@ const BLOOM_CLIP_FEATHER_PIXELS = 3
 const BLOOM_CLIP_DEBUG_LINE_ALPHA = SHOW_BLOOM_CLIP_DEBUG_LINE ? 0.85 : 0
 const BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS = 3
 const NOTE_BLOOM_EMISSIVE_INTENSITY = 3
+const NOTE_SWIRL_SHORT_NOTE_START_HEIGHT = NOTE_MIN_HEIGHT
+const NOTE_SWIRL_SHORT_NOTE_END_HEIGHT = 24
+const NOTE_SWIRL_SHORT_NOTE_WARP_STRENGTH = 0.14
+const NOTE_SWIRL_WARP_STRENGTH = 0.19
+const NOTE_SWIRL_SHORT_NOTE_MAIN_FREQUENCY = 2.8
+const NOTE_SWIRL_MAIN_FREQUENCY = 3.9
+const NOTE_SWIRL_WARP_FREQUENCY_A = 1.35
+const NOTE_SWIRL_WARP_FREQUENCY_B = 1.85
+const NOTE_SWIRL_SECOND_OCTAVE_SCALE = 2.15
+const NOTE_SWIRL_SECOND_OCTAVE_WEIGHT = 0.32
+const NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY = 0.1
+const NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY = 0.18
+const NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY = 0.038
+const NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY = 0.06
 const WAVE_OUTER_AURA_EMISSIVE_INTENSITY = 0
 const WAVE_MID_GLOW_EMISSIVE_INTENSITY = 1.6
 const WAVE_CORE_EMISSIVE_INTENSITY = 1.2
@@ -159,6 +174,9 @@ interface RoundedNoteUniforms {
     value: Vector2
   }
   noteMaterialTime: {
+    value: number
+  }
+  noteTravelPhaseOffset: {
     value: number
   }
   noteCoreDiffuseColor: {
@@ -915,6 +933,10 @@ export class ThreeRenderer implements VisualizerRenderer {
     const noteMesh = this.getOrCreateNoteMesh(group, noteMeshIndex)
 
     this.assignNoteMaterial(noteMesh, noteColor)
+    const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
+    if (roundedNoteUniforms != null) {
+      roundedNoteUniforms.noteTravelPhaseOffset.value = resolveNoteTravelPhaseOffset(indexedNote.note)
+    }
     noteMesh.position.set(
       adjustedRect.x + (adjustedRect.w / 2),
       this.toSceneRectY(adjustedRect.y, adjustedRect.h),
@@ -1576,6 +1598,7 @@ void main() {
       noteHaloEmissiveColor: { value: new Color(notePalette.haloEmissiveColor) },
       noteHaloEmissiveStrength: { value: notePalette.haloEmissiveStrength },
       noteMaterialTime: this.sharedNoteMaterialTimeUniform,
+      noteTravelPhaseOffset: { value: 0 },
       roundedRectRadius: { value: getPillNoteCornerRadius(1, 1) },
       roundedRectSize: { value: new Vector2(1, 1) },
     }
@@ -1594,6 +1617,7 @@ void main() {
       shader.uniforms.noteHaloEmissiveColor = roundedNoteUniforms.noteHaloEmissiveColor
       shader.uniforms.noteHaloEmissiveStrength = roundedNoteUniforms.noteHaloEmissiveStrength
       shader.uniforms.noteMaterialTime = roundedNoteUniforms.noteMaterialTime
+      shader.uniforms.noteTravelPhaseOffset = roundedNoteUniforms.noteTravelPhaseOffset
       shader.uniforms.roundedRectRadius = roundedNoteUniforms.roundedRectRadius
       shader.uniforms.roundedRectSize = roundedNoteUniforms.roundedRectSize
 
@@ -1620,6 +1644,7 @@ uniform vec3 noteHaloEmissiveColor;
 uniform float noteCoreEmissiveStrength;
 uniform float noteHaloEmissiveStrength;
 uniform float noteMaterialTime;
+uniform float noteTravelPhaseOffset;
 uniform float roundedRectRadius;
 uniform vec2 roundedRectSize;
 varying vec2 vRoundedRectUv;
@@ -1627,6 +1652,25 @@ varying vec2 vRoundedRectUv;
 float roundedRectSignedDistance(vec2 point, vec2 halfSize, float radius) {
   vec2 q = abs(point) - (halfSize - vec2(radius));
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+float swirlHash12(vec2 point) {
+  vec3 point3 = fract(vec3(point.xyx) * 0.1031);
+  point3 += dot(point3, point3.yzx + 33.33);
+  return fract((point3.x + point3.y) * point3.z);
+}
+
+float swirlValueNoise2D(vec2 point) {
+  vec2 cell = floor(point);
+  vec2 fraction = fract(point);
+  vec2 smoothFraction = fraction * fraction * (3.0 - (2.0 * fraction));
+  float topLeft = swirlHash12(cell);
+  float topRight = swirlHash12(cell + vec2(1.0, 0.0));
+  float bottomLeft = swirlHash12(cell + vec2(0.0, 1.0));
+  float bottomRight = swirlHash12(cell + vec2(1.0, 1.0));
+  float top = mix(topLeft, topRight, smoothFraction.x);
+  float bottom = mix(bottomLeft, bottomRight, smoothFraction.x);
+  return mix(top, bottom, smoothFraction.y);
 }`,
         )
         .replace(
@@ -1651,6 +1695,35 @@ vec2 noteHighlightUv = (vRoundedRectUv - vec2(0.5)) / vec2(0.8, 1.35);
 float noteHighlightMask = exp(-dot(noteHighlightUv, noteHighlightUv) * 2.6);
 noteHighlightMask *= 1.0 - (noteEdgeMix * 0.5);
 
+float noteSwirlHeightMix = smoothstep(${NOTE_SWIRL_SHORT_NOTE_START_HEIGHT.toFixed(1)}, ${NOTE_SWIRL_SHORT_NOTE_END_HEIGHT.toFixed(1)}, roundedRectSize.y);
+float noteSwirlWarpStrength = mix(${NOTE_SWIRL_SHORT_NOTE_WARP_STRENGTH.toFixed(3)}, ${NOTE_SWIRL_WARP_STRENGTH.toFixed(3)}, noteSwirlHeightMix);
+float noteSwirlMainFrequency = mix(${NOTE_SWIRL_SHORT_NOTE_MAIN_FREQUENCY.toFixed(3)}, ${NOTE_SWIRL_MAIN_FREQUENCY.toFixed(3)}, noteSwirlHeightMix);
+vec2 noteSwirlInteriorUv = (vRoundedRectUv - vec2(0.5)) / vec2(0.96, 1.08);
+float noteSwirlInteriorMask = exp(-dot(noteSwirlInteriorUv, noteSwirlInteriorUv) * 1.2);
+noteSwirlInteriorMask *= 1.0 - (noteEdgeMix * 0.72);
+vec2 noteSwirlLocalCoords = roundedRectPoint / roundedRectMinDimension;
+float noteSwirlSeed = noteTravelPhaseOffset;
+vec2 noteSwirlSeedA = vec2((noteSwirlSeed * 7.13) + 0.37, (noteSwirlSeed * 13.57) - 0.91);
+vec2 noteSwirlSeedB = vec2((noteSwirlSeed * 11.47) + 2.31, (noteSwirlSeed * 17.29) + 1.77);
+vec2 noteSwirlSeedC = vec2((noteSwirlSeed * 19.91) - 1.27, (noteSwirlSeed * 23.83) + 3.41);
+vec2 noteSwirlSeedD = vec2((noteSwirlSeed * 29.13) + 4.92, (noteSwirlSeed * 31.71) - 2.63);
+vec2 noteSwirlWarpSampleA = (noteSwirlLocalCoords * ${NOTE_SWIRL_WARP_FREQUENCY_A.toFixed(3)}) + noteSwirlSeedA + vec2(noteMaterialTime * 0.19, -noteMaterialTime * 0.14);
+vec2 noteSwirlWarpSampleB = (noteSwirlLocalCoords * ${NOTE_SWIRL_WARP_FREQUENCY_B.toFixed(3)}) + noteSwirlSeedB + vec2(-noteMaterialTime * 0.13, noteMaterialTime * 0.17);
+vec2 noteSwirlWarp = (vec2(
+  swirlValueNoise2D(noteSwirlWarpSampleA),
+  swirlValueNoise2D(noteSwirlWarpSampleB)
+) - 0.5) * 2.0;
+vec2 noteSwirlCoords = (noteSwirlLocalCoords * noteSwirlMainFrequency) + (noteSwirlWarp * noteSwirlWarpStrength);
+float noteSwirlMainA = swirlValueNoise2D(noteSwirlCoords + noteSwirlSeedC + vec2(noteMaterialTime * 0.23, -noteMaterialTime * 0.18));
+float noteSwirlMainB = swirlValueNoise2D(
+  (noteSwirlCoords * ${NOTE_SWIRL_SECOND_OCTAVE_SCALE.toFixed(2)}) + noteSwirlSeedD + vec2(-noteMaterialTime * 0.31, noteMaterialTime * 0.27)
+);
+float noteSwirlField = mix(noteSwirlMainA, noteSwirlMainB, ${NOTE_SWIRL_SECOND_OCTAVE_WEIGHT.toFixed(2)});
+float noteSwirlRidgedField = 1.0 - abs((noteSwirlField * 2.0) - 1.0);
+noteSwirlRidgedField = pow(clamp(noteSwirlRidgedField, 0.0, 1.0), 1.15);
+float noteSwirlBrightField = pow(noteSwirlRidgedField, 1.55) * noteSwirlInteriorMask;
+float noteSwirlRecessField = max(0.0, pow(noteSwirlRidgedField, 0.78) - pow(noteSwirlRidgedField, 1.55)) * noteSwirlInteriorMask;
+
 float noteShimmerField = sin((vRoundedRectUv.x * 3.4) + (noteMaterialTime * 0.52))
   * sin((vRoundedRectUv.y * 2.8) - (noteMaterialTime * 0.31));
 float noteShimmer = 1.0 + (noteShimmerField * 0.05);
@@ -1659,6 +1732,10 @@ float noteAnimatedHighlight = noteHighlightMask * noteShimmer;
 
 vec3 noteFaceColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix);
 noteFaceColor = mix(noteFaceColor, noteHaloDiffuseColor, noteAnimatedHighlight * 0.08);
+vec3 noteSwirlBrightColor = mix(noteHaloDiffuseColor, noteHaloEmissiveColor, 0.62);
+vec3 noteSwirlRecessColor = mix(noteFaceColor, noteCoreDiffuseColor, 0.68);
+noteFaceColor = mix(noteFaceColor, noteSwirlBrightColor, noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY.toFixed(3)});
+noteFaceColor = mix(noteFaceColor, noteSwirlRecessColor, noteSwirlRecessField * ${NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY.toFixed(3)});
 diffuseColor.rgb = noteFaceColor;
 
 vec3 roundedNoteEmissiveRadiance = mix(
@@ -1668,6 +1745,14 @@ vec3 roundedNoteEmissiveRadiance = mix(
 );
 roundedNoteEmissiveRadiance *= noteBreathing;
 roundedNoteEmissiveRadiance += noteHaloEmissiveColor * (noteAnimatedHighlight * 0.12 * noteHaloEmissiveStrength);
+roundedNoteEmissiveRadiance += noteSwirlBrightColor * (noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY.toFixed(3)} * noteHaloEmissiveStrength);
+roundedNoteEmissiveRadiance = max(
+  vec3(0.0),
+  roundedNoteEmissiveRadiance - (
+    noteSwirlBrightColor
+    * (noteSwirlRecessField * ${NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY.toFixed(3)} * noteHaloEmissiveStrength)
+  )
+);
 roundedNoteEmissiveRadiance *= roundedRectMask;`,
         )
         .replace(
@@ -1675,7 +1760,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
           'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v2'
+    material.customProgramCacheKey = () => 'rounded-note-pill-v6'
     return material
   }
 
@@ -2171,17 +2256,29 @@ function createNoteMaterialPalette(color: number): NoteMaterialPalette {
   const saturatedBase = adjustColorSaturation(color, 1.12)
   const softenedBase = adjustColorSaturation(color, 0.72)
   const coreDiffuseColor = brightenColor(saturatedBase, 0.92)
-  const haloDiffuseColor = interpolateColor(brightenColor(softenedBase, 1.08), 0xffffff, 0.18)
-  const coreEmissiveColor = interpolateColor(coreDiffuseColor, 0xffffff, 0.08)
-  const haloEmissiveColor = interpolateColor(haloDiffuseColor, 0xffffff, 0.16)
+  const haloDiffuseColor = interpolateColor(
+    brightenColor(softenedBase, 1.12),
+    brightenColor(saturatedBase, 1.26),
+    0.45,
+  )
+  const coreEmissiveColor = interpolateColor(
+    coreDiffuseColor,
+    brightenColor(saturatedBase, 1.14),
+    0.34,
+  )
+  const haloEmissiveColor = interpolateColor(
+    haloDiffuseColor,
+    brightenColor(saturatedBase, 1.32),
+    0.38,
+  )
 
   return {
     coreDiffuseColor,
     coreEmissiveColor,
-    coreEmissiveStrength: 2.0,
+    coreEmissiveStrength: 1.35,
     haloDiffuseColor,
     haloEmissiveColor,
-    haloEmissiveStrength: 2.8,
+    haloEmissiveStrength: 1.45,
   }
 }
 
@@ -2220,6 +2317,14 @@ function getAnimationTimeSeconds(frameTimeMs?: number): number {
   }
 
   return Date.now() / 1000
+}
+
+function resolveNoteTravelPhaseOffset(note: Note): number {
+  const normalizedNoteId = typeof note.id === 'string' && note.id.trim().length > 0
+    ? note.id
+    : `${Math.round(note.pitch)}:${Math.round(note.startTick)}`
+  const phaseSeed = createDeterministicSeed(normalizedNoteId, Math.round(note.pitch), Math.round(note.startTick))
+  return randomFromSeed(phaseSeed, 0)
 }
 
 function getDevicePixelRatio(): number {
