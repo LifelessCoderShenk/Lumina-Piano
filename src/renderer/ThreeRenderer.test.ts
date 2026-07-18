@@ -120,13 +120,18 @@ vi.mock('three', () => {
 
   class MeshBasicMaterial {
     color = {
-      setHex: mockMaterialColorSetHex,
+      value: 0,
+      setHex: (value: number) => {
+        this.color.value = value
+        mockMaterialColorSetHex(value)
+      },
     }
     needsUpdate = false
     opacity: number
     transparent: boolean
 
-    constructor(options: { opacity?: number; transparent?: boolean }) {
+    constructor(options: { color?: number; opacity?: number; transparent?: boolean }) {
+      this.color.value = options.color ?? 0
       this.opacity = options.opacity ?? 1
       this.transparent = options.transparent ?? false
       createdMeshMaterials.push(this)
@@ -137,10 +142,18 @@ vi.mock('three', () => {
 
   class MeshLambertMaterial {
     color = {
-      setHex: mockMaterialColorSetHex,
+      value: 0,
+      setHex: (value: number) => {
+        this.color.value = value
+        mockMaterialColorSetHex(value)
+      },
     }
     emissive = {
-      setHex: mockMaterialColorSetHex,
+      value: 0,
+      setHex: (value: number) => {
+        this.emissive.value = value
+        mockMaterialColorSetHex(value)
+      },
     }
     emissiveIntensity: number
     needsUpdate = false
@@ -148,7 +161,9 @@ vi.mock('three', () => {
     transparent: boolean
     userData: Record<string, unknown> = {}
 
-    constructor(options: { emissiveIntensity?: number; opacity?: number; transparent?: boolean }) {
+    constructor(options: { color?: number; emissive?: number; emissiveIntensity?: number; opacity?: number; transparent?: boolean }) {
+      this.color.value = options.color ?? 0
+      this.emissive.value = options.emissive ?? 0
       this.emissiveIntensity = options.emissiveIntensity ?? 1
       this.opacity = options.opacity ?? 1
       this.transparent = options.transparent ?? false
@@ -240,7 +255,10 @@ vi.mock('three', () => {
 
   class Mesh {
     layers = {
-      enable: mockLayersEnable,
+      enable: vi.fn((channel: number) => {
+        this.layers.mask |= (1 << channel)
+        mockLayersEnable(channel)
+      }),
       mask: 1,
       set: mockLayersSet,
     }
@@ -301,7 +319,10 @@ vi.mock('three', () => {
   class Points {
     frustumCulled = true
     layers = {
-      enable: mockLayersEnable,
+      enable: vi.fn((channel: number) => {
+        this.layers.mask |= (1 << channel)
+        mockLayersEnable(channel)
+      }),
       mask: 1,
       set: mockLayersSet,
     }
@@ -455,6 +476,7 @@ const {
   createNoteMaterialPalette,
   getColorRelativeLuminance,
 } = await import('./ThreeRenderer')
+const { getKeyAtScreenX } = await import('./pianoMath')
 
 describe('createNoteMaterialPalette', () => {
   const paletteCases = [
@@ -819,7 +841,7 @@ describe('ThreeRenderer', () => {
 
     Object.defineProperty(canvas, 'clientWidth', {
       configurable: true,
-      value: 640,
+      value: 1200,
     })
     Object.defineProperty(canvas, 'clientHeight', {
       configurable: true,
@@ -889,13 +911,71 @@ describe('ThreeRenderer', () => {
     expect(secondPassOffsets).toEqual(firstPassOffsets)
   })
 
-  it('recolors visible notes, key highlights, and active particles when Create Mode colors change', async () => {
+  it('spawns non-bloom impact reflections on note hits and fades them out over time', async () => {
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
     Object.defineProperty(canvas, 'clientWidth', {
       configurable: true,
-      value: 640,
+      value: 1200,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    loadProjectWithNotes([
+      {
+        endTick: 480,
+        id: 'reflection-note',
+        pitch: 60,
+        startTick: 240,
+        velocity: 127,
+        visualEndTick: 480,
+      },
+    ])
+
+    await renderer.init(canvas)
+
+    const reflectionState = (renderer as any).impactReflectionStates.get(60) as {
+      currentStrength: number
+      mesh: { layers: { mask: number } }
+      uniforms: {
+        reflectionColor: { value: { value: number } }
+        reflectionStrength: { value: number }
+      }
+    }
+
+    expect(reflectionState.uniforms.reflectionStrength.value).toBe(0)
+    expect(reflectionState.mesh.layers.mask).toBe(1)
+    expect(reflectionState.uniforms.reflectionColor.value.value).toBe(0x2e65a2)
+
+    useAppStore.setState({ currentTick: 239 })
+    ;(renderer as any).handleAnimationFrame(1000)
+    useAppStore.getState().setIsPlaying(true)
+    ;(renderer as any).handleAnimationFrame(1016)
+    useAppStore.setState({ currentTick: 240 })
+    ;(renderer as any).handleAnimationFrame(1032)
+
+    const strengthAtImpact = reflectionState.uniforms.reflectionStrength.value
+    expect(strengthAtImpact).toBeGreaterThan(0.9)
+
+    ;(renderer as any).handleAnimationFrame(1112)
+    expect(reflectionState.uniforms.reflectionStrength.value).toBeGreaterThan(0)
+    expect(reflectionState.uniforms.reflectionStrength.value).toBeLessThan(strengthAtImpact)
+
+    ;(renderer as any).handleAnimationFrame(1280)
+    expect(reflectionState.currentStrength).toBe(0)
+    expect(reflectionState.uniforms.reflectionStrength.value).toBe(0)
+  })
+
+  it('recolors visible notes, key highlights, impact reflections, wave segments, and active particles when Create Mode colors change', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 1200,
     })
     Object.defineProperty(canvas, 'clientHeight', {
       configurable: true,
@@ -934,10 +1014,33 @@ describe('ThreeRenderer', () => {
       activeCount: number
       colors: Float32Array
     }
+    const keyHighlightState = (renderer as any).keyHighlightStates.get(60) as {
+      material: {
+        color: { value: number }
+      }
+    }
+    const impactReflectionState = (renderer as any).impactReflectionStates.get(60) as {
+      uniforms: {
+        reflectionColor: { value: { value: number } }
+      }
+    }
+    const waveSamplePoints = (renderer as any).waveSamplePoints as number[]
+    const cWaveSegmentIndex = waveSamplePoints.findIndex((x0, index) =>
+      index < waveSamplePoints.length - 1 &&
+      getKeyAtScreenX((x0 + waveSamplePoints[index + 1]) / 2, 1200) === 60,
+    )
+    const waveLayers = (renderer as any).waveLayers as Array<{
+      definition: { role: 'core' | 'mid' | 'outer' }
+      materials: Array<{
+        color: { value: number }
+        emissive: { value: number }
+      }>
+    }>
 
     expect(visibleNoteMesh).toBeDefined()
     expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0x2e65a2)
     expect(particleSystem.activeCount).toBeGreaterThan(0)
+    expect(cWaveSegmentIndex).toBeGreaterThanOrEqual(0)
 
     const originalMaterial = visibleNoteMesh?.material
     const rebuildStaticSceneSpy = vi.spyOn(renderer as any, 'rebuildStaticScene')
@@ -959,6 +1062,33 @@ describe('ThreeRenderer', () => {
     expect(particleSystem.colors[0]).toBeCloseTo(1, 6)
     expect(particleSystem.colors[1]).toBeCloseTo(0, 6)
     expect(particleSystem.colors[2]).toBeCloseTo(0, 6)
+    expect(keyHighlightState.material.color.value).toBe(0xff0000)
+    expect(impactReflectionState.uniforms.reflectionColor.value.value).toBe(0xff0000)
+
+    const singleModePalette = createNoteMaterialPalette(0xff0000)
+    const outerWaveLayer = waveLayers.find((layer) => layer.definition.role === 'outer')
+    const midWaveLayer = waveLayers.find((layer) => layer.definition.role === 'mid')
+    const coreWaveLayer = waveLayers.find((layer) => layer.definition.role === 'core')
+    expect(outerWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(singleModePalette.coreDiffuseColor)
+    expect(midWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(singleModePalette.haloDiffuseColor)
+    expect(coreWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(singleModePalette.haloEmissiveColor)
+
+    useAppStore.getState().setCreateNoteColorMode('pitchClass')
+    useAppStore.getState().setCreatePitchClassColor(0, '#ffaa00')
+    ;(renderer as any).handleAnimationFrame(1064)
+
+    useAppStore.setState({ currentTick: 239 })
+    ;(renderer as any).handleAnimationFrame(1080)
+    useAppStore.setState({ currentTick: 240 })
+    ;(renderer as any).handleAnimationFrame(1096)
+
+    const pitchClassPalette = createNoteMaterialPalette(0xffaa00)
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0xffaa00)
+    expect(keyHighlightState.material.color.value).toBe(0xffaa00)
+    expect(impactReflectionState.uniforms.reflectionColor.value.value).toBe(0xffaa00)
+    expect(outerWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(pitchClassPalette.coreDiffuseColor)
+    expect(midWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(pitchClassPalette.haloDiffuseColor)
+    expect(coreWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(pitchClassPalette.haloEmissiveColor)
   })
 
   it('updates rounded note uniforms from the current note dimensions', async () => {
@@ -1404,7 +1534,7 @@ describe('ThreeRenderer', () => {
     expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(1)
     expect(mockMeshBasicMaterialDispose).toHaveBeenCalled()
     expect(mockMeshLambertMaterialDispose).toHaveBeenCalled()
-    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(1)
+    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(89)
     expect(mockSpriteMaterialDispose).not.toHaveBeenCalled()
     expect(mockUnrealBloomPassDispose).toHaveBeenCalledTimes(1)
     expect(mockOutputPassDispose).toHaveBeenCalledTimes(1)

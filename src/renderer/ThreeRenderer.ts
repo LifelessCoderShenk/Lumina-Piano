@@ -49,6 +49,7 @@ import {
   PIANO_MAX_PITCH,
   PIANO_MIN_PITCH,
   PIANO_WHITE_KEY_COUNT,
+  getKeyAtScreenX,
   getBlackKeyWidth,
   getWhiteKeyBounds,
   getWhiteKeyIndex,
@@ -63,9 +64,6 @@ const CREATE_MODE_BACKGROUND_COLOR = 0x000000
 const CREATE_MODE_LANE_LINE_COLOR = 0x444444
 const CREATE_MODE_LANE_LINE_ALPHA = 0.4
 const CREATE_MODE_BLACK_KEY_HEIGHT_RATIO = 0.6
-const CREATE_MODE_BOUNDARY_OUTER_AURA_COLOR = 0x1a3a6e
-const CREATE_MODE_BOUNDARY_MID_GLOW_COLOR = 0x4a9eff
-const CREATE_MODE_BOUNDARY_CORE_COLOR = 0x7ec8ff
 const CREATE_MODE_BOUNDARY_OUTER_AURA_THICKNESS = 16
 const CREATE_MODE_BOUNDARY_MID_GLOW_THICKNESS = 6
 const CREATE_MODE_BOUNDARY_CORE_THICKNESS = 2
@@ -92,6 +90,7 @@ const WHITE_NOTE_Z = 6
 const WAVE_OUTER_Z = 8
 const WAVE_MID_Z = 9
 const WAVE_CORE_Z = 10
+const KEYBOARD_REFLECTION_Z = 3
 const NOTE_AMBIENT_LIGHT_COLOR = 0xffffff
 const NOTE_AMBIENT_LIGHT_INTENSITY = 1
 const NOTE_ROUNDED_CORNER_RATIO = 0.18
@@ -136,6 +135,11 @@ const WAVE_MID_GLOW_EMISSIVE_INTENSITY = 1.6
 const WAVE_CORE_EMISSIVE_INTENSITY = 1.2
 const KEY_HIGHLIGHT_FADE_IN_SECONDS = 0.06
 const KEY_HIGHLIGHT_FADE_OUT_SECONDS = 0.18
+const IMPACT_REFLECTION_HEIGHT = 30
+const IMPACT_REFLECTION_PEAK_STRENGTH_MIN = 0.55
+const IMPACT_REFLECTION_PEAK_STRENGTH_MAX = 0.95
+const IMPACT_REFLECTION_DURATION_MIN_SECONDS = 0.12
+const IMPACT_REFLECTION_DURATION_MAX_SECONDS = 0.22
 const PARTICLE_POOL_CAPACITY = 4_096
 const PARTICLE_Z = WAVE_MID_Z
 const PARTICLE_RENDER_ORDER = Math.round((WAVE_CORE_Z + 1) * 10)
@@ -175,6 +179,7 @@ const PARTICLE_MAX_NOTES_PER_DETECTION = 64
 const PARTICLE_MAX_PHYSICS_STEP_SECONDS = 0.05
 
 type GlowMaterial = MeshLambertMaterial
+type ReflectionMaterial = ShaderMaterial
 type ParticleMaterial = ShaderMaterial
 
 interface RoundedNoteUniforms {
@@ -232,18 +237,38 @@ interface KeyHighlightState {
 }
 
 interface WaveLayerDefinition {
-  color: number
   emissiveIntensity: number
   lineWidth: number
   opacity: number
+  role: 'core' | 'mid' | 'outer'
   renderOrder: number
   z: number
 }
 
 interface WaveLayerState {
   definition: WaveLayerDefinition
-  material: GlowMaterial
+  materials: GlowMaterial[]
   segments: Array<Mesh<PlaneGeometry, GlowMaterial>>
+}
+
+interface ImpactReflectionUniforms {
+  reflectionColor: {
+    value: Color
+  }
+  reflectionStrength: {
+    value: number
+  }
+}
+
+interface ImpactReflectionState {
+  currentStrength: number
+  durationSeconds: number
+  material: ReflectionMaterial
+  mesh: Mesh<PlaneGeometry, ReflectionMaterial>
+  peakStrength: number
+  pitch: number
+  startTimeSeconds: number
+  uniforms: ImpactReflectionUniforms
 }
 
 export interface NoteMaterialPalette {
@@ -255,6 +280,12 @@ export interface NoteMaterialPalette {
   swirlRecessColor: number
   coreEmissiveStrength: number
   haloEmissiveStrength: number
+}
+
+interface BoundaryWavePalette {
+  coreColor: number
+  midGlowColor: number
+  outerAuraColor: number
 }
 
 interface SharedFloatUniform {
@@ -323,6 +354,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   private persistentResources: Array<{ dispose(): void }> = []
   private keyboardMaterialStates: KeyboardMaterialState[] = []
   private keyHighlightStates = new Map<number, KeyHighlightState>()
+  private impactReflectionStates = new Map<number, ImpactReflectionState>()
   private explicitActiveKeyPitches = new Set<number>()
   private playbackActiveKeyPitches = new Set<number>()
   private keyboardOpacity = 1
@@ -594,6 +626,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.keyboardOpacity = clamp(opacity, 0, 1)
     this.applyKeyboardOpacity()
     this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    this.applyImpactReflections(this.noteMaterialTimeSeconds)
     this.renderScene()
   }
 
@@ -610,7 +643,9 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.hasPendingCreateNoteColorUpdate = false
     this.updateKeyHighlightColors(state)
+    this.updateImpactReflectionColors(state)
     this.updateVisibleNoteMaterialColors(state)
+    this.updateWaveLayerColors(state)
     this.updateActiveParticleColors(state)
     return true
   }
@@ -619,6 +654,15 @@ export class ThreeRenderer implements VisualizerRenderer {
     for (const [pitch, keyHighlight] of this.keyHighlightStates) {
       keyHighlight.material.color.setHex(resolveCreateModeNoteColor(pitch, state.createNoteColors))
       keyHighlight.material.needsUpdate = true
+    }
+  }
+
+  private updateImpactReflectionColors(state: AppState): void {
+    for (const impactReflection of this.impactReflectionStates.values()) {
+      impactReflection.uniforms.reflectionColor.value.setHex(
+        resolveCreateModeNoteColor(impactReflection.pitch, state.createNoteColors),
+      )
+      impactReflection.material.needsUpdate = true
     }
   }
 
@@ -655,6 +699,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     const notesChanged = this.renderDynamicState(this.currentTick, state, false)
     const shouldAnimateNotes = this.visibleNoteMeshCount > 0
     const shouldAnimateHighlights = this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    const shouldAnimateImpactReflections = this.applyImpactReflections(this.noteMaterialTimeSeconds)
     this.detectNoteBursts(this.currentTick, state)
 
     if (!state.learnV3.isActive) {
@@ -664,7 +709,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       return
     }
 
-    if (notesChanged || shouldAnimateNotes || shouldAnimateHighlights) {
+    if (notesChanged || shouldAnimateNotes || shouldAnimateHighlights || shouldAnimateImpactReflections) {
       this.renderScene()
     }
   }
@@ -699,6 +744,7 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     if (projectOrTempoChanged || learnStateChanged) {
       this.clearParticleSystem(false)
+      this.clearImpactReflections()
       this.particleBurstSerial = 0
       this.resetBurstDetectionState(currentTick)
     }
@@ -727,6 +773,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.buildKeyboard()
     this.applyKeyboardOpacity()
     this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    this.applyImpactReflections(this.noteMaterialTimeSeconds)
   }
 
   private buildLaneGuides(): void {
@@ -828,6 +875,14 @@ export class ThreeRenderer implements VisualizerRenderer {
         transitionDurationSeconds: 0,
         transitionStartSeconds: 0,
       })
+      this.createImpactReflectionMesh(
+        keyboardGroup,
+        pitch,
+        whiteKeyBounds.x,
+        keyboardY,
+        whiteKeyWidth,
+        Math.max(8, Math.min(whiteKeyHeight, IMPACT_REFLECTION_HEIGHT)),
+      )
     }
 
     for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
@@ -892,6 +947,14 @@ export class ThreeRenderer implements VisualizerRenderer {
         transitionDurationSeconds: 0,
         transitionStartSeconds: 0,
       })
+      this.createImpactReflectionMesh(
+        keyboardGroup,
+        pitch,
+        keyX,
+        keyboardY,
+        blackKeyWidth,
+        Math.max(6, Math.min(blackFaceHeight, Math.round(IMPACT_REFLECTION_HEIGHT * 0.82))),
+      )
     }
   }
 
@@ -1048,26 +1111,26 @@ export class ThreeRenderer implements VisualizerRenderer {
   private initWaveLayers(): void {
     this.waveLayers = [
       this.createWaveLayerState({
-        color: CREATE_MODE_BOUNDARY_OUTER_AURA_COLOR,
         emissiveIntensity: WAVE_OUTER_AURA_EMISSIVE_INTENSITY,
         lineWidth: CREATE_MODE_BOUNDARY_OUTER_AURA_THICKNESS,
         opacity: CREATE_MODE_BOUNDARY_OUTER_AURA_ALPHA,
+        role: 'outer',
         renderOrder: Math.round(WAVE_OUTER_Z * 10),
         z: WAVE_OUTER_Z,
       }),
       this.createWaveLayerState({
-        color: CREATE_MODE_BOUNDARY_MID_GLOW_COLOR,
         emissiveIntensity: WAVE_MID_GLOW_EMISSIVE_INTENSITY,
         lineWidth: CREATE_MODE_BOUNDARY_MID_GLOW_THICKNESS,
         opacity: CREATE_MODE_BOUNDARY_MID_GLOW_ALPHA,
+        role: 'mid',
         renderOrder: Math.round(WAVE_MID_Z * 10),
         z: WAVE_MID_Z,
       }),
       this.createWaveLayerState({
-        color: CREATE_MODE_BOUNDARY_CORE_COLOR,
         emissiveIntensity: WAVE_CORE_EMISSIVE_INTENSITY,
         lineWidth: CREATE_MODE_BOUNDARY_CORE_THICKNESS,
         opacity: CREATE_MODE_BOUNDARY_CORE_ALPHA,
+        role: 'core',
         renderOrder: Math.round(WAVE_CORE_Z * 10),
         z: WAVE_CORE_Z,
       }),
@@ -1075,27 +1138,23 @@ export class ThreeRenderer implements VisualizerRenderer {
   }
 
   private createWaveLayerState(definition: WaveLayerDefinition): WaveLayerState {
-    const material = new MeshLambertMaterial({
-      color: definition.color,
-      depthTest: false,
-      depthWrite: false,
-      emissive: definition.color,
-      emissiveIntensity: definition.emissiveIntensity,
-      opacity: definition.opacity,
-      transparent: true,
-    })
-    this.persistentResources.push(material)
-
     return {
       definition,
-      material,
+      materials: [],
       segments: [],
     }
   }
 
   private rebuildWaveMeshes(): void {
     const waveGroup = this.requireWaveGroup()
+    const state = getAppState()
 
+    for (const layer of this.waveLayers) {
+      for (const material of layer.materials) {
+        material.dispose()
+      }
+      layer.materials = []
+    }
     clearGroup(waveGroup)
     this.waveSamplePoints = createWaveSamplePoints(this.viewportWidth)
 
@@ -1103,15 +1162,49 @@ export class ThreeRenderer implements VisualizerRenderer {
       layer.segments = []
 
       for (let index = 0; index < this.waveSamplePoints.length - 1; index += 1) {
-        const mesh = new Mesh(this.requireRectGeometry(), layer.material)
+        const midpointX = (this.waveSamplePoints[index] + this.waveSamplePoints[index + 1]) / 2
+        const material = this.createWaveSegmentMaterial(
+          layer.definition,
+          this.resolveWaveSegmentColor(layer.definition, midpointX, state),
+        )
+        const mesh = new Mesh(this.requireRectGeometry(), material)
         mesh.renderOrder = layer.definition.renderOrder
         mesh.layers.enable(BLOOM_LAYER)
         waveGroup.add(mesh)
+        layer.materials.push(material)
         layer.segments.push(mesh)
       }
     }
 
     this.updateWaveMeshes()
+  }
+
+  private createWaveSegmentMaterial(definition: WaveLayerDefinition, color: number): GlowMaterial {
+    return new MeshLambertMaterial({
+      color,
+      depthTest: false,
+      depthWrite: false,
+      emissive: color,
+      emissiveIntensity: definition.emissiveIntensity,
+      opacity: definition.opacity,
+      transparent: true,
+    })
+  }
+
+  private updateWaveLayerColors(state: AppState): void {
+    for (const layer of this.waveLayers) {
+      for (let index = 0; index < layer.materials.length; index += 1) {
+        const x0 = this.waveSamplePoints[index] ?? 0
+        const x1 = this.waveSamplePoints[index + 1] ?? x0
+        const midpointX = (x0 + x1) / 2
+        const color = this.resolveWaveSegmentColor(layer.definition, midpointX, state)
+        const material = layer.materials[index]
+
+        material.color.setHex(color)
+        material.emissive.setHex(color)
+        material.needsUpdate = true
+      }
+    }
   }
 
   private updateWaveMeshes(): void {
@@ -1393,6 +1486,7 @@ void main() {
       }
 
       emittedNoteIds.add(note.id)
+      this.triggerImpactReflection(note)
       const didEmitBurst = this.emitBurstForNote(indexedNote)
       particlesChanged = didEmitBurst || particlesChanged
       if (didEmitBurst) {
@@ -1507,6 +1601,28 @@ void main() {
     }
 
     return true
+  }
+
+  private triggerImpactReflection(note: Note): void {
+    const impactReflection = this.impactReflectionStates.get(note.pitch)
+    if (impactReflection == null) {
+      return
+    }
+
+    const intensity = clamp(note.velocity / 127, 0, 1)
+    impactReflection.startTimeSeconds = this.noteMaterialTimeSeconds
+    impactReflection.durationSeconds = lerp(
+      IMPACT_REFLECTION_DURATION_MIN_SECONDS,
+      IMPACT_REFLECTION_DURATION_MAX_SECONDS,
+      intensity,
+    )
+    impactReflection.peakStrength = lerp(
+      IMPACT_REFLECTION_PEAK_STRENGTH_MIN,
+      IMPACT_REFLECTION_PEAK_STRENGTH_MAX,
+      intensity,
+    )
+    impactReflection.currentStrength = impactReflection.peakStrength
+    this.applyImpactReflectionState(impactReflection)
   }
 
   private updateParticleSystem(currentTimeSeconds: number): void {
@@ -1676,6 +1792,101 @@ void main() {
 
     return mesh
   }
+
+  private createImpactReflectionMesh(
+    group: Group,
+    pitch: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
+    const uniforms: ImpactReflectionUniforms = {
+      reflectionColor: {
+        value: new Color(resolveCreateModeNoteColor(pitch, getAppState().createNoteColors)),
+      },
+      reflectionStrength: {
+        value: 0,
+      },
+    }
+    const material = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: `
+        uniform vec3 reflectionColor;
+        uniform float reflectionStrength;
+
+        varying vec2 vUv;
+
+        void main() {
+          float sideFade = smoothstep(0.0, 0.08, vUv.x) * (1.0 - smoothstep(0.92, 1.0, vUv.x));
+          float verticalFade = pow(clamp(vUv.y, 0.0, 1.0), 1.8);
+          float alpha = reflectionStrength * sideFade * verticalFade;
+
+          gl_FragColor = vec4(reflectionColor, alpha);
+        }
+      `,
+      transparent: true,
+      uniforms,
+      vertexShader: `
+        varying vec2 vUv;
+
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+    })
+    const mesh = new Mesh(this.requireRectGeometry(), material)
+    mesh.position.set(x + (width / 2), this.toSceneRectY(y, height), KEYBOARD_REFLECTION_Z)
+    mesh.scale.set(width, height, 1)
+    mesh.renderOrder = Math.round(KEYBOARD_REFLECTION_Z * 10)
+    group.add(mesh)
+
+    this.staticResources.push(material)
+    this.impactReflectionStates.set(pitch, {
+      currentStrength: 0,
+      durationSeconds: 0,
+      material,
+      mesh,
+      peakStrength: 0,
+      pitch,
+      startTimeSeconds: Number.NaN,
+      uniforms,
+    })
+  }
+
+  private clearImpactReflections(): void {
+    for (const impactReflection of this.impactReflectionStates.values()) {
+      impactReflection.currentStrength = 0
+      impactReflection.durationSeconds = 0
+      impactReflection.peakStrength = 0
+      impactReflection.startTimeSeconds = Number.NaN
+      this.applyImpactReflectionState(impactReflection)
+    }
+  }
+
+  private resolveWaveSegmentColor(
+    definition: WaveLayerDefinition,
+    x: number,
+    state: AppState,
+  ): number {
+    const clampedX = clamp(x, 0, Math.max(0, this.viewportWidth - 1))
+    const pitch = getKeyAtScreenX(clampedX, this.viewportWidth) ?? PIANO_MIN_PITCH
+    const wavePalette = createBoundaryWavePalette(
+      resolveCreateModeNoteColor(pitch, state.createNoteColors),
+    )
+
+    switch (definition.role) {
+      case 'outer':
+        return wavePalette.outerAuraColor
+      case 'mid':
+        return wavePalette.midGlowColor
+      case 'core':
+        return wavePalette.coreColor
+    }
+  }
+
   private createNoteMaterial(color: number): GlowMaterial {
     const notePalette = createNoteMaterialPalette(color)
     const material = new MeshLambertMaterial({
@@ -1975,6 +2186,50 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     return hasAnimatingHighlights
   }
 
+  private applyImpactReflections(currentTimeSeconds = this.noteMaterialTimeSeconds): boolean {
+    let hasAnimatingReflections = false
+
+    for (const impactReflection of this.impactReflectionStates.values()) {
+      impactReflection.currentStrength = this.getImpactReflectionStrength(impactReflection, currentTimeSeconds)
+      this.applyImpactReflectionState(impactReflection)
+      if (impactReflection.currentStrength > 0.001) {
+        hasAnimatingReflections = true
+      }
+    }
+
+    return hasAnimatingReflections
+  }
+
+  private applyImpactReflectionState(impactReflection: ImpactReflectionState): void {
+    impactReflection.uniforms.reflectionStrength.value = clamp(
+      impactReflection.currentStrength * this.keyboardOpacity,
+      0,
+      1,
+    )
+    impactReflection.material.needsUpdate = true
+  }
+
+  private getImpactReflectionStrength(
+    impactReflection: ImpactReflectionState,
+    currentTimeSeconds: number,
+  ): number {
+    if (
+      !Number.isFinite(currentTimeSeconds) ||
+      !Number.isFinite(impactReflection.startTimeSeconds) ||
+      impactReflection.durationSeconds <= 0
+    ) {
+      return 0
+    }
+
+    const elapsedSeconds = Math.max(0, currentTimeSeconds - impactReflection.startTimeSeconds)
+    if (elapsedSeconds >= impactReflection.durationSeconds) {
+      return 0
+    }
+
+    const progress = clamp(elapsedSeconds / impactReflection.durationSeconds, 0, 1)
+    return impactReflection.peakStrength * (1 - easeOutQuad(progress))
+  }
+
   private getKeyHighlightStrength(state: KeyHighlightState, currentTimeSeconds: number): number {
     if (!Number.isFinite(currentTimeSeconds) || state.transitionDurationSeconds <= 0) {
       return state.targetStrength
@@ -2004,6 +2259,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     this.staticResources = []
     this.keyboardMaterialStates = []
     this.keyHighlightStates.clear()
+    this.impactReflectionStates.clear()
   }
 
   private disposeWaveMeshes(): void {
@@ -2012,6 +2268,10 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     }
 
     for (const layer of this.waveLayers) {
+      for (const material of layer.materials) {
+        material.dispose()
+      }
+      layer.materials = []
       layer.segments = []
     }
 
@@ -2375,6 +2635,16 @@ function colorToNormalizedRgb(color: number): [number, number, number] {
     ((color >> 8) & 0xff) / 0xff,
     (color & 0xff) / 0xff,
   ]
+}
+
+function createBoundaryWavePalette(color: number): BoundaryWavePalette {
+  const notePalette = createNoteMaterialPalette(color)
+
+  return {
+    coreColor: notePalette.haloEmissiveColor,
+    midGlowColor: notePalette.haloDiffuseColor,
+    outerAuraColor: notePalette.coreDiffuseColor,
+  }
 }
 
 export function createNoteMaterialPalette(color: number): NoteMaterialPalette {
