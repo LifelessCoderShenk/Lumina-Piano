@@ -6,6 +6,7 @@ export type LearnHand = 'left' | 'right' | 'both'
 export type MidiConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'failed'
 export type AppMode = 'select' | 'create' | 'createCamera' | 'createRecord' | 'learn' | 'learnSong' | 'learnSession' | 'learnEnd'
 export type LearnNoteColorMode = 'white' | 'perHand' | 'custom'
+export type CreateNoteColorMode = 'single' | 'pitchClass'
 export type PieceType = 'midi' | 'recording'
 export type CreateTab = 'pieces' | 'particles' | 'color' | 'camera'
 export type AlignStep = 'idle' | 'waiting-low-a' | 'waiting-high-c' | 'complete'
@@ -93,6 +94,12 @@ export interface LearnVisuals {
   fingerNumbersEnabled: boolean
 }
 
+export interface CreateNoteColors {
+  mode: CreateNoteColorMode
+  singleColor: string
+  pitchClassColors: Record<number, string>
+}
+
 export interface ProjectSlice {
   projectData: ProjectData | null
   precomputedTempoMap: PrecomputedTempoMap | null
@@ -135,6 +142,10 @@ export interface PiecesSlice {
 
 export interface CreateVisualizerSettingsSlice {
   visualizerSettings: VisualizerSettings
+}
+
+export interface CreateNoteColorsSlice {
+  createNoteColors: CreateNoteColors
 }
 
 export interface CameraOverlaySlice {
@@ -195,6 +206,7 @@ export type AppState =
   & TrackSlice
   & PiecesSlice
   & CreateVisualizerSettingsSlice
+  & CreateNoteColorsSlice
   & CameraOverlaySlice
   & AlignmentSlice
   & RecordModeSlice
@@ -227,6 +239,9 @@ export interface AppActions {
   clearLoadPieceError(): void
   clearLoadedPiece(): void
   setVisualizerSettings(patch: Partial<VisualizerSettings>): void
+  setCreateNoteColorMode(mode: CreateNoteColorMode): void
+  setCreateSingleNoteColor(color: string): void
+  setCreatePitchClassColor(pitchClass: number, color: string): void
   setCameraOverlay(patch: Partial<CameraOverlaySettings>): void
   setAlignStep(step: AlignStep): void
   setLowAPoint(point: AlignmentPoint | null): void

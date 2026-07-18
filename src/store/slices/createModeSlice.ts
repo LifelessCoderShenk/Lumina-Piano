@@ -3,6 +3,7 @@ import type { StateCreator } from 'zustand'
 import {
   alignmentInitial,
   cameraOverlayInitial,
+  createCreateNoteColorDefaults,
   recordModeConfigInitial,
   visualizerSettingsInitial,
 } from '../defaults'
@@ -10,6 +11,7 @@ import type {
   AppActions,
   AppStore,
   CameraOverlaySettings,
+  CreateNoteColorsSlice,
   CreateVisualizerSettingsSlice,
   CameraOverlaySlice,
   AlignmentSlice,
@@ -20,18 +22,25 @@ import {
   normalizeVisualizerAspectRatio,
   validateAlignmentPoint,
   validateAlignStep,
+  validateCreateNoteColorMode,
   validateFiniteStateNumber,
+  validateHexColor,
+  validatePitchClass,
   validateRecordModeConfigPatch,
 } from '../validation'
 
 type CreateModeStoreSlice =
   & CreateVisualizerSettingsSlice
+  & CreateNoteColorsSlice
   & CameraOverlaySlice
   & AlignmentSlice
   & RecordModeSlice
   & Pick<
     AppActions,
     | 'enterRecordMode'
+    | 'setCreateNoteColorMode'
+    | 'setCreatePitchClassColor'
+    | 'setCreateSingleNoteColor'
     | 'setAlignStep'
     | 'setCameraOverlay'
     | 'setHighCPoint'
@@ -47,6 +56,7 @@ export const createCreateModeSlice: StateCreator<
   CreateModeStoreSlice
 > = (set) => ({
   visualizerSettings: { ...visualizerSettingsInitial },
+  createNoteColors: createCreateNoteColorDefaults(),
   cameraOverlay: { ...cameraOverlayInitial },
   alignStep: alignmentInitial.alignStep,
   lowAPoint: alignmentInitial.lowAPoint,
@@ -63,6 +73,46 @@ export const createCreateModeSlice: StateCreator<
         ...state.visualizerSettings,
         ...patch,
         ...(normalizedAspectRatio == null ? {} : { aspectRatio: normalizedAspectRatio }),
+      }
+    })
+  },
+
+  setCreateNoteColorMode: (mode) => {
+    validateCreateNoteColorMode(mode)
+
+    set((state) => {
+      if (state.createNoteColors.mode === mode) {
+        return
+      }
+
+      state.createNoteColors.mode = mode
+    })
+  },
+
+  setCreateSingleNoteColor: (color) => {
+    validateHexColor(color)
+
+    set((state) => {
+      if (state.createNoteColors.singleColor === color) {
+        return
+      }
+
+      state.createNoteColors.singleColor = color
+    })
+  },
+
+  setCreatePitchClassColor: (pitchClass, color) => {
+    validatePitchClass(pitchClass)
+    validateHexColor(color)
+
+    set((state) => {
+      if (state.createNoteColors.pitchClassColors[pitchClass] === color) {
+        return
+      }
+
+      state.createNoteColors.pitchClassColors = {
+        ...state.createNoteColors.pitchClassColors,
+        [pitchClass]: color,
       }
     })
   },

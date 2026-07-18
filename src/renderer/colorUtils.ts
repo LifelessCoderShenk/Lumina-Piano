@@ -1,4 +1,5 @@
 import type { Note } from '../midi/types'
+import type { CreateNoteColors } from '../store/types'
 import type { AppState } from '../store/store'
 import { isBlackKey } from './pianoMath'
 
@@ -124,9 +125,43 @@ export function interpolateColor(startColor: number, endColor: number, progress:
   return (red << 16) | (green << 8) | blue
 }
 
-export function resolveCreateModeNoteColor(pitch: number): number {
-  void pitch
-  return CREATE_MODE_NOTE_COLOR
+export function resolveCreateModeNoteColor(
+  pitch: number,
+  createNoteColors: CreateNoteColors | null | undefined = null,
+): number {
+  return resolveCreateModePitchColor(pitch, createNoteColors)
+}
+
+export function resolveCreateModePitchColor(
+  pitch: number,
+  createNoteColors: CreateNoteColors | null | undefined,
+): number {
+  if (createNoteColors == null) {
+    return CREATE_MODE_NOTE_COLOR
+  }
+
+  if (createNoteColors.mode === 'single') {
+    return hexToPixi(createNoteColors.singleColor)
+  }
+
+  const pitchClass = normalizePitchClass(pitch)
+  return resolveCreateModePitchClassColor(pitchClass, createNoteColors)
+}
+
+export function resolveCreateModePitchClassColor(
+  pitchClass: number,
+  createNoteColors: CreateNoteColors | null | undefined,
+): number {
+  if (createNoteColors == null) {
+    return CREATE_MODE_NOTE_COLOR
+  }
+
+  const normalizedPitchClass = normalizePitchClass(pitchClass)
+  const resolvedColor =
+    createNoteColors.pitchClassColors[normalizedPitchClass] ??
+    createNoteColors.singleColor
+
+  return hexToPixi(resolvedColor)
 }
 
 function resolveSplitGradientBottomColor(pitch: number, state: AppState): string {
@@ -146,6 +181,10 @@ function clamp01(value: number): number {
   }
 
   return Math.min(1, Math.max(0, value))
+}
+
+function normalizePitchClass(pitch: number): number {
+  return ((Math.round(pitch) % 12) + 12) % 12
 }
 
 function hexNibble(code: number): number {

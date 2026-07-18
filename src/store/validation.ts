@@ -6,6 +6,7 @@ import type {
   AlignmentPoint,
   AppMode,
   AlignStep,
+  CreateNoteColorMode,
   CreateTab,
   LearnNoteColorMode,
   LearnVisuals,
@@ -229,6 +230,14 @@ export function validateLearnNoteColorMode(mode: LearnNoteColorMode): void {
   }
 
   throw new StoreError('Learn note color mode is invalid.', 'INVALID_STATE', mode)
+}
+
+export function validateCreateNoteColorMode(mode: CreateNoteColorMode): void {
+  if (mode === 'single' || mode === 'pitchClass') {
+    return
+  }
+
+  throw new StoreError('Create note color mode is invalid.', 'INVALID_STATE', mode)
 }
 
 export function validateLearnVisuals(visuals: LearnVisuals): void {

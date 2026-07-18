@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 
+import { CreateColorPanel } from '../CreateColorPanel/CreateColorPanel'
 import { useAppStore } from '../../store/store'
 import { CameraControlsPanel } from '../CameraControlsPanel/CameraControlsPanel'
 import { PieceFilesColumn } from '../PieceFilesColumn/PieceFilesColumn'
@@ -52,9 +53,7 @@ export function EditPanel() {
             Particles panel coming soon
           </div>
         ) : (
-          <div className={styles.placeholderPanel} data-testid="color-panel">
-            Color Picker panel coming soon
-          </div>
+          <CreateColorPanel />
         )}
       </div>
     </aside>

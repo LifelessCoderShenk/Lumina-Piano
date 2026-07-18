@@ -1,6 +1,7 @@
 import type { Track } from '../midi/types'
 
 import type {
+  CreateNoteColors,
   AlignStep,
   AlignmentPoint,
   AppState,
@@ -32,6 +33,8 @@ export const DEFAULT_TRACK_COLORS = [
   '#4f8ef7',
   '#f7674f',
 ] as const
+
+export const DEFAULT_CREATE_MODE_SINGLE_COLOR = '#2e65a2'
 
 export const DEFAULT_PITCH_CLASS_COLORS: Record<number, string> = {
   0: '#f74f4f',
@@ -143,6 +146,14 @@ export function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   }
 }
 
+export function createCreateNoteColorDefaults(): CreateNoteColors {
+  return {
+    mode: 'single',
+    pitchClassColors: { ...DEFAULT_PITCH_CLASS_COLORS },
+    singleColor: DEFAULT_CREATE_MODE_SINGLE_COLOR,
+  }
+}
+
 export function createPlaybackDefaults(): PlaybackSlice {
   return {
     currentTick: 0,
@@ -204,6 +215,7 @@ export function createInitialAppState(): AppState {
     alignStep: alignmentInitial.alignStep,
     activePanel: null,
     currentTick: 0,
+    createNoteColors: createCreateNoteColorDefaults(),
     errorMessage: null,
     exportEstimatedSecondsRemaining: 0,
     exportFramesRendered: 0,

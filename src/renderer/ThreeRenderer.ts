@@ -26,9 +26,9 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import type { Note } from '../midi/types'
 import { type PlaybackEventMap, playbackEngine } from '../playback/PlaybackEngine'
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
-import { getAppState } from '../store/store'
+import { getAppState, subscribeToStore } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
-import { brightenColor, interpolateColor, resolveCreateModeNoteColor } from './colorUtils'
+import { resolveCreateModeNoteColor } from './colorUtils'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
   BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
@@ -120,6 +120,17 @@ const NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY = 0.1
 const NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY = 0.18
 const NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY = 0.038
 const NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY = 0.06
+const NOTE_CORE_TARGET_TOTAL_LUMINANCE = 1.08
+const NOTE_HALO_TARGET_TOTAL_LUMINANCE = 1.58
+const NOTE_CORE_EMISSIVE_STRENGTH_MIN = 0.2
+const NOTE_CORE_EMISSIVE_STRENGTH_MAX = 3.6
+const NOTE_HALO_EMISSIVE_STRENGTH_MIN = 0.45
+const NOTE_HALO_EMISSIVE_STRENGTH_MAX = 3.6
+const NOTE_ACHROMATIC_SATURATION_THRESHOLD = 0.05
+const NOTE_ACHROMATIC_FALLBACK_HUE = 0.61
+const NOTE_ACHROMATIC_FALLBACK_SATURATION = 0.72
+const NOTE_SWIRL_BRIGHT_MIN_LUMINANCE_DELTA = 0.08
+const NOTE_SWIRL_RECESS_MIN_LUMINANCE_DELTA = 0.2
 const WAVE_OUTER_AURA_EMISSIVE_INTENSITY = 0
 const WAVE_MID_GLOW_EMISSIVE_INTENSITY = 1.6
 const WAVE_CORE_EMISSIVE_INTENSITY = 1.2
@@ -191,6 +202,12 @@ interface RoundedNoteUniforms {
   noteHaloEmissiveColor: {
     value: Color
   }
+  noteSwirlBrightColor: {
+    value: Color
+  }
+  noteSwirlRecessColor: {
+    value: Color
+  }
   noteCoreEmissiveStrength: {
     value: number
   }
@@ -229,11 +246,13 @@ interface WaveLayerState {
   segments: Array<Mesh<PlaneGeometry, GlowMaterial>>
 }
 
-interface NoteMaterialPalette {
+export interface NoteMaterialPalette {
   coreDiffuseColor: number
   haloDiffuseColor: number
   coreEmissiveColor: number
   haloEmissiveColor: number
+  swirlBrightColor: number
+  swirlRecessColor: number
   coreEmissiveStrength: number
   haloEmissiveStrength: number
 }
@@ -269,6 +288,7 @@ interface ParticleSystemState {
   geometry: BufferGeometry
   lifetimes: Float32Array
   material: ParticleMaterial
+  pitchClasses: Int8Array
   points: Points<BufferGeometry, ParticleMaterial>
   positionAttribute: BufferAttribute
   positions: Float32Array
@@ -327,10 +347,18 @@ export class ThreeRenderer implements VisualizerRenderer {
   private lastBurstDetectionTick = Number.NaN
   private hasPendingSeekSuppression = false
   private particleBurstSerial = 0
+  private storeUnsubscribe: (() => void) | null = null
+  private hasPendingCreateNoteColorUpdate = false
 
   private readonly handlePlaybackSeek: PlaybackEventMap['onSeek'] = (currentTick) => {
     this.hasPendingSeekSuppression = true
     this.resetBurstDetectionState(currentTick)
+  }
+
+  private readonly handleStoreChange = (nextState: AppState, previousState: AppState): void => {
+    if (nextState.createNoteColors !== previousState.createNoteColors) {
+      this.hasPendingCreateNoteColorUpdate = true
+    }
   }
 
   async init(canvas: HTMLCanvasElement): Promise<void> {
@@ -396,12 +424,15 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.initPostprocessing()
     playbackEngine.on('onSeek', this.handlePlaybackSeek)
+    this.storeUnsubscribe = subscribeToStore(this.handleStoreChange)
     this.renderer.setAnimationLoop(this.handleAnimationFrame)
     this.renderFrame(this.currentTick)
   }
 
   async destroy(): Promise<void> {
     playbackEngine.off('onSeek', this.handlePlaybackSeek)
+    this.storeUnsubscribe?.()
+    this.storeUnsubscribe = null
     this.clearDynamicNoteObjects()
     this.clearParticleSystem(true)
     this.disposeStaticScene()
@@ -490,6 +521,8 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.lastBurstDetectionTick = Number.NaN
     this.hasPendingSeekSuppression = false
     this.particleBurstSerial = 0
+    this.storeUnsubscribe = null
+    this.hasPendingCreateNoteColorUpdate = false
     this.noteMeshes = []
     this.waveLayers = []
     this.waveSamplePoints = []
@@ -531,6 +564,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       this.currentTick = tick
     }
 
+    this.consumePendingCreateNoteColorUpdate(getAppState())
     this.notesDirty = true
     this.renderDynamicState(this.currentTick)
   }
@@ -569,12 +603,47 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.renderScene()
   }
 
+  private consumePendingCreateNoteColorUpdate(state: AppState): boolean {
+    if (!this.hasPendingCreateNoteColorUpdate || this.renderer == null) {
+      return false
+    }
+
+    this.hasPendingCreateNoteColorUpdate = false
+    this.updateKeyHighlightColors(state)
+    this.updateVisibleNoteMaterialColors(state)
+    this.updateActiveParticleColors(state)
+    return true
+  }
+
+  private updateKeyHighlightColors(state: AppState): void {
+    for (const [pitch, keyHighlight] of this.keyHighlightStates) {
+      keyHighlight.material.color.setHex(resolveCreateModeNoteColor(pitch, state.createNoteColors))
+      keyHighlight.material.needsUpdate = true
+    }
+  }
+
+  private updateVisibleNoteMaterialColors(state: AppState): void {
+    for (const noteMesh of this.noteMeshes) {
+      if (!noteMesh.visible) {
+        continue
+      }
+
+      const notePitch = noteMesh.userData.notePitch as number | undefined
+      if (notePitch == null) {
+        continue
+      }
+
+      this.assignNoteMaterial(noteMesh, resolveCreateModeNoteColor(notePitch, state.createNoteColors))
+    }
+  }
+
   private readonly handleAnimationFrame = (frameTimeMs?: number): void => {
     if (this.renderer == null || this.scene == null || this.camera == null) {
       return
     }
 
     const state = getAppState()
+    this.consumePendingCreateNoteColorUpdate(state)
     if (Number.isFinite(state.currentTick) && state.currentTick !== this.currentTick) {
       this.currentTick = state.currentTick
       this.notesDirty = true
@@ -745,7 +814,7 @@ export class ThreeRenderer implements VisualizerRenderer {
         keyboardY,
         whiteKeyWidth,
         whiteKeyHeight,
-        resolveCreateModeNoteColor(pitch),
+        resolveCreateModeNoteColor(pitch, getAppState().createNoteColors),
         0,
         WHITE_KEY_Z,
       )
@@ -809,7 +878,7 @@ export class ThreeRenderer implements VisualizerRenderer {
         keyboardY,
         blackKeyWidth,
         blackFaceHeight,
-        resolveCreateModeNoteColor(pitch),
+        resolveCreateModeNoteColor(pitch, getAppState().createNoteColors),
         0,
         BLACK_KEY_Z,
       )
@@ -929,9 +998,10 @@ export class ThreeRenderer implements VisualizerRenderer {
       x: rect.x + inset,
       y: rect.y + verticalInset,
     }
-    const noteColor = resolveCreateModeNoteColor(indexedNote.note.pitch)
+    const noteColor = resolveCreateModeNoteColor(indexedNote.note.pitch, state.createNoteColors)
     const noteMesh = this.getOrCreateNoteMesh(group, noteMeshIndex)
 
+    noteMesh.userData.notePitch = indexedNote.note.pitch
     this.assignNoteMaterial(noteMesh, noteColor)
     const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
     if (roundedNoteUniforms != null) {
@@ -1088,6 +1158,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     const particleGroup = this.requireParticleGroup()
     const positions = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
     const velocities = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
+    const pitchClasses = new Int8Array(PARTICLE_POOL_CAPACITY)
     const lifetimes = new Float32Array(PARTICLE_POOL_CAPACITY)
     const ages = new Float32Array(PARTICLE_POOL_CAPACITY)
     const baseSizes = new Float32Array(PARTICLE_POOL_CAPACITY)
@@ -1195,6 +1266,7 @@ void main() {
       geometry,
       lifetimes,
       material,
+      pitchClasses,
       points,
       positionAttribute,
       positions,
@@ -1218,6 +1290,27 @@ void main() {
     if (resetUpdateClock) {
       this.lastParticleUpdateTimeSeconds = Number.NaN
     }
+  }
+
+  private updateActiveParticleColors(state: AppState): void {
+    const particleSystem = this.particleSystem
+    if (particleSystem == null || particleSystem.activeCount === 0) {
+      return
+    }
+
+    for (let particleIndex = 0; particleIndex < particleSystem.activeCount; particleIndex += 1) {
+      const color = resolveCreateModeNoteColor(
+        particleSystem.pitchClasses[particleIndex],
+        state.createNoteColors,
+      )
+      const [red, green, blue] = colorToNormalizedRgb(color)
+      const colorOffset = particleIndex * 3
+      particleSystem.colors[colorOffset] = red
+      particleSystem.colors[colorOffset + 1] = green
+      particleSystem.colors[colorOffset + 2] = blue
+    }
+
+    particleSystem.colorAttribute.needsUpdate = true
   }
 
   private detectNoteBursts(currentTick: number, state: AppState): void {
@@ -1334,7 +1427,10 @@ void main() {
     const burstX = this.getKeyX(indexedNote.note.pitch)
     const burstTopDownY = this.getBoundaryTopDownY(burstX)
     const burstSceneY = this.toScenePointY(burstTopDownY)
-    const [red, green, blue] = colorToNormalizedRgb(resolveCreateModeNoteColor(indexedNote.note.pitch))
+    const pitchClass = ((indexedNote.note.pitch % 12) + 12) % 12
+    const [red, green, blue] = colorToNormalizedRgb(
+      resolveCreateModeNoteColor(indexedNote.note.pitch, getAppState().createNoteColors),
+    )
     const burstSeed = createDeterministicSeed(indexedNote.note.id, this.particleBurstSerial)
     const burstWindBiasX = randomBetweenFromSeed(
       -PARTICLE_BURST_WIND_BIAS_X,
@@ -1373,6 +1469,7 @@ void main() {
       particleSystem.positions[positionOffset] = burstX
       particleSystem.positions[positionOffset + 1] = burstSceneY
       particleSystem.positions[positionOffset + 2] = PARTICLE_Z
+      particleSystem.pitchClasses[slot] = pitchClass
       particleSystem.velocities[positionOffset] = velocityX
       particleSystem.velocities[positionOffset + 1] = velocityY
       particleSystem.velocities[positionOffset + 2] = 0
@@ -1582,11 +1679,11 @@ void main() {
   private createNoteMaterial(color: number): GlowMaterial {
     const notePalette = createNoteMaterialPalette(color)
     const material = new MeshLambertMaterial({
-      color,
+      color: notePalette.coreDiffuseColor,
       depthTest: false,
       depthWrite: false,
-      emissive: color,
-      emissiveIntensity: NOTE_BLOOM_EMISSIVE_INTENSITY,
+      emissive: notePalette.haloEmissiveColor,
+      emissiveIntensity: notePalette.haloEmissiveStrength,
       opacity: 1,
       transparent: true,
     })
@@ -1597,6 +1694,8 @@ void main() {
       noteHaloDiffuseColor: { value: new Color(notePalette.haloDiffuseColor) },
       noteHaloEmissiveColor: { value: new Color(notePalette.haloEmissiveColor) },
       noteHaloEmissiveStrength: { value: notePalette.haloEmissiveStrength },
+      noteSwirlBrightColor: { value: new Color(notePalette.swirlBrightColor) },
+      noteSwirlRecessColor: { value: new Color(notePalette.swirlRecessColor) },
       noteMaterialTime: this.sharedNoteMaterialTimeUniform,
       noteTravelPhaseOffset: { value: 0 },
       roundedRectRadius: { value: getPillNoteCornerRadius(1, 1) },
@@ -1616,6 +1715,8 @@ void main() {
       shader.uniforms.noteHaloDiffuseColor = roundedNoteUniforms.noteHaloDiffuseColor
       shader.uniforms.noteHaloEmissiveColor = roundedNoteUniforms.noteHaloEmissiveColor
       shader.uniforms.noteHaloEmissiveStrength = roundedNoteUniforms.noteHaloEmissiveStrength
+      shader.uniforms.noteSwirlBrightColor = roundedNoteUniforms.noteSwirlBrightColor
+      shader.uniforms.noteSwirlRecessColor = roundedNoteUniforms.noteSwirlRecessColor
       shader.uniforms.noteMaterialTime = roundedNoteUniforms.noteMaterialTime
       shader.uniforms.noteTravelPhaseOffset = roundedNoteUniforms.noteTravelPhaseOffset
       shader.uniforms.roundedRectRadius = roundedNoteUniforms.roundedRectRadius
@@ -1641,6 +1742,8 @@ uniform vec3 noteCoreDiffuseColor;
 uniform vec3 noteHaloDiffuseColor;
 uniform vec3 noteCoreEmissiveColor;
 uniform vec3 noteHaloEmissiveColor;
+uniform vec3 noteSwirlBrightColor;
+uniform vec3 noteSwirlRecessColor;
 uniform float noteCoreEmissiveStrength;
 uniform float noteHaloEmissiveStrength;
 uniform float noteMaterialTime;
@@ -1732,8 +1835,6 @@ float noteAnimatedHighlight = noteHighlightMask * noteShimmer;
 
 vec3 noteFaceColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix);
 noteFaceColor = mix(noteFaceColor, noteHaloDiffuseColor, noteAnimatedHighlight * 0.08);
-vec3 noteSwirlBrightColor = mix(noteHaloDiffuseColor, noteHaloEmissiveColor, 0.62);
-vec3 noteSwirlRecessColor = mix(noteFaceColor, noteCoreDiffuseColor, 0.68);
 noteFaceColor = mix(noteFaceColor, noteSwirlBrightColor, noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY.toFixed(3)});
 noteFaceColor = mix(noteFaceColor, noteSwirlRecessColor, noteSwirlRecessField * ${NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY.toFixed(3)});
 diffuseColor.rgb = noteFaceColor;
@@ -1760,7 +1861,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
           'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v6'
+    material.customProgramCacheKey = () => 'rounded-note-pill-v7'
     return material
   }
 
@@ -1770,7 +1871,9 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       return existing
     }
 
-    const material = this.createNoteMaterial(resolveCreateModeNoteColor(PIANO_MIN_PITCH))
+    const material = this.createNoteMaterial(
+      resolveCreateModeNoteColor(PIANO_MIN_PITCH, getAppState().createNoteColors),
+    )
     const mesh = new Mesh(this.requireRectGeometry(), material)
     mesh.visible = false
     mesh.layers.enable(BLOOM_LAYER)
@@ -1796,8 +1899,30 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       return
     }
 
-    noteMesh.material.dispose()
-    noteMesh.material = this.createNoteMaterial(color)
+    this.applyNoteMaterialPalette(noteMesh.material, color)
+  }
+
+  private applyNoteMaterialPalette(material: GlowMaterial, color: number): void {
+    const notePalette = createNoteMaterialPalette(color)
+    const roundedNoteUniforms = material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
+
+    material.userData.noteMaterialColor = color
+    material.color.setHex(notePalette.coreDiffuseColor)
+    material.emissive.setHex(notePalette.haloEmissiveColor)
+    material.emissiveIntensity = notePalette.haloEmissiveStrength
+
+    if (roundedNoteUniforms == null) {
+      return
+    }
+
+    roundedNoteUniforms.noteCoreDiffuseColor.value.setHex(notePalette.coreDiffuseColor)
+    roundedNoteUniforms.noteCoreEmissiveColor.value.setHex(notePalette.coreEmissiveColor)
+    roundedNoteUniforms.noteCoreEmissiveStrength.value = notePalette.coreEmissiveStrength
+    roundedNoteUniforms.noteHaloDiffuseColor.value.setHex(notePalette.haloDiffuseColor)
+    roundedNoteUniforms.noteHaloEmissiveColor.value.setHex(notePalette.haloEmissiveColor)
+    roundedNoteUniforms.noteHaloEmissiveStrength.value = notePalette.haloEmissiveStrength
+    roundedNoteUniforms.noteSwirlBrightColor.value.setHex(notePalette.swirlBrightColor)
+    roundedNoteUniforms.noteSwirlRecessColor.value.setHex(notePalette.swirlRecessColor)
   }
 
   private syncNoteMaterialAnimationTime(frameTimeMs?: number): void {
@@ -1842,7 +1967,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
         state.fromStrength = state.targetStrength
       }
 
-      state.material.color.setHex(resolveCreateModeNoteColor(pitch))
+      state.material.color.setHex(resolveCreateModeNoteColor(pitch, getAppState().createNoteColors))
       state.material.opacity = clamp(state.baseOpacity * state.currentStrength * this.keyboardOpacity, 0, 1)
       state.material.needsUpdate = true
     }
@@ -2252,47 +2377,277 @@ function colorToNormalizedRgb(color: number): [number, number, number] {
   ]
 }
 
-function createNoteMaterialPalette(color: number): NoteMaterialPalette {
-  const saturatedBase = adjustColorSaturation(color, 1.12)
-  const softenedBase = adjustColorSaturation(color, 0.72)
-  const coreDiffuseColor = brightenColor(saturatedBase, 0.92)
-  const haloDiffuseColor = interpolateColor(
-    brightenColor(softenedBase, 1.12),
-    brightenColor(saturatedBase, 1.26),
-    0.45,
-  )
-  const coreEmissiveColor = interpolateColor(
-    coreDiffuseColor,
-    brightenColor(saturatedBase, 1.14),
-    0.34,
-  )
-  const haloEmissiveColor = interpolateColor(
-    haloDiffuseColor,
-    brightenColor(saturatedBase, 1.32),
-    0.38,
-  )
+export function createNoteMaterialPalette(color: number): NoteMaterialPalette {
+  const baseHsl = colorToHsl(color)
+  const isAchromatic = baseHsl.saturation < NOTE_ACHROMATIC_SATURATION_THRESHOLD
+  const paletteHue = isAchromatic ? NOTE_ACHROMATIC_FALLBACK_HUE : baseHsl.hue
+  const baseSaturation = isAchromatic
+    ? NOTE_ACHROMATIC_FALLBACK_SATURATION
+    : clamp(baseHsl.saturation, 0.48, 0.9)
+  const baseLightness = clamp(baseHsl.lightness, 0.34, 0.5)
+  const highLuminanceBias = clamp((getColorRelativeLuminance(color) - 0.55) / 0.3, 0, 1)
+  const haloLightnessDelta = lerp(0.12, 0.1, highLuminanceBias)
+  const haloDiffuseSaturation = clamp(baseSaturation - 0.08, 0.24, 0.86)
+  const swirlBrightSaturation = clamp(baseSaturation - 0.04, 0.24, 0.84)
+  const swirlRecessSaturation = clamp(baseSaturation + 0.04, 0.24, 0.96)
+  const coreDiffuseColor = hslToColor({
+    hue: paletteHue,
+    lightness: baseLightness,
+    saturation: clamp(baseSaturation + 0.08, 0.24, 0.96),
+  })
+  let haloDiffuseLightness = clamp(baseLightness + haloLightnessDelta, 0.46, 0.62)
+  let swirlBrightLightness = clamp(baseLightness + 0.22, 0.58, 0.72)
+  let swirlRecessLightness = clamp(baseLightness - 0.13, 0.2, 0.4)
+  let swirlBrightColor = hslToColor({
+    hue: paletteHue,
+    lightness: swirlBrightLightness,
+    saturation: swirlBrightSaturation,
+  })
+  haloDiffuseLightness = resolveLightnessForLuminance({
+    direction: -1,
+    hue: paletteHue,
+    max: haloDiffuseLightness,
+    min: 0.44,
+    saturation: haloDiffuseSaturation,
+    start: haloDiffuseLightness,
+    targetLuminance: getColorRelativeLuminance(swirlBrightColor) - NOTE_SWIRL_BRIGHT_MIN_LUMINANCE_DELTA,
+  })
+  let haloDiffuseColor = hslToColor({
+    hue: paletteHue,
+    lightness: haloDiffuseLightness,
+    saturation: haloDiffuseSaturation,
+  })
+  swirlBrightLightness = resolveLightnessForLuminance({
+    direction: 1,
+    hue: paletteHue,
+    max: 0.72,
+    min: swirlBrightLightness,
+    saturation: swirlBrightSaturation,
+    start: swirlBrightLightness,
+    targetLuminance: getColorRelativeLuminance(haloDiffuseColor) + NOTE_SWIRL_BRIGHT_MIN_LUMINANCE_DELTA,
+  })
+  swirlBrightColor = hslToColor({
+    hue: paletteHue,
+    lightness: swirlBrightLightness,
+    saturation: swirlBrightSaturation,
+  })
+  haloDiffuseLightness = resolveLightnessForLuminance({
+    direction: -1,
+    hue: paletteHue,
+    max: haloDiffuseLightness,
+    min: 0.44,
+    saturation: haloDiffuseSaturation,
+    start: haloDiffuseLightness,
+    targetLuminance: getColorRelativeLuminance(swirlBrightColor) - NOTE_SWIRL_BRIGHT_MIN_LUMINANCE_DELTA,
+  })
+  haloDiffuseColor = hslToColor({
+    hue: paletteHue,
+    lightness: haloDiffuseLightness,
+    saturation: haloDiffuseSaturation,
+  })
+  swirlRecessLightness = resolveLightnessForLuminance({
+    direction: -1,
+    hue: paletteHue,
+    max: swirlRecessLightness,
+    min: 0.16,
+    saturation: swirlRecessSaturation,
+    start: swirlRecessLightness,
+    targetLuminance: getColorRelativeLuminance(haloDiffuseColor) - NOTE_SWIRL_RECESS_MIN_LUMINANCE_DELTA,
+  })
+  const swirlRecessColor = hslToColor({
+    hue: paletteHue,
+    lightness: swirlRecessLightness,
+    saturation: swirlRecessSaturation,
+  })
+  const coreEmissiveColor = hslToColor({
+    hue: paletteHue,
+    lightness: clamp(baseLightness + 0.07, 0.42, 0.58),
+    saturation: clamp(baseSaturation + 0.02, 0.3, 0.9),
+  })
+  const haloEmissiveColor = hslToColor({
+    hue: paletteHue,
+    lightness: clamp(baseLightness + 0.17, 0.52, 0.68),
+    saturation: clamp(baseSaturation - 0.02, 0.3, 0.86),
+  })
 
   return {
     coreDiffuseColor,
     coreEmissiveColor,
-    coreEmissiveStrength: 1.35,
+    coreEmissiveStrength: resolveEmissiveStrength(
+      coreDiffuseColor,
+      coreEmissiveColor,
+      NOTE_CORE_TARGET_TOTAL_LUMINANCE,
+      NOTE_CORE_EMISSIVE_STRENGTH_MIN,
+      NOTE_CORE_EMISSIVE_STRENGTH_MAX,
+    ),
     haloDiffuseColor,
     haloEmissiveColor,
-    haloEmissiveStrength: 1.45,
+    haloEmissiveStrength: resolveEmissiveStrength(
+      haloDiffuseColor,
+      haloEmissiveColor,
+      NOTE_HALO_TARGET_TOTAL_LUMINANCE,
+      NOTE_HALO_EMISSIVE_STRENGTH_MIN,
+      NOTE_HALO_EMISSIVE_STRENGTH_MAX,
+    ),
+    swirlBrightColor,
+    swirlRecessColor,
   }
 }
 
-function adjustColorSaturation(color: number, saturation: number): number {
+interface HslColor {
+  hue: number
+  lightness: number
+  saturation: number
+}
+
+function colorToHsl(color: number): HslColor {
   const red = (color >> 16) & 0xff
   const green = (color >> 8) & 0xff
   const blue = color & 0xff
-  const luminance = (red * 0.299) + (green * 0.587) + (blue * 0.114)
+  const normalizedRed = red / 0xff
+  const normalizedGreen = green / 0xff
+  const normalizedBlue = blue / 0xff
+  const maxChannel = Math.max(normalizedRed, normalizedGreen, normalizedBlue)
+  const minChannel = Math.min(normalizedRed, normalizedGreen, normalizedBlue)
+  const lightness = (maxChannel + minChannel) / 2
+
+  if (maxChannel === minChannel) {
+    return {
+      hue: 0,
+      lightness,
+      saturation: 0,
+    }
+  }
+
+  const chroma = maxChannel - minChannel
+  const saturation = lightness > 0.5
+    ? chroma / (2 - maxChannel - minChannel)
+    : chroma / (maxChannel + minChannel)
+  let hue = 0
+
+  if (maxChannel === normalizedRed) {
+    hue = ((normalizedGreen - normalizedBlue) / chroma) + (normalizedGreen < normalizedBlue ? 6 : 0)
+  } else if (maxChannel === normalizedGreen) {
+    hue = ((normalizedBlue - normalizedRed) / chroma) + 2
+  } else {
+    hue = ((normalizedRed - normalizedGreen) / chroma) + 4
+  }
+
+  return {
+    hue: hue / 6,
+    lightness,
+    saturation,
+  }
+}
+
+function hslToColor(color: HslColor): number {
+  const hue = ((color.hue % 1) + 1) % 1
+  const saturation = clamp(color.saturation, 0, 1)
+  const lightness = clamp(color.lightness, 0, 1)
+
+  if (saturation <= 0) {
+    const channel = clampChannel(lightness * 0xff)
+    return (channel << 16) | (channel << 8) | channel
+  }
+
+  const q = lightness < 0.5
+    ? lightness * (1 + saturation)
+    : lightness + saturation - (lightness * saturation)
+  const p = (2 * lightness) - q
+  const red = hueToRgbChannel(p, q, hue + (1 / 3))
+  const green = hueToRgbChannel(p, q, hue)
+  const blue = hueToRgbChannel(p, q, hue - (1 / 3))
 
   return (
-    (clampChannel(luminance + ((red - luminance) * saturation)) << 16)
-    | (clampChannel(luminance + ((green - luminance) * saturation)) << 8)
-    | clampChannel(luminance + ((blue - luminance) * saturation))
+    (clampChannel(red * 0xff) << 16)
+    | (clampChannel(green * 0xff) << 8)
+    | clampChannel(blue * 0xff)
   )
+}
+
+function hueToRgbChannel(p: number, q: number, hue: number): number {
+  let normalizedHue = hue
+  if (normalizedHue < 0) {
+    normalizedHue += 1
+  }
+  if (normalizedHue > 1) {
+    normalizedHue -= 1
+  }
+
+  if (normalizedHue < 1 / 6) {
+    return p + ((q - p) * 6 * normalizedHue)
+  }
+  if (normalizedHue < 1 / 2) {
+    return q
+  }
+  if (normalizedHue < 2 / 3) {
+    return p + ((q - p) * ((2 / 3) - normalizedHue) * 6)
+  }
+
+  return p
+}
+
+interface LightnessSearch {
+  direction: -1 | 1
+  hue: number
+  max: number
+  min: number
+  saturation: number
+  start: number
+  targetLuminance: number
+}
+
+function resolveLightnessForLuminance(search: LightnessSearch): number {
+  const start = clamp(search.start, search.min, search.max)
+  const targetLuminance = clamp(search.targetLuminance, 0, 1)
+  const steps = 64
+
+  for (let step = 0; step <= steps; step += 1) {
+    const progress = step / steps
+    const lightness = search.direction > 0
+      ? lerp(start, search.max, progress)
+      : lerp(start, search.min, progress)
+    const color = hslToColor({
+      hue: search.hue,
+      lightness,
+      saturation: search.saturation,
+    })
+    const luminance = getColorRelativeLuminance(color)
+
+    if (
+      (search.direction > 0 && luminance >= targetLuminance) ||
+      (search.direction < 0 && luminance <= targetLuminance)
+    ) {
+      return lightness
+    }
+  }
+
+  return search.direction > 0 ? search.max : search.min
+}
+
+function resolveEmissiveStrength(
+  diffuseColor: number,
+  emissiveColor: number,
+  targetTotalLuminance: number,
+  minStrength: number,
+  maxStrength: number,
+): number {
+  const diffuseLuminance = getColorRelativeLuminance(diffuseColor)
+  const emissiveLuminance = Math.max(0.08, getColorRelativeLuminance(emissiveColor))
+
+  return clamp(
+    (targetTotalLuminance - diffuseLuminance) / emissiveLuminance,
+    minStrength,
+    maxStrength,
+  )
+}
+
+export function getColorRelativeLuminance(color: number): number {
+  const red = (color >> 16) & 0xff
+  const green = (color >> 8) & 0xff
+  const blue = color & 0xff
+
+  return ((red * 0.299) + (green * 0.587) + (blue * 0.114)) / 0xff
 }
 
 function clampChannel(value: number): number {

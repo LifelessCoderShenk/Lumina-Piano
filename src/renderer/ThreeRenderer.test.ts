@@ -91,7 +91,17 @@ vi.mock('three', () => {
   }
 
   class Color {
-    constructor(_value: number) {}
+    value: number
+
+    constructor(value: number) {
+      this.value = value
+    }
+
+    setHex(value: number) {
+      this.value = value
+      mockMaterialColorSetHex(value)
+      return this
+    }
   }
 
   class Group {
@@ -251,6 +261,7 @@ vi.mock('three', () => {
         this.scale.z = z
       }),
     }
+    userData: Record<string, unknown> = {}
     visible = true
 
     constructor(
@@ -439,7 +450,114 @@ vi.mock('../playback/PlaybackEngine', () => ({
   },
 }))
 
-const { ThreeRenderer } = await import('./ThreeRenderer')
+const {
+  ThreeRenderer,
+  createNoteMaterialPalette,
+  getColorRelativeLuminance,
+} = await import('./ThreeRenderer')
+
+describe('createNoteMaterialPalette', () => {
+  const paletteCases = [
+    { color: 0x2e65a2, name: 'default blue' },
+    { color: 0xff0000, name: 'saturated red' },
+    { color: 0x00ff00, name: 'saturated green' },
+    { color: 0x0000ff, name: 'saturated blue' },
+    { color: 0xffff00, name: 'saturated yellow' },
+    { color: 0x00ffff, name: 'saturated cyan' },
+    { color: 0xff00ff, name: 'saturated magenta' },
+    { color: 0xffffff, name: 'white' },
+    { color: 0x000000, name: 'black' },
+    { color: 0x050912, name: 'near black' },
+    { color: 0x888888, name: 'gray' },
+  ] as const
+
+  const getEstimatedTotalLuminance = (
+    diffuseColor: number,
+    emissiveColor: number,
+    emissiveStrength: number,
+  ) => (
+    getColorRelativeLuminance(diffuseColor) +
+    (getColorRelativeLuminance(emissiveColor) * emissiveStrength)
+  )
+  const getChannelSpread = (color: number) => {
+    const red = (color >> 16) & 0xff
+    const green = (color >> 8) & 0xff
+    const blue = color & 0xff
+
+    return Math.max(red, green, blue) - Math.min(red, green, blue)
+  }
+
+  it.each(paletteCases)('keeps total bloom luminance consistent for $name', ({ color }) => {
+    const palette = createNoteMaterialPalette(color)
+    const coreBloomLuminance = getEstimatedTotalLuminance(
+      palette.coreDiffuseColor,
+      palette.coreEmissiveColor,
+      palette.coreEmissiveStrength,
+    )
+    const haloBloomLuminance = getEstimatedTotalLuminance(
+      palette.haloDiffuseColor,
+      palette.haloEmissiveColor,
+      palette.haloEmissiveStrength,
+    )
+
+    expect(palette.coreEmissiveStrength).toBeGreaterThanOrEqual(0.2)
+    expect(palette.coreEmissiveStrength).toBeLessThanOrEqual(3.6)
+    expect(palette.haloEmissiveStrength).toBeGreaterThanOrEqual(0.45)
+    expect(palette.haloEmissiveStrength).toBeLessThanOrEqual(3.6)
+    expect(coreBloomLuminance).toBeGreaterThanOrEqual(1.06)
+    expect(coreBloomLuminance).toBeLessThanOrEqual(1.1)
+    expect(haloBloomLuminance).toBeGreaterThanOrEqual(1.55)
+    expect(haloBloomLuminance).toBeLessThanOrEqual(1.61)
+  })
+
+  it.each(paletteCases)('preserves readable swirl contrast for $name', ({ color }) => {
+    const palette = createNoteMaterialPalette(color)
+    const haloLuminance = getColorRelativeLuminance(palette.haloDiffuseColor)
+    const brightLuminance = getColorRelativeLuminance(palette.swirlBrightColor)
+    const recessLuminance = getColorRelativeLuminance(palette.swirlRecessColor)
+
+    expect(brightLuminance - haloLuminance).toBeGreaterThanOrEqual(0.075)
+    expect(haloLuminance - recessLuminance).toBeGreaterThanOrEqual(0.19)
+  })
+
+  it.each(paletteCases)('keeps swirl bright total luminance below washout for $name', ({ color }) => {
+    const palette = createNoteMaterialPalette(color)
+    const swirlBrightTotalLuminance = getEstimatedTotalLuminance(
+      palette.swirlBrightColor,
+      palette.haloEmissiveColor,
+      palette.haloEmissiveStrength,
+    )
+
+    expect(swirlBrightTotalLuminance).toBeGreaterThanOrEqual(1.62)
+    expect(swirlBrightTotalLuminance).toBeLessThanOrEqual(1.76)
+  })
+
+  it('does not collapse white or black inputs to one flat palette color', () => {
+    for (const color of [0xffffff, 0x000000]) {
+      const palette = createNoteMaterialPalette(color)
+      const uniquePaletteColors = new Set([
+        palette.coreDiffuseColor,
+        palette.haloDiffuseColor,
+        palette.coreEmissiveColor,
+        palette.haloEmissiveColor,
+        palette.swirlBrightColor,
+        palette.swirlRecessColor,
+      ])
+
+      expect(uniquePaletteColors.size).toBeGreaterThan(3)
+    }
+  })
+
+  it('gives achromatic inputs enough channel headroom for swirl contrast', () => {
+    for (const color of [0xffffff, 0x888888, 0x000000]) {
+      const palette = createNoteMaterialPalette(color)
+
+      expect(getChannelSpread(palette.haloDiffuseColor)).toBeGreaterThanOrEqual(36)
+      expect(getChannelSpread(palette.swirlBrightColor)).toBeGreaterThanOrEqual(36)
+      expect(getChannelSpread(palette.swirlRecessColor)).toBeGreaterThanOrEqual(36)
+    }
+  })
+})
 
 describe('ThreeRenderer', () => {
   beforeEach(() => {
@@ -771,6 +889,78 @@ describe('ThreeRenderer', () => {
     expect(secondPassOffsets).toEqual(firstPassOffsets)
   })
 
+  it('recolors visible notes, key highlights, and active particles when Create Mode colors change', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    loadProjectWithNotes([
+      {
+        endTick: 480,
+        id: 'recolor-note',
+        pitch: 60,
+        startTick: 240,
+        velocity: 127,
+        visualEndTick: 480,
+      },
+    ])
+
+    await renderer.init(canvas)
+
+    useAppStore.setState({ currentTick: 239 })
+    ;(renderer as any).handleAnimationFrame(1000)
+    useAppStore.getState().setIsPlaying(true)
+    ;(renderer as any).handleAnimationFrame(1016)
+    useAppStore.setState({ currentTick: 240 })
+    ;(renderer as any).handleAnimationFrame(1032)
+
+    const visibleNoteMesh = ((renderer as any).noteMeshes as Array<{
+      material: {
+        userData: {
+          noteMaterialColor: number
+        }
+      }
+      visible: boolean
+    }>).find((noteMesh) => noteMesh.visible)
+    const particleSystem = (renderer as any).particleSystem as {
+      activeCount: number
+      colors: Float32Array
+    }
+
+    expect(visibleNoteMesh).toBeDefined()
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0x2e65a2)
+    expect(particleSystem.activeCount).toBeGreaterThan(0)
+
+    const originalMaterial = visibleNoteMesh?.material
+    const rebuildStaticSceneSpy = vi.spyOn(renderer as any, 'rebuildStaticScene')
+    const updateVisibleNoteMaterialColorsSpy = vi.spyOn(renderer as any, 'updateVisibleNoteMaterialColors')
+    mockMeshLambertMaterialDispose.mockClear()
+
+    useAppStore.getState().setCreateSingleNoteColor('#00ff00')
+    useAppStore.getState().setCreateSingleNoteColor('#ff0000')
+
+    expect(updateVisibleNoteMaterialColorsSpy).not.toHaveBeenCalled()
+    ;(renderer as any).handleAnimationFrame(1048)
+
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0xff0000)
+    expect(visibleNoteMesh?.material).toBe(originalMaterial)
+    expect(mockMaterialColorSetHex).toHaveBeenCalledWith(0xff0000)
+    expect(rebuildStaticSceneSpy).not.toHaveBeenCalled()
+    expect(updateVisibleNoteMaterialColorsSpy).toHaveBeenCalledTimes(1)
+    expect(mockMeshLambertMaterialDispose).not.toHaveBeenCalled()
+    expect(particleSystem.colors[0]).toBeCloseTo(1, 6)
+    expect(particleSystem.colors[1]).toBeCloseTo(0, 6)
+    expect(particleSystem.colors[2]).toBeCloseTo(0, 6)
+  })
+
   it('updates rounded note uniforms from the current note dimensions', async () => {
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
@@ -798,18 +988,23 @@ describe('ThreeRenderer', () => {
       noteHaloDiffuseColor: { value: unknown }
       noteHaloEmissiveColor: { value: unknown }
       noteHaloEmissiveStrength: { value: number }
+      noteSwirlBrightColor: { value: unknown }
+      noteSwirlRecessColor: { value: unknown }
       noteMaterialTime: { value: number }
       roundedRectRadius: { value: number }
       roundedRectSize: { value: { x: number; y: number } }
     }
+    const expectedPalette = createNoteMaterialPalette(0x2e65a2)
 
     expect(roundedNoteUniforms.noteMaterialTime.value).toBe(0)
     expect(roundedNoteUniforms.noteCoreDiffuseColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteHaloDiffuseColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteCoreEmissiveColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteHaloEmissiveColor.value).toBeDefined()
-    expect(roundedNoteUniforms.noteCoreEmissiveStrength.value).toBeCloseTo(1.35)
-    expect(roundedNoteUniforms.noteHaloEmissiveStrength.value).toBeCloseTo(1.45)
+    expect(roundedNoteUniforms.noteSwirlBrightColor.value).toBeDefined()
+    expect(roundedNoteUniforms.noteSwirlRecessColor.value).toBeDefined()
+    expect(roundedNoteUniforms.noteCoreEmissiveStrength.value).toBeCloseTo(expectedPalette.coreEmissiveStrength)
+    expect(roundedNoteUniforms.noteHaloEmissiveStrength.value).toBeCloseTo(expectedPalette.haloEmissiveStrength)
     expect(roundedNoteUniforms.roundedRectSize.value.x).toBe(12)
     expect(roundedNoteUniforms.roundedRectSize.value.y).toBe(6)
     expect(roundedNoteUniforms.roundedRectRadius.value).toBeCloseTo(1.08)

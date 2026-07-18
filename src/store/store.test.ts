@@ -50,6 +50,24 @@ describe('initial state', () => {
       useMic: false,
       useMidiAudio: true,
     })
+    expect(state.createNoteColors).toEqual({
+      mode: 'single',
+      pitchClassColors: {
+        0: '#f74f4f',
+        1: '#f7674f',
+        2: '#f7a44f',
+        3: '#f7d44f',
+        4: '#a4f74f',
+        5: '#4ff77a',
+        6: '#4ff7a0',
+        7: '#4ff7f0',
+        8: '#4fa4f7',
+        9: '#4f8ef7',
+        10: '#7a4ff7',
+        11: '#f74ff0',
+      },
+      singleColor: '#2e65a2',
+    })
   })
 })
 
@@ -309,6 +327,37 @@ describe('create record mode', () => {
       useMic: true,
       useMidiAudio: true,
     })
+  })
+})
+
+describe('create note colors', () => {
+  it('updates the Create Mode note color mode and values', () => {
+    useAppStore.getState().setCreateNoteColorMode('pitchClass')
+    useAppStore.getState().setCreateSingleNoteColor('#123456')
+    useAppStore.getState().setCreatePitchClassColor(9, '#abcdef')
+
+    expect(getAppState().createNoteColors).toEqual({
+      mode: 'pitchClass',
+      pitchClassColors: expect.objectContaining({
+        9: '#abcdef',
+      }),
+      singleColor: '#123456',
+    })
+  })
+
+  it('validates Create Mode colors and pitch classes', () => {
+    expect(() => useAppStore.getState().setCreateSingleNoteColor('red')).toThrowError(StoreError)
+    expect(() => useAppStore.getState().setCreatePitchClassColor(12, '#ffffff')).toThrowError(StoreError)
+  })
+
+  it('does not replace Create Mode color state for identical values', () => {
+    const initialColors = getAppState().createNoteColors
+
+    useAppStore.getState().setCreateNoteColorMode(initialColors.mode)
+    useAppStore.getState().setCreateSingleNoteColor(initialColors.singleColor)
+    useAppStore.getState().setCreatePitchClassColor(0, initialColors.pitchClassColors[0])
+
+    expect(getAppState().createNoteColors).toBe(initialColors)
   })
 })
 

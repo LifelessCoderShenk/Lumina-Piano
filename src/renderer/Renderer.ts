@@ -992,7 +992,7 @@ export class Renderer {
     const isCreateMode = !state.learnV3.isActive
     const learnVisuals = getActiveLearnVisuals(state)
     const noteColor = isCreateMode
-      ? resolveCreateModeNoteColor(indexedNote.note.pitch)
+      ? resolveCreateModeNoteColor(indexedNote.note.pitch, state.createNoteColors)
       : learnVisuals == null
       ? resolveNoteColor(indexedNote.note, indexedNote.trackId, state)
       : resolveLearnNoteColor(indexedNote.note.pitch, learnVisuals)
@@ -1192,7 +1192,7 @@ export class Renderer {
     const activeColor = activeNote == null
       ? null
       : !state.learnV3.isActive
-      ? resolveCreateModeNoteColor(activeNote.note.pitch)
+      ? resolveCreateModeNoteColor(activeNote.note.pitch, state.createNoteColors)
       : resolveNoteColor(activeNote.note, activeNote.trackId, state)
     const flashColor = state.learnV3.isActive ? this.keyFlashAnimations.get(entry.pitch)?.color ?? null : null
     const highlightColor = flashColor ?? activeColor
