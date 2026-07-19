@@ -473,6 +473,7 @@ vi.mock('../playback/PlaybackEngine', () => ({
 
 const {
   ThreeRenderer,
+  calculateNoteDepthFalloff,
   createNoteMaterialPalette,
   getColorRelativeLuminance,
 } = await import('./ThreeRenderer')
@@ -578,6 +579,35 @@ describe('createNoteMaterialPalette', () => {
       expect(getChannelSpread(palette.swirlBrightColor)).toBeGreaterThanOrEqual(36)
       expect(getChannelSpread(palette.swirlRecessColor)).toBeGreaterThanOrEqual(36)
     }
+  })
+})
+
+describe('calculateNoteDepthFalloff', () => {
+  it('keeps notes at full brightness and saturation near the boundary', () => {
+    expect(calculateNoteDepthFalloff(0)).toEqual({
+      brightnessScale: 1,
+      desaturation: 0,
+      emissiveScale: 1,
+      fade: 0,
+    })
+    expect(calculateNoteDepthFalloff(72)).toEqual({
+      brightnessScale: 1,
+      desaturation: 0,
+      emissiveScale: 1,
+      fade: 0,
+    })
+  })
+
+  it('plateaus distant notes at the target diffuse and emissive falloff', () => {
+    const farFalloff = calculateNoteDepthFalloff(360)
+    const beyondPlateauFalloff = calculateNoteDepthFalloff(720)
+
+    expect(farFalloff.fade).toBeCloseTo(1, 6)
+    expect(farFalloff.brightnessScale).toBeCloseTo(0.68, 6)
+    expect(farFalloff.desaturation).toBeCloseTo(0.22, 6)
+    expect(farFalloff.emissiveScale).toBeCloseTo(farFalloff.brightnessScale, 6)
+
+    expect(beyondPlateauFalloff).toEqual(farFalloff)
   })
 })
 
@@ -1138,6 +1168,54 @@ describe('ThreeRenderer', () => {
     expect(roundedNoteUniforms.roundedRectSize.value.x).toBe(12)
     expect(roundedNoteUniforms.roundedRectSize.value.y).toBe(6)
     expect(roundedNoteUniforms.roundedRectRadius.value).toBeCloseTo(1.08)
+  })
+
+  it('uses the same depth brightness scale for diffuse and emissive note shading', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    await renderer.init(canvas)
+
+    const noteGroup = (renderer as any).requireNoteGroup()
+    const noteMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 0)
+    const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as {
+      noteDistanceFromBoundary: { value: number }
+    }
+    const shader = {
+      fragmentShader: `#include <common>
+void main() {
+  vec4 diffuseColor = vec4( diffuse, opacity );
+  vec3 totalEmissiveRadiance = emissive;
+}`,
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: `#include <common>
+void main() {
+  #include <uv_vertex>
+}`,
+    }
+
+    noteMesh.material.onBeforeCompile?.(shader as {
+      fragmentShader: string
+      uniforms: Record<string, { value: unknown }>
+      vertexShader: string
+    })
+
+    expect(shader.uniforms.noteDistanceFromBoundary).toBe(roundedNoteUniforms.noteDistanceFromBoundary)
+    expect(shader.fragmentShader).toContain('smoothstep(72.0, 360.0, noteDistanceFromBoundary)')
+    expect(shader.fragmentShader).toContain('mix(1.0, 0.68, noteDepthFade)')
+    expect(shader.fragmentShader).toContain('noteDepthFade * 0.22')
+    expect(shader.fragmentShader).toContain('noteFaceColor = mix(noteFaceColor, vec3(noteFaceLuminance), noteDepthDesaturation);')
+    expect(shader.fragmentShader).toContain('noteFaceColor *= noteDepthBrightnessScale;')
+    expect(shader.fragmentShader).toContain('roundedNoteEmissiveRadiance *= noteDepthBrightnessScale;')
   })
 
   it('updates the shared note material animation time from real-time frames', async () => {

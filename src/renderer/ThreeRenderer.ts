@@ -119,6 +119,10 @@ const NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY = 0.1
 const NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY = 0.18
 const NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY = 0.038
 const NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY = 0.06
+const NOTE_DEPTH_FADE_START_DISTANCE = 72
+const NOTE_DEPTH_FADE_END_DISTANCE = 360
+const NOTE_DEPTH_MIN_BRIGHTNESS = 0.68
+const NOTE_DEPTH_MAX_DESATURATION = 0.22
 const NOTE_CORE_TARGET_TOTAL_LUMINANCE = 1.08
 const NOTE_HALO_TARGET_TOTAL_LUMINANCE = 1.58
 const NOTE_CORE_EMISSIVE_STRENGTH_MIN = 0.2
@@ -193,6 +197,9 @@ interface RoundedNoteUniforms {
     value: number
   }
   noteTravelPhaseOffset: {
+    value: number
+  }
+  noteDistanceFromBoundary: {
     value: number
   }
   noteCoreDiffuseColor: {
@@ -280,6 +287,13 @@ export interface NoteMaterialPalette {
   swirlRecessColor: number
   coreEmissiveStrength: number
   haloEmissiveStrength: number
+}
+
+export interface NoteDepthFalloff {
+  brightnessScale: number
+  desaturation: number
+  emissiveScale: number
+  fade: number
 }
 
 interface BoundaryWavePalette {
@@ -1063,15 +1077,22 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
     const noteColor = resolveCreateModeNoteColor(indexedNote.note.pitch, state.createNoteColors)
     const noteMesh = this.getOrCreateNoteMesh(group, noteMeshIndex)
+    const noteCenterX = adjustedRect.x + (adjustedRect.w / 2)
+    const noteBottomY = adjustedRect.y + adjustedRect.h
+    const noteDistanceFromBoundary = Math.max(
+      0,
+      this.getBoundaryTopDownY(noteCenterX) - noteBottomY,
+    )
 
     noteMesh.userData.notePitch = indexedNote.note.pitch
     this.assignNoteMaterial(noteMesh, noteColor)
     const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
     if (roundedNoteUniforms != null) {
       roundedNoteUniforms.noteTravelPhaseOffset.value = resolveNoteTravelPhaseOffset(indexedNote.note)
+      roundedNoteUniforms.noteDistanceFromBoundary.value = noteDistanceFromBoundary
     }
     noteMesh.position.set(
-      adjustedRect.x + (adjustedRect.w / 2),
+      noteCenterX,
       this.toSceneRectY(adjustedRect.y, adjustedRect.h),
       noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z,
     )
@@ -1909,6 +1930,7 @@ void main() {
       noteSwirlRecessColor: { value: new Color(notePalette.swirlRecessColor) },
       noteMaterialTime: this.sharedNoteMaterialTimeUniform,
       noteTravelPhaseOffset: { value: 0 },
+      noteDistanceFromBoundary: { value: 0 },
       roundedRectRadius: { value: getPillNoteCornerRadius(1, 1) },
       roundedRectSize: { value: new Vector2(1, 1) },
     }
@@ -1930,6 +1952,7 @@ void main() {
       shader.uniforms.noteSwirlRecessColor = roundedNoteUniforms.noteSwirlRecessColor
       shader.uniforms.noteMaterialTime = roundedNoteUniforms.noteMaterialTime
       shader.uniforms.noteTravelPhaseOffset = roundedNoteUniforms.noteTravelPhaseOffset
+      shader.uniforms.noteDistanceFromBoundary = roundedNoteUniforms.noteDistanceFromBoundary
       shader.uniforms.roundedRectRadius = roundedNoteUniforms.roundedRectRadius
       shader.uniforms.roundedRectSize = roundedNoteUniforms.roundedRectSize
 
@@ -1959,6 +1982,7 @@ uniform float noteCoreEmissiveStrength;
 uniform float noteHaloEmissiveStrength;
 uniform float noteMaterialTime;
 uniform float noteTravelPhaseOffset;
+uniform float noteDistanceFromBoundary;
 uniform float roundedRectRadius;
 uniform vec2 roundedRectSize;
 varying vec2 vRoundedRectUv;
@@ -2043,11 +2067,18 @@ float noteShimmerField = sin((vRoundedRectUv.x * 3.4) + (noteMaterialTime * 0.52
 float noteShimmer = 1.0 + (noteShimmerField * 0.05);
 float noteBreathing = 1.0 + (sin(noteMaterialTime * 0.4) * 0.04);
 float noteAnimatedHighlight = noteHighlightMask * noteShimmer;
+float noteDepthFade = smoothstep(${NOTE_DEPTH_FADE_START_DISTANCE.toFixed(1)}, ${NOTE_DEPTH_FADE_END_DISTANCE.toFixed(1)}, noteDistanceFromBoundary);
+noteDepthFade *= noteDepthFade;
+float noteDepthBrightnessScale = mix(1.0, ${NOTE_DEPTH_MIN_BRIGHTNESS.toFixed(2)}, noteDepthFade);
+float noteDepthDesaturation = noteDepthFade * ${NOTE_DEPTH_MAX_DESATURATION.toFixed(2)};
 
 vec3 noteFaceColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix);
 noteFaceColor = mix(noteFaceColor, noteHaloDiffuseColor, noteAnimatedHighlight * 0.08);
 noteFaceColor = mix(noteFaceColor, noteSwirlBrightColor, noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY.toFixed(3)});
 noteFaceColor = mix(noteFaceColor, noteSwirlRecessColor, noteSwirlRecessField * ${NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY.toFixed(3)});
+float noteFaceLuminance = dot(noteFaceColor, vec3(0.2126, 0.7152, 0.0722));
+noteFaceColor = mix(noteFaceColor, vec3(noteFaceLuminance), noteDepthDesaturation);
+noteFaceColor *= noteDepthBrightnessScale;
 diffuseColor.rgb = noteFaceColor;
 
 vec3 roundedNoteEmissiveRadiance = mix(
@@ -2065,6 +2096,7 @@ roundedNoteEmissiveRadiance = max(
     * (noteSwirlRecessField * ${NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY.toFixed(3)} * noteHaloEmissiveStrength)
   )
 );
+roundedNoteEmissiveRadiance *= noteDepthBrightnessScale;
 roundedNoteEmissiveRadiance *= roundedRectMask;`,
         )
         .replace(
@@ -2072,7 +2104,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
           'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v7'
+    material.customProgramCacheKey = () => 'rounded-note-pill-v8'
     return material
   }
 
@@ -2918,6 +2950,27 @@ export function getColorRelativeLuminance(color: number): number {
   const blue = color & 0xff
 
   return ((red * 0.299) + (green * 0.587) + (blue * 0.114)) / 0xff
+}
+
+export function calculateNoteDepthFalloff(distanceFromBoundary: number): NoteDepthFalloff {
+  const clampedDistance = Math.max(0, Number.isFinite(distanceFromBoundary) ? distanceFromBoundary : 0)
+  const normalizedFade = clamp(
+    (clampedDistance - NOTE_DEPTH_FADE_START_DISTANCE)
+      / (NOTE_DEPTH_FADE_END_DISTANCE - NOTE_DEPTH_FADE_START_DISTANCE),
+    0,
+    1,
+  )
+  const smoothFade = normalizedFade * normalizedFade * (3 - (2 * normalizedFade))
+  const fade = smoothFade * smoothFade
+  const brightnessScale = 1 + ((NOTE_DEPTH_MIN_BRIGHTNESS - 1) * fade)
+  const desaturation = NOTE_DEPTH_MAX_DESATURATION * fade
+
+  return {
+    brightnessScale,
+    desaturation,
+    emissiveScale: brightnessScale,
+    fade,
+  }
 }
 
 function clampChannel(value: number): number {
