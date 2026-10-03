@@ -111,11 +111,11 @@ export function PieceFilesColumn({
       <h2 className={styles.heading} style={headingStyle}>Library</h2>
       <div className={styles.importActions}>
         <button type="button" className={styles.addMidiButton} disabled={activeAction != null} onClick={() => void addMidi()}>
-          <AppIcon className={activeAction === 'midi' ? styles.loadingIcon : undefined} icon={activeAction === 'midi' ? LoaderCircle : FilePlus2} size={18} />
+          <AppIcon className={activeAction === 'midi' ? styles.loadingIcon : undefined} icon={activeAction === 'midi' ? LoaderCircle : FilePlus2} size={16} />
           {activeAction === 'midi' ? 'Opening…' : 'Add MIDI'}
         </button>
         <button type="button" className={styles.addMidiButton} disabled={activeAction != null} onClick={() => void addScore()}>
-          <AppIcon className={activeAction === 'score' ? styles.loadingIcon : undefined} icon={activeAction === 'score' ? LoaderCircle : Music2} size={18} />
+          <AppIcon className={activeAction === 'score' ? styles.loadingIcon : undefined} icon={activeAction === 'score' ? LoaderCircle : Music2} size={16} />
           {activeAction === 'score' ? 'Opening…' : 'Add score'}
         </button>
       </div>
