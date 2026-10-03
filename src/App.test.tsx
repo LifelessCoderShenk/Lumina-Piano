@@ -1,3 +1,9 @@
+/*
+INPUT: App routing state with mocked renderer and mode components.
+OUTPUT: Root-layout coverage for each right-pane mode, including Transcriptor.
+PURPOSE: Verifies Transcriptor takes the same full visualizer pane rather than creating a compact keyboard surface.
+*/
+
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,7 +39,14 @@ vi.mock('./components/TitleBar/TitleBar', () => ({
 }))
 
 vi.mock('./components/MenuBar/MenuBar', () => ({
-  MenuBar: () => <div data-testid="menu-bar">Menu Bar</div>,
+  MenuBar: ({ onExportClick }: { onExportClick: () => void }) => (
+    <div data-testid="menu-bar">
+      Menu Bar
+      <button data-testid="menu-export-button" onClick={onExportClick} type="button">
+        Export
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock('./components/TrackList/TrackList', () => ({
@@ -41,8 +54,19 @@ vi.mock('./components/TrackList/TrackList', () => ({
 }))
 
 vi.mock('./components/CanvasArea/CanvasArea', () => ({
-  CanvasArea: ({ engine }: { engine: 'pixi' | 'three' }) => (
+  CanvasArea: ({
+    engine,
+    onOpenExport,
+  }: {
+    engine: 'pixi' | 'three'
+    onOpenExport?: () => void
+  }) => (
     <div data-testid="canvas-area" data-engine={engine} style={{ flex: 1, width: '100%', height: '100%' }}>
+      {onOpenExport ? (
+        <button data-testid="create-export-trigger" onClick={onOpenExport} type="button">
+          Open Export
+        </button>
+      ) : null}
       Canvas Area
     </div>
   ),
@@ -50,7 +74,14 @@ vi.mock('./components/CanvasArea/CanvasArea', () => ({
 
 vi.mock('./components/CameraMode/CameraMode', () => ({
   CAMERA_MODE_TIMELINE_HEIGHT_PX: 120,
-  CameraMode: () => <div data-testid="camera-mode">Camera Mode</div>,
+  CameraMode: ({ onOpenExportSheet }: { onOpenExportSheet?: () => void }) => (
+    <div data-testid="camera-mode">
+      Camera Mode
+      <button data-testid="camera-export-trigger" onClick={onOpenExportSheet} type="button">
+        Open Camera Export
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock('./components/RecordMode/RecordMode', () => ({
@@ -58,7 +89,24 @@ vi.mock('./components/RecordMode/RecordMode', () => ({
 }))
 
 vi.mock('./components/EditPanel/EditPanel', () => ({
-  EditPanel: () => <div data-testid="edit-panel" style={{ width: '25%', flexBasis: '25%' }}>Edit Panel</div>,
+  EditPanel: ({
+    isSettingsOpen,
+    onSettingsOpenChange,
+  }: {
+    isSettingsOpen?: boolean
+    onSettingsOpenChange?: (isOpen: boolean) => void
+  }) => (
+    <div data-testid="edit-panel" style={{ width: '25%', flexBasis: '25%' }}>
+      {isSettingsOpen ? <span data-testid="settings-panel">Settings Panel</span> : 'Edit Panel'}
+      <button
+        data-testid="settings-panel-toggle"
+        onClick={() => onSettingsOpenChange?.(!isSettingsOpen)}
+        type="button"
+      >
+        Toggle Settings
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock('./components/StatusBar/StatusBar', () => ({
@@ -66,35 +114,9 @@ vi.mock('./components/StatusBar/StatusBar', () => ({
 }))
 
 vi.mock('./components/ExportModal/ExportModal', () => ({
-  ExportModal: () => null,
-}))
-
-vi.mock('./components/EndScreen/EndScreen', () => ({
-  EndScreen: () => <div data-testid="end-screen">End Screen</div>,
-}))
-
-vi.mock('./components/LearnHome/LearnHome', () => ({
-  LearnHome: () => <div data-testid="learn-home">Learn Home</div>,
-}))
-
-vi.mock('./components/LearnOptionsPanel/LearnOptionsPanel', () => ({
-  LearnOptionsPanel: () => <div data-testid="learn-options-panel">Learn Options</div>,
-}))
-
-vi.mock('./components/LearnSession/ListenSession', () => ({
-  ListenSession: () => <div data-testid="listen-session">Listen Session</div>,
-}))
-
-vi.mock('./components/LearnSession/NoteByNoteSession', () => ({
-  NoteByNoteSession: () => <div data-testid="note-by-note-session">Note by Note Session</div>,
-}))
-
-vi.mock('./components/LearnSession/PlayAlongSession', () => ({
-  PlayAlongSession: () => <div data-testid="play-along-session">Play Along Session</div>,
-}))
-
-vi.mock('./components/SongPage/SongPage', () => ({
-  SongPage: () => <div data-testid="song-page">Song Page</div>,
+  ExportModal: ({ isOpen, variant }: { isOpen: boolean, variant?: 'modal' | 'sheet' }) => (
+    isOpen ? <div data-testid="export-modal" data-variant={variant ?? 'modal'}>Export Modal</div> : null
+  ),
 }))
 
 vi.mock('./audio/AudioScheduler', () => ({
@@ -204,7 +226,6 @@ describe('App Create Mode shell', () => {
     })
 
     window.electronAPI = {
-      deleteSong: vi.fn(),
       dialog: {
         getDefaultExportPath: vi.fn(async () => null),
         openMidiFile: vi.fn(async () => null),
@@ -217,27 +238,12 @@ describe('App Create Mode shell', () => {
       ffmpeg: {
         run: vi.fn(async () => undefined),
       },
-      getSongs: vi.fn(async () => []),
-      library: {
-        deleteUserSong: vi.fn(async () => undefined),
-        getUserSongs: vi.fn(async () => []),
-        saveUserSong: vi.fn(async () => ({
-          composer: 'User',
-          difficulty: 'beginner',
-          file: 'demo.mid',
-          filePath: 'C:/music/demo.mid',
-          id: 'song-1',
-          source: 'user',
-          title: 'Demo',
-        })),
-      },
       openJsonFile: vi.fn(async () => null),
       openMidiFile: vi.fn(async () => 'C:/music/demo.mid'),
       shell: {
         openPath: vi.fn(async () => undefined),
       },
       showSaveDialog: vi.fn(async () => null),
-      uploadSong: vi.fn(async () => null),
       window: {
         close: vi.fn(async () => undefined),
         maximize: vi.fn(async () => undefined),
@@ -277,24 +283,17 @@ describe('App Create Mode shell', () => {
     expect(document.documentElement.style.getPropertyValue('--font-family-base')).toBe('Arial, sans-serif')
   })
 
-  it('keeps Learn Mode rendering and navigation intact', async () => {
+  it('opens the shared export modal from the plain Create visualizer overlay trigger', () => {
     render(<App />)
 
-    expect(screen.getByTestId('edit-panel')).toBeTruthy()
-    expect(screen.queryByTestId('mode-selector')).toBeNull()
+    fireEvent.click(screen.getByTestId('create-export-trigger'))
 
-    await act(async () => {
-      useAppStore.getState().setAppMode('learn')
-    })
+    expect(screen.getByTestId('export-modal')).toBeTruthy()
+    expect(screen.getByTestId('export-modal').getAttribute('data-variant')).toBe('sheet')
+    expect(screen.getByTestId('settings-panel')).toBeTruthy()
 
-    await waitFor(() => {
-      expect(screen.getByTestId('learn-home')).toBeTruthy()
-    })
-
-    expect(screen.getByTestId('menu-bar')).toBeTruthy()
-    expect(screen.getByTestId('track-list')).toBeTruthy()
-    expect(screen.getByTestId('status-bar')).toBeTruthy()
-    expect(screen.queryByTestId('edit-panel')).toBeNull()
+    fireEvent.click(screen.getByTestId('settings-panel-toggle'))
+    expect(screen.queryByTestId('settings-panel')).toBeNull()
   })
 
   it('renders Camera Mode in the right 75% panel when createCamera is active', () => {
@@ -305,9 +304,12 @@ describe('App Create Mode shell', () => {
         cropLeft: 0,
         cropRight: 0,
         cropTop: 0,
-        offsetX: 0,
+        flipHorizontal: false,
+        flipVertical: false,
+        offsetX: 36,
         offsetY: 48,
-        scale: 1,
+        rotation: 0,
+        scale: 1.25,
       },
       currentPieceId: 'piece-1',
       isProjectLoaded: true,
@@ -329,12 +331,38 @@ describe('App Create Mode shell', () => {
     expect(screen.getByTestId('canvas-area')).toBeTruthy()
     expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('three')
     expect(screen.getByTestId('camera-visualizer-slot')).toBeTruthy()
-    expect(screen.getByTestId('camera-visualizer-slot').style.transform).toBe('translate3d(0px, 48px, 0)')
+    const visualizerSlot = screen.getByTestId('camera-visualizer-slot')
+    // Positive Y expands the note field upward instead of translating the
+    // fixed-height canvas down and leaving an empty black band.
+    expect(visualizerSlot.style.height).toBe('calc(60% + 38.4px)')
+    expect(visualizerSlot.style.transform).toBe('translate3d(36px, 0px, 0) scale(1.25)')
+    expect(visualizerSlot.style.transformOrigin).toBe('top left')
     expect(screen.getByTestId('camera-mode')).toBeTruthy()
+  })
+
+  it('opens Visualizer Settings alongside Camera Mode export', () => {
+    useAppStore.setState({ appMode: 'createCamera' })
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('camera-export-trigger'))
+
+    expect(screen.getByTestId('settings-panel')).toBeTruthy()
   })
 
   it('renders Record Mode in the right 75% panel when createRecord is active', () => {
     useAppStore.getState().setAppMode('createRecord')
+
+    render(<App />)
+
+    expect(screen.getByTestId('edit-panel')).toBeTruthy()
+    expect(screen.getByTestId('create-visualizer-area').style.width).toBe('75%')
+    expect(screen.getByTestId('record-mode')).toBeTruthy()
+    expect(screen.queryByTestId('canvas-area')).toBeNull()
+  })
+
+  it('renders Transcription through Record Mode in the same right visualizer pane', () => {
+    useAppStore.getState().enterRecordMode()
+    useAppStore.getState().setRecordModeView('transcription')
 
     render(<App />)
 
@@ -371,24 +399,6 @@ describe('App Create Mode shell', () => {
     expect(screen.getByTestId('canvas-area')).toBe(originalCanvasArea)
     expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('three')
     expect(screen.getByTestId('camera-mode')).toBeTruthy()
-  })
-
-  it('uses the Pixi canvas path for Learn session visualizer mounts', () => {
-    useAppStore.setState({
-      appMode: 'learnSession',
-      learnV3: {
-        ...useAppStore.getState().learnV3,
-        sessionConfig: {
-          ...useAppStore.getState().learnV3.sessionConfig,
-          mode: 'listen',
-        },
-      },
-    })
-
-    render(<App />)
-
-    expect(screen.getByTestId('canvas-area').getAttribute('data-engine')).toBe('pixi')
-    expect(screen.getByTestId('listen-session')).toBeTruthy()
   })
 
   it('captures alignment clicks across the full right panel in Camera Mode', () => {

@@ -1,15 +1,34 @@
-import React, { useEffect, useRef, useState } from 'react'
+/*
+INPUT: The selected renderer plus view-level canvas options.
+OUTPUT: A responsive mounted visualizer canvas and optional pointer keyboard interaction.
+PURPOSE: Hosts one shared renderer canvas; Transcriptor uses keyboardOnly to retain the full standard keyboard beneath its SVG score.
+*/
 
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { Maximize2 } from 'lucide-react'
+
+import { AppIcon } from '../AppIcon/AppIcon'
+import { audioScheduler } from '../../audio/AudioScheduler'
 import { cameraSystem } from '../../camera/CameraSystem'
+import { CreatePlaybackOverlay } from '../CreatePlaybackOverlay/CreatePlaybackOverlay'
+import { CreateScoreOverlay } from '../CreateScoreOverlay/CreateScoreOverlay'
+import { CreateNoteEditor } from '../CreateNoteEditor/CreateNoteEditor'
 import { clearActiveVisualizerCanvas, registerActiveVisualizerCanvas } from '../../renderer/activeCanvas'
-import { clearActiveVisualizerRenderer, registerActiveVisualizerRenderer } from '../../renderer/activeVisualizerRenderer'
+import {
+  clearActiveVisualizerRenderer,
+  registerActiveVisualizerRenderer,
+  type ActiveVisualizerRenderer,
+} from '../../renderer/activeVisualizerRenderer'
 import { renderer } from '../../renderer/Renderer'
 import { threeRenderer } from '../../renderer/ThreeRenderer'
-import type { VisualizerEngine, VisualizerRenderer } from '../../renderer/VisualizerRenderer'
+import type { VisualizerEngine } from '../../renderer/VisualizerRenderer'
+import { getKeyAtCanvasPoint } from '../../renderer/pianoMath'
+import type { RenderLayoutContext } from '../../renderer/layoutConstants'
 import { getAppState, useAppStore } from '../../store/store'
+import type { VisualizerSettings } from '../../store/types'
 import styles from './CanvasArea.module.css'
 
-type SupportedAspectRatio = 'fit' | '16:9' | '1:1' | '4:3'
+type SupportedAspectRatio = VisualizerSettings['aspectRatio']
 
 interface CanvasDimensions {
   width: number
@@ -43,11 +62,51 @@ export function getConstrainedDimensions(
   return { width, height }
 }
 
-interface CanvasAreaProps {
-  engine: VisualizerEngine
+export interface PointerKeyboardNoteEvent {
+  readonly type: 'noteon' | 'noteoff'
+  readonly pitch: number
+  readonly velocity: number
+  readonly timestampMs: number
 }
 
-export function CanvasArea({ engine }: CanvasAreaProps) {
+interface CanvasAreaProps {
+  aspectRatioOverride?: SupportedAspectRatio
+  engine: VisualizerEngine
+  onOpenExport?: () => void
+  /** Enables mouse play on the rendered piano keyboard. */
+  keyboardPointerEnabled?: boolean
+  onKeyboardNote?: (event: PointerKeyboardNoteEvent) => void
+  /** Renders the static keyboard only; used by Camera Mode's framing setup. */
+  guideOnly?: boolean
+  /** Hides falling-note effects while preserving the normal keyboard and live highlights. */
+  keyboardOnly?: boolean
+  /** Keeps file-note travel proportional when Camera/Record expands the note field. */
+  noteFieldTravelSeconds?: number
+  /** Overrides the rendered piano height while preserving the full canvas. */
+  keyboardHeightRatio?: number
+}
+
+interface HeldPointerKey {
+  pointerId: number
+  pitch: number | null
+}
+
+const POINTER_NOTE_SOURCE = 'pointer-keyboard'
+const RECORD_MIDI_NOTE_SOURCE = 'record-midi'
+const POINTER_NOTE_VELOCITY = 100
+const MIDI_ACTIVITY_WINDOW_MS = 600
+
+export function CanvasArea({
+  aspectRatioOverride,
+  engine,
+  onOpenExport,
+  keyboardPointerEnabled,
+  onKeyboardNote,
+  guideOnly = false,
+  keyboardOnly = false,
+  noteFieldTravelSeconds,
+  keyboardHeightRatio,
+}: CanvasAreaProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const availableAreaRef = useRef<HTMLDivElement>(null)
   const aspectRatioRef = useRef<SupportedAspectRatio>('fit')
@@ -55,13 +114,166 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
   const isInitializingRef = useRef(false)
   const isRendererReadyRef = useRef(false)
   const rendererCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const lastAppliedRenderSizeRef = useRef<CanvasDimensions | null>(null)
+  const layoutContextRef = useRef<Partial<RenderLayoutContext> | null>(null)
+  const keyboardNoteCallbackRef = useRef(onKeyboardNote)
+  keyboardNoteCallbackRef.current = onKeyboardNote
+  const heldPointerKeyRef = useRef<HeldPointerKey | null>(null)
   const [frameSize, setFrameSize] = useState<CanvasDimensions>({ width: 0, height: 0 })
   const appMode = useAppStore((state) => state.appMode)
-  const aspectRatio = useAppStore((state) => state.visualizerSettings.aspectRatio)
+  const storedAspectRatio = useAppStore((state) => state.visualizerSettings.aspectRatio)
+  const aspectRatio = aspectRatioOverride ?? storedAspectRatio
+  const isPlaybackRunning = useAppStore((state) => state.isPlaying)
+  const showCreatePlaybackOverlay = appMode === 'create'
+  const hasImportedScore = useAppStore((state) => state.projectData?.tracks.some((track) => track.notes.some((note) => note.id.startsWith('xml-'))) ?? false)
+  const hasEditableNotes = useAppStore((state) => state.projectData?.tracks.some((track) => track.notes.length > 0) ?? false)
+  const [showScore, setShowScore] = useState(true)
+  const [showNoteEditor, setShowNoteEditor] = useState(false)
   const showWindowExpandButton = appMode === 'create'
-  const activeRenderer: VisualizerRenderer = engine === 'three' ? threeRenderer : renderer
+  const isPointerKeyboardEnabled = keyboardPointerEnabled ?? appMode === 'create'
+  const activeRenderer: ActiveVisualizerRenderer = engine === 'three' ? threeRenderer : renderer
+
+  layoutContextRef.current = keyboardHeightRatio == null && noteFieldTravelSeconds == null
+    ? null
+    : {
+        ...(keyboardHeightRatio == null ? {} : { keyboardHeightRatio, preserveKeyboardHeightRatio: true }),
+        ...(noteFieldTravelSeconds == null ? {} : { noteFieldTravelSeconds }),
+      }
 
   aspectRatioRef.current = aspectRatio
+
+  const clearPointerKey = useCallback(() => {
+    if (heldPointerKeyRef.current == null) {
+      return
+    }
+
+    const pitch = heldPointerKeyRef.current.pitch
+    heldPointerKeyRef.current = null
+    if (pitch != null) keyboardNoteCallbackRef.current?.({ type: 'noteoff', pitch, velocity: 0, timestampMs: performance.now() })
+    activeRenderer.setLiveNoteSource?.(POINTER_NOTE_SOURCE, [])
+  }, [activeRenderer])
+
+  const isPointerKeyboardBlocked = () => (
+    isPlaybackRunning ||
+    activeRenderer.isLiveNoteSourceActiveOrRecent?.(RECORD_MIDI_NOTE_SOURCE, MIDI_ACTIVITY_WINDOW_MS) === true
+  )
+
+  const getPitchFromPointerEvent = (event: React.PointerEvent<HTMLCanvasElement>): number | null => {
+    const canvas = event.currentTarget
+    const bounds = canvas.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0 || frameSize.width <= 0 || frameSize.height <= 0) {
+      return null
+    }
+
+    const x = ((event.clientX - bounds.left) / bounds.width) * frameSize.width
+    const y = ((event.clientY - bounds.top) / bounds.height) * frameSize.height
+    return getKeyAtCanvasPoint(
+      x,
+      y,
+      frameSize.width,
+      frameSize.height,
+      activeRenderer.getRenderLayoutContext?.(),
+    )
+  }
+
+  const setPointerKeyPitch = (pitch: number | null) => {
+    const heldPointerKey = heldPointerKeyRef.current
+    if (heldPointerKey == null || heldPointerKey.pitch === pitch) {
+      return
+    }
+
+    const timestampMs = performance.now()
+    if (heldPointerKey.pitch != null) keyboardNoteCallbackRef.current?.({ type: 'noteoff', pitch: heldPointerKey.pitch, velocity: 0, timestampMs })
+    heldPointerKey.pitch = pitch
+    if (pitch != null) keyboardNoteCallbackRef.current?.({ type: 'noteon', pitch, velocity: POINTER_NOTE_VELOCITY, timestampMs })
+    activeRenderer.setLiveNoteSource?.(
+      POINTER_NOTE_SOURCE,
+      pitch == null
+        ? []
+        : [{
+          id: `pointer:${pitch}`,
+          pitch,
+          startedAtMs: timestampMs,
+          velocity: POINTER_NOTE_VELOCITY,
+        }],
+    )
+
+    if (pitch != null) {
+      void audioScheduler.playLiveNote(pitch, POINTER_NOTE_VELOCITY)
+    }
+  }
+
+  useEffect(() => {
+    if (isPlaybackRunning || !isPointerKeyboardEnabled) {
+      clearPointerKey()
+    }
+  }, [isPlaybackRunning, isPointerKeyboardEnabled, clearPointerKey])
+
+  useEffect(() => {
+    window.addEventListener('blur', clearPointerKey)
+    return () => {
+      window.removeEventListener('blur', clearPointerKey)
+      clearPointerKey()
+      activeRenderer.setLiveNoteSource?.(POINTER_NOTE_SOURCE, [])
+    }
+  }, [activeRenderer, clearPointerKey])
+
+  useEffect(() => {
+    activeRenderer.setGuideOnly?.(guideOnly)
+
+    return () => {
+      activeRenderer.setGuideOnly?.(false)
+    }
+  }, [activeRenderer, guideOnly])
+
+  useEffect(() => {
+    activeRenderer.setKeyboardOnly?.(keyboardOnly)
+
+    return () => {
+      activeRenderer.setKeyboardOnly?.(false)
+    }
+  }, [activeRenderer, keyboardOnly])
+
+  const handleKeyboardPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (guideOnly || engine !== 'three' || !isPointerKeyboardEnabled || event.button !== 0 || isPointerKeyboardBlocked() || heldPointerKeyRef.current != null) {
+      return
+    }
+
+    const pitch = getPitchFromPointerEvent(event)
+    if (pitch == null) {
+      return
+    }
+
+    event.preventDefault()
+    heldPointerKeyRef.current = { pointerId: event.pointerId, pitch: null }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setPointerKeyPitch(pitch)
+  }
+
+  const handleKeyboardPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const heldPointerKey = heldPointerKeyRef.current
+    if (heldPointerKey == null || heldPointerKey.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (isPointerKeyboardBlocked()) {
+      clearPointerKey()
+      return
+    }
+
+    setPointerKeyPitch(getPitchFromPointerEvent(event))
+  }
+
+  const handleKeyboardPointerRelease = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (heldPointerKeyRef.current?.pointerId !== event.pointerId) {
+      return
+    }
+
+    clearPointerKey()
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -137,6 +349,11 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
       }
 
       const nextSize = getConstrainedDimensions(availableWidth, availableHeight, aspectRatioRef.current)
+      const previousSize = lastAppliedRenderSizeRef.current
+      if (previousSize?.width === nextSize.width && previousSize.height === nextSize.height) {
+        return true
+      }
+      lastAppliedRenderSizeRef.current = nextSize
       setFrameSize((currentSize) => {
         if (currentSize.width === nextSize.width && currentSize.height === nextSize.height) {
           return currentSize
@@ -154,7 +371,14 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
       }
 
       if (isRendererReadyRef.current) {
-        activeRenderer.resize(nextSize.width, nextSize.height)
+        const layoutContext = layoutContextRef.current
+        if (layoutContext == null) {
+          activeRenderer.resize(nextSize.width, nextSize.height)
+        } else {
+          activeRenderer.resize(nextSize.width, nextSize.height, {
+            layoutContext,
+          })
+        }
         syncCanvasElementSize(nextSize.width, nextSize.height)
       }
 
@@ -208,6 +432,9 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
           }
 
           isRendererReadyRef.current = true
+          // Initialization can create post-processing resources after the
+          // pre-init measurement. Apply that size once to the ready renderer.
+          lastAppliedRenderSizeRef.current = null
           attachRendererCanvasListeners()
           resizeToAvailableArea()
         } finally {
@@ -293,6 +520,7 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
 
     return () => {
       cancelled = true
+      lastAppliedRenderSizeRef.current = null
       initializeRendererRef.current = null
       isInitializingRef.current = false
       isRendererReadyRef.current = false
@@ -311,6 +539,10 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
   }, [activeRenderer, engine])
 
   useEffect(() => {
+    // The Camera/Record note-field timing can change without a DOM resize
+    // (for example when switching modes while this canvas remains mounted).
+    // Force one measured resize so the renderer receives the new context.
+    lastAppliedRenderSizeRef.current = null
     let resizeOuterFrameId: number | null = null
     let resizeInnerFrameId: number | null = null
 
@@ -343,6 +575,11 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
           }
 
           const nextSize = getConstrainedDimensions(availableWidth, availableHeight, aspectRatio)
+          const previousSize = lastAppliedRenderSizeRef.current
+          if (previousSize?.width === nextSize.width && previousSize.height === nextSize.height) {
+            return
+          }
+          lastAppliedRenderSizeRef.current = nextSize
           setFrameSize(nextSize)
 
           if (canvasRef.current != null) {
@@ -357,7 +594,14 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
           cameraSystem.setViewportSize(nextSize.width, nextSize.height)
 
           if (isRendererReadyRef.current) {
-            activeRenderer.resize(nextSize.width, nextSize.height)
+            const layoutContext = layoutContextRef.current
+            if (layoutContext == null) {
+              activeRenderer.resize(nextSize.width, nextSize.height)
+            } else {
+              activeRenderer.resize(nextSize.width, nextSize.height, {
+                layoutContext,
+              })
+            }
             if (canvasRef.current != null) {
               canvasRef.current.style.width = `${nextSize.width}px`
               canvasRef.current.style.height = `${nextSize.height}px`
@@ -386,7 +630,19 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
         cancelAnimationFrame(resizeInnerFrameId)
       }
     }
-  }, [activeRenderer, aspectRatio])
+  }, [activeRenderer, aspectRatio, keyboardHeightRatio, noteFieldTravelSeconds])
+
+  useEffect(() => {
+    const size = lastAppliedRenderSizeRef.current
+    if (!isRendererReadyRef.current || size == null) return
+
+    const layoutContext = layoutContextRef.current
+    if (layoutContext == null) {
+      activeRenderer.resize(size.width, size.height)
+    } else {
+      activeRenderer.resize(size.width, size.height, { layoutContext })
+    }
+  }, [activeRenderer, keyboardHeightRatio, noteFieldTravelSeconds])
 
   const handleWindowExpand = async () => {
     const maximizeWindow = window.electronAPI?.window?.maximize
@@ -418,12 +674,11 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
             border: '0',
             color: '#2e65a2',
             cursor: 'pointer',
-            fontSize: 20,
             lineHeight: 1,
             padding: 0,
           }}
         >
-          {'<>'}
+          <AppIcon icon={Maximize2} size={20} />
         </button>
       ) : null}
       <div ref={availableAreaRef} data-testid="canvas-available-area" className={styles.availableArea}>
@@ -437,12 +692,22 @@ export function CanvasArea({ engine }: CanvasAreaProps) {
         >
           <canvas
             ref={canvasRef}
+            data-testid="visualizer-canvas"
             className={styles.canvas}
+            onPointerDown={handleKeyboardPointerDown}
+            onPointerMove={handleKeyboardPointerMove}
+            onPointerUp={handleKeyboardPointerRelease}
+            onPointerCancel={handleKeyboardPointerRelease}
+            onLostPointerCapture={handleKeyboardPointerRelease}
+            onPointerLeave={handleKeyboardPointerRelease}
             style={{
               width: `${frameSize.width}px`,
               height: `${frameSize.height}px`,
             }}
           />
+          {showCreatePlaybackOverlay && hasImportedScore && showScore && !showNoteEditor ? <CreateScoreOverlay /> : null}
+          {showCreatePlaybackOverlay && showNoteEditor ? <CreateNoteEditor /> : null}
+          {showCreatePlaybackOverlay ? <CreatePlaybackOverlay hasEditor={hasEditableNotes} editorVisible={showNoteEditor} onToggleEditor={() => { setShowNoteEditor((visible) => !visible); setShowScore(false) }} hasScore={hasImportedScore} scoreVisible={showScore && !showNoteEditor} onToggleScore={() => { setShowScore((visible) => !visible); setShowNoteEditor(false) }} onOpenExport={onOpenExport} /> : null}
         </div>
       </div>
     </div>

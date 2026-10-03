@@ -1,4 +1,10 @@
-import type { ProjectData, Track } from '../midi/types'
+/*
+INPUT: Values proposed for application state updates.
+OUTPUT: Assertion helpers that reject invalid state before it reaches the store.
+PURPOSE: Maintains strict runtime validation for externally influenced store actions.
+*/
+
+import type { NoteFingering, ProjectData, Track } from '../midi/types'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 
 import { StoreError } from './errors'
@@ -7,9 +13,8 @@ import type {
   AppMode,
   AlignStep,
   CreateNoteColorMode,
+  ParticleSettings,
   CreateTab,
-  LearnNoteColorMode,
-  LearnVisuals,
   Piece,
   PieceType,
   RecordModeConfig,
@@ -21,13 +26,13 @@ import type {
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 export function normalizeVisualizerAspectRatio(
-  aspectRatio: VisualizerSettings['aspectRatio'] | '9:16' | undefined,
+  aspectRatio: VisualizerSettings['aspectRatio'] | undefined,
 ): VisualizerSettings['aspectRatio'] | undefined {
   if (aspectRatio == null) {
     return undefined
   }
 
-  return aspectRatio === '9:16' ? 'fit' : aspectRatio
+  return aspectRatio
 }
 
 export function validateProjectData(
@@ -41,6 +46,29 @@ export function validateProjectData(
     !Number.isFinite(projectData.ticksPerQuarter)
   ) {
     throw new StoreError('Project data is invalid.', 'INVALID_PROJECT', projectData)
+  }
+
+  for (const track of projectData.tracks) {
+    if (track == null || !Array.isArray(track.notes)) {
+      throw new StoreError('Project track data is invalid.', 'INVALID_PROJECT', track)
+    }
+    for (const note of track.notes) {
+      if (note?.fingering != null) validateNoteFingering(note.fingering)
+    }
+  }
+}
+
+export function validateNoteFingering(fingering: NoteFingering): void {
+  if (
+    fingering == null
+    || typeof fingering !== 'object'
+    || (fingering.hand !== 'left' && fingering.hand !== 'right')
+    || !Number.isInteger(fingering.finger)
+    || fingering.finger < 1
+    || fingering.finger > 5
+    || (fingering.source !== 'generated' && fingering.source !== 'manual')
+  ) {
+    throw new StoreError('Note fingering is invalid.', 'INVALID_PROJECT', fingering)
   }
 }
 
@@ -79,7 +107,7 @@ export function validateTrackId(trackId: string): void {
 }
 
 export function validatePieceType(type: PieceType): void {
-  if (type === 'midi' || type === 'recording') {
+  if (type === 'midi' || type === 'musicxml' || type === 'project' || type === 'recording') {
     return
   }
 
@@ -144,11 +172,7 @@ export function validateAppMode(mode: AppMode): void {
     mode === 'select' ||
     mode === 'create' ||
     mode === 'createCamera' ||
-    mode === 'createRecord' ||
-    mode === 'learn' ||
-    mode === 'learnSong' ||
-    mode === 'learnSession' ||
-    mode === 'learnEnd'
+    mode === 'createRecord'
   ) {
     return
   }
@@ -224,31 +248,58 @@ export function validateRecordModeConfigPatch(patch: Partial<RecordModeConfig>):
   }
 }
 
-export function validateLearnNoteColorMode(mode: LearnNoteColorMode): void {
-  if (mode === 'white' || mode === 'perHand' || mode === 'custom') {
-    return
-  }
-
-  throw new StoreError('Learn note color mode is invalid.', 'INVALID_STATE', mode)
-}
-
 export function validateCreateNoteColorMode(mode: CreateNoteColorMode): void {
-  if (mode === 'single' || mode === 'pitchClass') {
+  if (mode === 'single' || mode === 'pitchClass' || mode === 'gradient' || mode === 'velocity' || mode === 'dynamic' || mode === 'random' || mode === 'tutorial') {
     return
   }
 
   throw new StoreError('Create note color mode is invalid.', 'INVALID_STATE', mode)
 }
 
-export function validateLearnVisuals(visuals: LearnVisuals): void {
-  if (visuals == null || typeof visuals !== 'object') {
-    throw new StoreError('Learn visuals preset is invalid.', 'INVALID_STATE', visuals)
+export function validatePitchClassColors(colors: Record<number, string>): void {
+  if (colors == null || typeof colors !== 'object' || Array.isArray(colors)) {
+    throw new StoreError('Pitch class colors must be an object.', 'INVALID_STATE', colors)
   }
 
-  validateLearnNoteColorMode(visuals.noteColor)
-  validateHexColor(visuals.leftHandColor)
-  validateHexColor(visuals.rightHandColor)
-  validateFiniteStateNumber(visuals.noteOpacity, 'learnVisuals.noteOpacity')
+  const keys = Object.keys(colors)
+  if (
+    keys.length !== 12 ||
+    keys.some((key) => !Number.isInteger(Number(key)) || Number(key) < 0 || Number(key) > 11)
+  ) {
+    throw new StoreError('Pitch class colors must include exactly pitch classes 0 through 11.', 'INVALID_STATE', colors)
+  }
+
+  for (let pitchClass = 0; pitchClass < 12; pitchClass += 1) {
+    validateHexColor(colors[pitchClass])
+  }
+}
+
+export function validateParticleSettingsPatch(patch: Partial<ParticleSettings>): void {
+  if (patch == null || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new StoreError('Particle settings patch is invalid.', 'INVALID_STATE', patch)
+  }
+
+  if (patch.enabled != null && typeof patch.enabled !== 'boolean') {
+    throw new StoreError('particleSettings.enabled must be a boolean.', 'INVALID_STATE', patch.enabled)
+  }
+
+  if (patch.style != null && !['spark', 'wisp', 'ray'].includes(patch.style)) {
+    throw new StoreError('particleSettings.style is invalid.', 'INVALID_STATE', patch.style)
+  }
+
+  if (patch.colorMode != null && patch.colorMode !== 'note' && patch.colorMode !== 'custom') {
+    throw new StoreError('particleSettings.colorMode is invalid.', 'INVALID_STATE', patch.colorMode)
+  }
+
+  if (patch.customColor != null) {
+    validateHexColor(patch.customColor)
+  }
+
+  for (const key of ['density', 'size', 'speed', 'spread', 'lifetime', 'glow'] as const) {
+    if (patch[key] != null) {
+      validateFiniteStateNumber(patch[key], `particleSettings.${key}`)
+    }
+  }
 }
 
 export function validateColorMode(mode: VisualizerSettingsSlice['colorMode']): void {
@@ -259,12 +310,35 @@ export function validateColorMode(mode: VisualizerSettingsSlice['colorMode']): v
   throw new StoreError('Color mode is invalid.', 'INVALID_STATE', mode)
 }
 
+export function validateBackgroundStyle(style: VisualizerSettingsSlice['backgroundStyle']): void {
+  if (style === 'flat' || style === 'studio' || style === 'aurora' || style === 'stage') {
+    return
+  }
+
+  throw new StoreError('Background style is invalid.', 'INVALID_STATE', style)
+}
+
 export function validateNoteStyle(style: VisualizerSettingsSlice['noteStyle']): void {
-  if (style === 'solid' || style === 'gradient' || style === 'saber') {
+  if (
+    style === 'solid'
+    || style === 'gradient'
+    || style === 'saber'
+    || style === 'outline'
+    || style === 'crystal'
+    || style === 'gem'
+  ) {
     return
   }
 
   throw new StoreError('Note style is invalid.', 'INVALID_STATE', style)
+}
+
+export function validateScoreOverlaySize(size: VisualizerSettingsSlice['scoreOverlaySize']): void {
+  if (size === 'compact' || size === 'standard' || size === 'large') {
+    return
+  }
+
+  throw new StoreError('Score overlay size is invalid.', 'INVALID_STATE', size)
 }
 
 export function validateNoteGradientDirection(

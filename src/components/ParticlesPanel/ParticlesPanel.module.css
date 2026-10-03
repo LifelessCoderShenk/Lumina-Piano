@@ -1,0 +1,163 @@
+.panel {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.enabledControl,
+.rangeControl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.enabledControl {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.enabledControl input {
+  accent-color: #ffffff;
+}
+
+.styleControl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 14px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.styleButton,
+.styleButtonActive {
+  min-height: 30px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.colorModeControl {
+  grid-template-columns: repeat(2, 1fr);
+  margin-top: 8px;
+}
+
+.colorControl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.colorControl input {
+  width: 42px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: #171717;
+  cursor: pointer;
+}
+
+.styleButtonActive {
+  background: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
+}
+
+.presetRow {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.presetControl {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 7px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.presetControl select {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: #171717;
+  color: var(--color-text-body);
+  padding: 0 8px;
+}
+
+.resetButton {
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.84);
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 0 10px;
+}
+
+.resetButton:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.rangeLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.rangeLabel output {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.rangeControl input[type="range"] {
+  width: 100%;
+  accent-color: #ffffff;
+}

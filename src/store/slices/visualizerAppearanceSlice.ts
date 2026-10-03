@@ -5,12 +5,14 @@ import type { AppActions, AppStore, VisualizerSettingsSlice } from '../types'
 import {
   clamp,
   validateColorMode,
+  validateBackgroundStyle,
   validateFiniteStateNumber,
   validateHexColor,
   validateNoteGradientDirection,
   validateNoteLabelFormat,
   validateNoteStyle,
   validatePitchClass,
+  validateScoreOverlaySize,
 } from '../validation'
 
 type VisualizerAppearanceStoreSlice =
@@ -18,6 +20,7 @@ type VisualizerAppearanceStoreSlice =
   & Pick<
     AppActions,
     | 'setBackgroundColor'
+    | 'setBackgroundStyle'
     | 'setColorMode'
     | 'setGradientBottomColorLeft'
     | 'setGradientBottomColorLeftBlack'
@@ -33,6 +36,14 @@ type VisualizerAppearanceStoreSlice =
     | 'setNoteLabelsOnNotes'
     | 'setNoteLabelSize'
     | 'setNoteStyle'
+    | 'setFallSpeed'
+    | 'setNoteWidth'
+    | 'setNoteOpacity'
+    | 'setNoteGlow'
+    | 'setLightingIntensity'
+    | 'setKeyboardSaber'
+    | 'setScoreOverlayOpacity'
+    | 'setScoreOverlaySize'
     | 'setPitchClassColor'
     | 'setRightHandColor'
     | 'setSplitPitch'
@@ -109,6 +120,45 @@ export const createVisualizerAppearanceSlice: StateCreator<
     })
   },
 
+  setFallSpeed: (value) => {
+    validateFiniteStateNumber(value, 'fallSpeed')
+    set((state) => { state.fallSpeed = clamp(Math.round(value), 50, 200) })
+  },
+
+  setNoteWidth: (value) => {
+    validateFiniteStateNumber(value, 'noteWidth')
+    set((state) => { state.noteWidth = clamp(Math.round(value), 60, 120) })
+  },
+
+  setNoteOpacity: (value) => {
+    validateFiniteStateNumber(value, 'noteOpacity')
+    set((state) => { state.noteOpacity = clamp(Math.round(value), 20, 100) })
+  },
+
+  setNoteGlow: (value) => {
+    validateFiniteStateNumber(value, 'noteGlow')
+    set((state) => { state.noteGlow = clamp(Math.round(value), 0, 200) })
+  },
+
+  setLightingIntensity: (value) => {
+    validateFiniteStateNumber(value, 'lightingIntensity')
+    set((state) => { state.lightingIntensity = clamp(Math.round(value), 0, 200) })
+  },
+
+  setKeyboardSaber: (value) => {
+    set((state) => { state.keyboardSaber = value })
+  },
+
+  setScoreOverlaySize: (size) => {
+    validateScoreOverlaySize(size)
+    set((state) => { state.scoreOverlaySize = size })
+  },
+
+  setScoreOverlayOpacity: (value) => {
+    validateFiniteStateNumber(value, 'scoreOverlayOpacity')
+    set((state) => { state.scoreOverlayOpacity = clamp(Math.round(value), 50, 100) })
+  },
+
   setNoteGradientDirection: (direction) => {
     validateNoteGradientDirection(direction)
 
@@ -163,6 +213,11 @@ export const createVisualizerAppearanceSlice: StateCreator<
     set((state) => {
       state.backgroundColor = color
     })
+  },
+
+  setBackgroundStyle: (style) => {
+    validateBackgroundStyle(style)
+    set((state) => { state.backgroundStyle = style })
   },
 
   setLaneOpacity: (value) => {

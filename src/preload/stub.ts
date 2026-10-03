@@ -2,16 +2,19 @@ import type { ElectronAPI } from './api'
 
 export function installStub() {
   window.electronAPI = {
-    getSongs: async () => [],
-    uploadSong: async () => null,
-    deleteSong: async (songId) => {
-      console.log('[Stub] deleteSong', songId)
-    },
-    showSaveDialog: async () => 'C:/tmp/learn-visuals.json',
+    showSaveDialog: async () => 'C:/tmp/visualizer-settings.json',
     openJsonFile: async () => null,
     openMidiFile: async () => null,
+    openMusicXmlFile: async () => null,
+    openProjectFile: async () => null,
+    openVideoFile: async () => null,
+    openAudioFile: async () => null,
     dialog: {
+      openAudioFile: async () => null,
       openMidiFile: async () => null,
+      openMusicXmlFile: async () => null,
+      openProjectFile: async () => null,
+      openVideoFile: async () => null,
       showSaveDialog: async () => 'stub_export.mp4',
       getDefaultExportPath: async () => 'C:/Users/User/Videos/lumina_export.mp4',
     },
@@ -24,18 +27,11 @@ export function installStub() {
     ffmpeg: {
       run: async (args) => console.log('[Stub] ffmpeg:run', args),
     },
-    library: {
-      getUserSongs: async () => [],
-      saveUserSong: async ({ sourcePath }) => ({
-        composer: 'User Upload',
-        difficulty: 'intermediate',
-        file: sourcePath.split(/[\\/]/).pop() ?? 'user-song.mid',
-        filePath: sourcePath,
-        id: globalThis.crypto.randomUUID(),
-        source: 'user',
-        title: sourcePath.split(/[\\/]/).pop()?.replace(/\.midi?$/i, '') ?? 'Uploaded MIDI',
-      }),
-      deleteUserSong: async (songId) => console.log('[Stub] library:deleteUserSong', songId),
+    samplePieces: {
+      list: async () => [],
+      read: async (fileName) => {
+        throw new Error(`Sample piece is unavailable in the browser stub: ${fileName}`)
+      },
     },
     shell: {
       openPath: async (path) => console.log('[Stub] shell:openPath', path),

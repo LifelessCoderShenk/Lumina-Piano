@@ -8,6 +8,9 @@ import { DeleteNotesCommand } from './DeleteNotesCommand'
 export function useCommandShortcuts() {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (getAppState().appMode === 'createRecord' && getAppState().recordModeView === 'transcription') {
+        return
+      }
       if (isEditableTarget(event.target)) {
         return
       }

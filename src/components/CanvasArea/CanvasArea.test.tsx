@@ -26,6 +26,10 @@ const mockThreeRendererResize = vi.hoisted(() => vi.fn())
 const mockThreeRendererGetKeyX = vi.hoisted(() => vi.fn(() => 200))
 const mockThreeRendererGetKeyboardY = vi.hoisted(() => vi.fn(() => 220))
 const mockThreeRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
+const mockThreeRendererSetLiveNoteSource = vi.hoisted(() => vi.fn())
+const mockThreeRendererSetGuideOnly = vi.hoisted(() => vi.fn())
+const mockThreeRendererIsLiveNoteSourceActiveOrRecent = vi.hoisted(() => vi.fn(() => false))
+const mockPlayLiveNote = vi.hoisted(() => vi.fn(async () => undefined))
 const mockCameraInit = vi.hoisted(() => vi.fn())
 const mockCameraIsInitialized = vi.hoisted(() => vi.fn(() => false))
 const mockCameraSetViewportSize = vi.hoisted(() => vi.fn())
@@ -33,12 +37,14 @@ const mockResizeObserverCallback = vi.hoisted(() => ({ current: null as null | R
 const mockWindowMaximize = vi.hoisted(() => vi.fn(async () => undefined))
 const mockClientSize = vi.hoisted(() => ({ height: 600, width: 800 }))
 const mockStoreState = vi.hoisted(() => ({
-  appMode: 'create' as const,
+  appMode: 'create' as 'create' | 'createCamera' | 'createRecord',
   currentTick: 0,
+  isPlaying: false,
   isProjectLoaded: false,
+  precomputedTempoMap: null,
   projectData: null as null,
   visualizerSettings: {
-    aspectRatio: 'fit' as const,
+    aspectRatio: 'fit' as 'fit' | '16:9' | '9:16' | '1:1' | '4:3',
   },
 }))
 
@@ -77,6 +83,9 @@ vi.mock('../../renderer/ThreeRenderer', () => ({
     renderFrame: mockThreeRendererRenderFrame,
     resize: mockThreeRendererResize,
     setKeyboardOpacity: mockThreeRendererSetKeyboardOpacity,
+    setLiveNoteSource: mockThreeRendererSetLiveNoteSource,
+    setGuideOnly: mockThreeRendererSetGuideOnly,
+    isLiveNoteSourceActiveOrRecent: mockThreeRendererIsLiveNoteSourceActiveOrRecent,
   },
 }))
 
@@ -91,6 +100,16 @@ vi.mock('../../camera/CameraSystem', () => ({
 vi.mock('../../store/store', () => ({
   getAppState: () => mockStoreState,
   useAppStore: (selector: (state: typeof mockStoreState) => unknown) => selector(mockStoreState),
+  usePlaybackState: () => ({
+    currentTick: mockStoreState.currentTick,
+    isPlaying: mockStoreState.isPlaying,
+  }),
+}))
+
+vi.mock('../../audio/AudioScheduler', () => ({
+  audioScheduler: {
+    playLiveNote: mockPlayLiveNote,
+  },
 }))
 
 const { CanvasArea } = await import('./CanvasArea')
@@ -126,11 +145,18 @@ describe('CanvasArea', () => {
     mockThreeRendererGetKeyX.mockReset()
     mockThreeRendererGetKeyboardY.mockReset()
     mockThreeRendererSetKeyboardOpacity.mockReset()
+    mockThreeRendererSetLiveNoteSource.mockReset()
+    mockThreeRendererSetGuideOnly.mockReset()
+    mockThreeRendererIsLiveNoteSourceActiveOrRecent.mockReset()
+    mockThreeRendererIsLiveNoteSourceActiveOrRecent.mockReturnValue(false)
+    mockPlayLiveNote.mockReset()
     mockCameraInit.mockReset()
     mockCameraIsInitialized.mockReset()
     mockCameraIsInitialized.mockReturnValue(false)
     mockCameraSetViewportSize.mockReset()
     mockStoreState.appMode = 'create'
+    mockStoreState.isPlaying = false
+    mockStoreState.precomputedTempoMap = null
     mockStoreState.visualizerSettings.aspectRatio = 'fit'
     mockWindowMaximize.mockReset()
     mockWindowMaximize.mockImplementation(async () => undefined)
@@ -300,11 +326,47 @@ describe('CanvasArea', () => {
     expect(screen.getByRole('button', { name: 'Expand window' })).toBeTruthy()
   })
 
+  it('renders the playback overlay only in plain Create Mode', async () => {
+    const view = render(<CanvasArea engine="three" />)
+
+    await waitFor(() => {
+      expect(mockThreeRendererInit).toHaveBeenCalledTimes(1)
+    })
+
+    expect(screen.getByTestId('create-playback-overlay')).toBeTruthy()
+
+    mockStoreState.appMode = 'createCamera'
+    view.rerender(<CanvasArea engine="three" />)
+    expect(screen.queryByTestId('create-playback-overlay')).toBeNull()
+
+    mockStoreState.appMode = 'createRecord'
+    view.rerender(<CanvasArea engine="three" />)
+    expect(screen.queryByTestId('create-playback-overlay')).toBeNull()
+
+  })
+
   it('resizes the renderer to the container clientWidth and clientHeight with no offsets', async () => {
     render(<CanvasArea engine="pixi" />)
 
     await waitFor(() => {
       expect(mockPixiRendererResize).toHaveBeenCalledWith(800, 600)
+    })
+  })
+
+  it('passes a custom keyboard proportion to the renderer without resizing the canvas', async () => {
+    const view = render(<CanvasArea engine="three" keyboardHeightRatio={0.5} />)
+
+    await waitFor(() => {
+      expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600, {
+        layoutContext: { keyboardHeightRatio: 0.5, preserveKeyboardHeightRatio: true },
+      })
+    })
+
+    view.rerender(<CanvasArea engine="three" keyboardHeightRatio={0.4} />)
+    await waitFor(() => {
+      expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600, {
+        layoutContext: { keyboardHeightRatio: 0.4, preserveKeyboardHeightRatio: true },
+      })
     })
   })
 
@@ -364,6 +426,15 @@ describe('CanvasArea', () => {
       expect(screen.getByTestId('canvas-preview-frame').style.height).toBe('600px')
       expect(mockPixiRendererResize).toHaveBeenCalledWith(600, 600)
     })
+
+    mockStoreState.visualizerSettings.aspectRatio = '9:16'
+    view.rerender(<CanvasArea engine="pixi" />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('canvas-preview-frame').style.width).toBe('337.5px')
+      expect(screen.getByTestId('canvas-preview-frame').style.height).toBe('600px')
+      expect(mockPixiRendererResize).toHaveBeenCalledWith(337.5, 600)
+    })
   })
 
   it('drives the three renderer when engine is set to three', async () => {
@@ -409,5 +480,93 @@ describe('CanvasArea', () => {
     view.unmount()
 
     expect(getActiveVisualizerRenderer()).toBeNull()
+  })
+
+  it('plays each keyboard key crossed by a held pointer and releases it on pointer-up', async () => {
+    const onKeyboardNote = vi.fn()
+    render(<CanvasArea engine="three" onKeyboardNote={onKeyboardNote} />)
+
+    await waitFor(() => {
+      expect(mockThreeRendererInit).toHaveBeenCalledTimes(1)
+    })
+
+    const canvas = screen.getByTestId('visualizer-canvas')
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 600,
+      height: 600,
+      left: 0,
+      right: 800,
+      toJSON: () => ({}),
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+    })
+    Object.assign(canvas, {
+      hasPointerCapture: vi.fn(() => true),
+      releasePointerCapture: vi.fn(),
+      setPointerCapture: vi.fn(),
+    })
+
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 500, pointerId: 7 })
+    const firstNote = mockThreeRendererSetLiveNoteSource.mock.calls.at(-1)?.[1]?.[0]
+    expect(mockThreeRendererSetLiveNoteSource).toHaveBeenLastCalledWith('pointer-keyboard', [expect.objectContaining({ velocity: 100 })])
+    expect(mockPlayLiveNote).toHaveBeenCalledWith(firstNote.pitch, 100)
+
+    fireEvent.pointerMove(canvas, { clientX: 180, clientY: 500, pointerId: 7 })
+    const secondNote = mockThreeRendererSetLiveNoteSource.mock.calls.at(-1)?.[1]?.[0]
+    expect(secondNote.pitch).not.toBe(firstNote.pitch)
+    fireEvent.pointerMove(canvas, { clientX: 180, clientY: 500, pointerId: 7 })
+    expect(onKeyboardNote).toHaveBeenCalledTimes(3)
+
+    fireEvent.pointerUp(canvas, { pointerId: 7 })
+    expect(mockThreeRendererSetLiveNoteSource).toHaveBeenLastCalledWith('pointer-keyboard', [])
+    expect(onKeyboardNote.mock.calls.map(([event]) => [event.type, event.pitch])).toEqual([
+      ['noteon', firstNote.pitch], ['noteoff', firstNote.pitch], ['noteon', secondNote.pitch], ['noteoff', secondNote.pitch],
+    ])
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 500, pointerId: 8 })
+    fireEvent(window, new Event('blur'))
+    expect(onKeyboardNote.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ type: 'noteoff', pitch: firstNote.pitch }))
+    expect(mockThreeRendererSetLiveNoteSource).toHaveBeenLastCalledWith('pointer-keyboard', [])
+  })
+
+  it('switches the Three renderer into static keyboard guide mode without enabling pointer play', async () => {
+    render(<CanvasArea engine="three" guideOnly />)
+
+    await waitFor(() => expect(mockThreeRendererInit).toHaveBeenCalledTimes(1))
+    expect(mockThreeRendererSetGuideOnly).toHaveBeenCalledWith(true)
+
+    const canvas = screen.getByTestId('visualizer-canvas')
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 600, height: 600, left: 0, right: 800, toJSON: () => ({}), top: 0, width: 800, x: 0, y: 0,
+    })
+    Object.assign(canvas, { setPointerCapture: vi.fn() })
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 500, pointerId: 3 })
+    expect(mockThreeRendererSetLiveNoteSource).not.toHaveBeenCalled()
+  })
+
+  it('blocks pointer play while transport or Record MIDI is active, then permits it when both are idle', async () => {
+    mockStoreState.isPlaying = true
+    const view = render(<CanvasArea engine="three" />)
+    await waitFor(() => expect(mockThreeRendererInit).toHaveBeenCalledTimes(1))
+    const canvas = screen.getByTestId('visualizer-canvas')
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 600, height: 600, left: 0, right: 800, toJSON: () => ({}), top: 0, width: 800, x: 0, y: 0,
+    })
+    Object.assign(canvas, { setPointerCapture: vi.fn() })
+
+    mockStoreState.isPlaying = true
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 500, pointerId: 1 })
+    expect(mockThreeRendererSetLiveNoteSource).not.toHaveBeenCalled()
+
+    mockStoreState.isPlaying = false
+    view.rerender(<CanvasArea engine="three" />)
+    mockThreeRendererIsLiveNoteSourceActiveOrRecent.mockReturnValue(true)
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 500, pointerId: 2 })
+    expect(mockThreeRendererSetLiveNoteSource).not.toHaveBeenCalled()
+
+    mockThreeRendererIsLiveNoteSourceActiveOrRecent.mockReturnValue(false)
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 500, pointerId: 3 })
+    expect(mockThreeRendererSetLiveNoteSource).toHaveBeenCalledWith('pointer-keyboard', [expect.any(Object)])
   })
 })

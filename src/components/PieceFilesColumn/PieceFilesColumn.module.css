@@ -47,20 +47,48 @@
   color: var(--color-text-body);
 }
 
-.samplePiece {
-  pointer-events: none;
-  opacity: 0.4;
-  cursor: default;
-}
-
-.learnButton {
-  align-self: flex-start;
-  margin-top: 10px;
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: transparent;
-  color: var(--color-text-body);
-  font: inherit;
-  font-size: 12px;
+.addMidiButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--color-icon) 70%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-icon) 18%, var(--color-bg));
+  color: var(--color-text-header);
+  font: 600 12px/1 var(--font-family-base);
   cursor: pointer;
 }
+.importActions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 8px; }
+.projectActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.projectButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-body);
+  font: 500 11px/1 var(--font-family-base);
+  cursor: pointer;
+}
+.projectButton:hover:enabled { background: rgba(255, 255, 255, 0.09); }
+.projectButton:disabled { opacity: .42; cursor: default; }
+.statusMessage, .errorMessage { margin: -3px 2px 8px; font-size: 11px; line-height: 1.3; }
+.statusMessage { color: #8fd2aa; }
+.errorMessage { color: #ff8c8c; }
+.addMidiButton:hover:enabled { filter: brightness(1.18); }
+.addMidiButton:disabled { opacity: .55; cursor: progress; }
+.loadingIcon { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

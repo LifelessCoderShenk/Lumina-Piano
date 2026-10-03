@@ -3,12 +3,18 @@ import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockLoadMidiFileFromPath = vi.hoisted(() => vi.fn(async () => true))
+const mockLoadMidiBytes = vi.hoisted(() => vi.fn(async () => true))
 const mockWarmUpAudioAndStartPlayback = vi.hoisted(() => vi.fn(async () => undefined))
+const mockLoadLuminaProject = vi.hoisted(() => vi.fn(async () => ({ filePath: 'C:/pieces/night.lumina', name: 'Night' })))
+const mockLoadMusicXml = vi.hoisted(() => vi.fn(async () => ({ filePath: 'C:/pieces/score.musicxml', name: 'Score' })))
 
 vi.mock('../../midi/loadMidiProject', () => ({
+  loadMidiBytes: mockLoadMidiBytes,
   loadMidiFileFromPath: mockLoadMidiFileFromPath,
   warmUpAudioAndStartPlayback: mockWarmUpAudioAndStartPlayback,
 }))
+vi.mock('../../project/luminaProject', () => ({ loadLuminaProjectFileFromPath: mockLoadLuminaProject }))
+vi.mock('../../musicxml/loadMusicXmlProject', () => ({ loadMusicXmlFileFromPath: mockLoadMusicXml }))
 
 const { registerMidiPieceLoader } = await import('../../store/midiPieceLoaderAccess')
 registerMidiPieceLoader({
@@ -24,8 +30,12 @@ describe('PiecesColumn', () => {
     resetStore()
     mockLoadMidiFileFromPath.mockReset()
     mockLoadMidiFileFromPath.mockImplementation(async () => true)
+    mockLoadMidiBytes.mockReset()
+    mockLoadMidiBytes.mockImplementation(async () => true)
     mockWarmUpAudioAndStartPlayback.mockReset()
     mockWarmUpAudioAndStartPlayback.mockImplementation(async () => undefined)
+    mockLoadLuminaProject.mockClear()
+    mockLoadMusicXml.mockClear()
     applyDesignTokens()
   })
 
@@ -37,25 +47,18 @@ describe('PiecesColumn', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders 2 default placeholder pieces plus user pieces from the store', () => {
+  it('renders user pieces without fictional sample placeholders', () => {
+    window.electronAPI = {} as typeof window.electronAPI
     useAppStore.getState().addPiece(createUserPiece())
 
     render(<PiecesColumn />)
 
-    const samplePieceOne = screen.getByRole('button', { name: 'Sample Piece 1' }) as HTMLButtonElement
-    const samplePieceTwo = screen.getByRole('button', { name: 'Sample Piece 2' }) as HTMLButtonElement
     const userPiece = screen.getByRole('button', { name: 'My First Piece' }) as HTMLButtonElement
 
     expect(screen.getByTestId('pieces-column').style.backgroundColor).toBe('var(--color-bg)')
-    expect((screen.getByRole('heading', { name: 'Pieces' }) as HTMLHeadingElement).style.color).toBe('var(--color-text-header)')
-    expect(samplePieceOne.getAttribute('aria-disabled')).toBe('true')
-    expect(samplePieceTwo.getAttribute('aria-disabled')).toBe('true')
+    expect((screen.getByRole('heading', { name: 'All pieces' }) as HTMLHeadingElement).style.color).toBe('var(--color-text-header)')
+    expect(screen.queryByRole('button', { name: /Sample Piece [12]/ })).toBeNull()
     expect(userPiece).toBeTruthy()
-    expect(samplePieceOne.style.color).toBe('var(--color-text-body)')
-    expect(samplePieceOne.style.pointerEvents).toBe('none')
-    expect(samplePieceOne.style.opacity).toBe('0.4')
-    expect(samplePieceOne.style.minHeight).toBe('40px')
-    expect(samplePieceOne.style.width).toBe('100%')
     expect(userPiece.style.color).toBe('var(--color-text-body)')
     expect(userPiece.style.pointerEvents).toBe('auto')
     expect(userPiece.style.cursor).toBe('pointer')
@@ -64,7 +67,7 @@ describe('PiecesColumn', () => {
     expect(userPiece.style.width).toBe('100%')
   })
 
-  it('clicking a user MIDI piece loads it through the existing pipeline and highlights the selected piece', async () => {
+  it('clicking a user MIDI piece uses the same paused loading state as sample pieces and highlights it', async () => {
     useAppStore.getState().addPiece(createUserPiece())
 
     render(<PiecesColumn />)
@@ -76,9 +79,7 @@ describe('PiecesColumn', () => {
       expect(mockLoadMidiFileFromPath).toHaveBeenCalledWith('C:/pieces/my-first-piece.mid')
     })
 
-    await waitFor(() => {
-      expect(mockWarmUpAudioAndStartPlayback).toHaveBeenCalledTimes(1)
-    })
+    expect(mockWarmUpAudioAndStartPlayback).not.toHaveBeenCalled()
 
     await waitFor(() => {
       expect((screen.getByRole('button', { name: 'My First Piece' }) as HTMLButtonElement).style.backgroundColor).toBe('var(--color-icon)')
@@ -91,9 +92,80 @@ describe('PiecesColumn', () => {
     expect(screen.queryByRole('button', { name: 'Record New' })).toBeNull()
   })
 
-  it('skips the MIDI pipeline for mp4 pieces, shows a temporary error, and renders a REC badge', async () => {
-    vi.useFakeTimers()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  it('shows real sample titles and loads the named MIDI file', async () => {
+    window.electronAPI = {
+      samplePieces: {
+        list: vi.fn(async () => ['Etude-in-C-Minor-Opus-10-Nr-12.mid', 'Pirates of the Caribbean.mid', 'third.mid']),
+        read: vi.fn(async () => Uint8Array.from([1, 2, 3])),
+      },
+    } as typeof window.electronAPI
+
+    render(<PiecesColumn />)
+
+    const samplePieceOne = await screen.findByRole('button', { name: 'Etude In C Minor Opus 10 Nr 12' })
+    const samplePieceTwo = screen.getByRole('button', { name: 'Pirates Of The Caribbean' })
+    expect(samplePieceOne.title).toBe('Load Etude In C Minor Opus 10 Nr 12')
+    expect(samplePieceTwo.title).toBe('Load Pirates Of The Caribbean')
+    expect(screen.queryByRole('button', { name: 'Third' })).toBeNull()
+
+    await waitFor(() => {
+      expect((samplePieceOne as HTMLButtonElement).disabled).toBe(false)
+      expect((samplePieceTwo as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    fireEvent.click(samplePieceTwo)
+
+    await waitFor(() => {
+      expect(window.electronAPI.samplePieces.read).toHaveBeenCalledWith('Pirates of the Caribbean.mid')
+      expect(mockLoadMidiBytes).toHaveBeenCalledWith(Uint8Array.from([1, 2, 3]))
+    })
+
+    expect(useAppStore.getState().createNoteColors.mode).toBe('pitchClass')
+    expect(useAppStore.getState().createNoteColors.pitchClassColors).toEqual({
+      0: '#f74fb1',
+      1: '#f74f8e',
+      2: '#f74f70',
+      3: '#f7674f',
+      4: '#f7834f',
+      5: '#f7a44f',
+      6: '#f7c74f',
+      7: '#f7d44f',
+      8: '#f79a4f',
+      9: '#f76e4f',
+      10: '#f74f63',
+      11: '#f74f8a',
+    })
+  })
+
+  it('replaces placeholders and user pieces with the bundled sample-piece list', async () => {
+    useAppStore.getState().addPiece(createUserPiece())
+    window.electronAPI = {
+      samplePieces: {
+        list: vi.fn(async () => ['moonlight-sonata.mid', 'twinkle_twinkle.midi']),
+        read: vi.fn(async () => Uint8Array.from([1, 2, 3])),
+      },
+    } as typeof window.electronAPI
+
+    render(<PiecesColumn showSamplePieces />)
+
+    expect(await screen.findByRole('button', { name: 'Moonlight Sonata' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Twinkle Twinkle' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Sample Piece 1' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'My First Piece' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Moonlight Sonata' }))
+
+    await waitFor(() => {
+      expect(window.electronAPI.samplePieces.read).toHaveBeenCalledWith('moonlight-sonata.mid')
+      expect(mockLoadMidiBytes).toHaveBeenCalledWith(Uint8Array.from([1, 2, 3]))
+    })
+  })
+
+  it('opens recording pieces in the system media player instead of trying to load them as MIDI', async () => {
+    const openRecording = vi.fn(async () => undefined)
+    window.electronAPI = {
+      shell: { openPath: openRecording },
+    } as typeof window.electronAPI
     useAppStore.getState().addPiece(createRecordingPiece())
 
     render(<PiecesColumn />)
@@ -106,25 +178,25 @@ describe('PiecesColumn', () => {
 
     expect(mockLoadMidiFileFromPath).not.toHaveBeenCalled()
     expect(mockWarmUpAudioAndStartPlayback).not.toHaveBeenCalled()
-    expect(warnSpy).toHaveBeenCalledWith('[loadPiece] Skipping non-MIDI file:', 'C:/pieces/practice-take.mp4')
+    expect(openRecording).toHaveBeenCalledWith('C:/pieces/practice-take.mp4')
     expect(recordingPiece.style.fontStyle).toBe('italic')
     expect(recordingPiece.style.opacity).toBe('0.65')
     expect(screen.getByText('REC')).toBeTruthy()
-    expect(screen.getByRole('alert').textContent).toContain(
-      'MP4 recording pieces cannot be loaded yet. This feature is coming in a future update.',
-    )
-
-    act(() => {
-      vi.advanceTimersByTime(3000)
-    })
-
-    await act(async () => {
-      await Promise.resolve()
-    })
-
     expect(screen.queryByRole('alert')).toBeNull()
+  })
 
-    warnSpy.mockRestore()
+  it('reopens project pieces as editable workspaces', async () => {
+    useAppStore.getState().addPiece({
+      createdAt: Date.now(), filePath: 'C:/pieces/night.lumina', id: 'project-1', name: 'Night', type: 'project',
+    })
+    render(<PiecesColumn />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Night' }))
+
+    await waitFor(() => expect(mockLoadLuminaProject).toHaveBeenCalledWith('C:/pieces/night.lumina'))
+    expect(mockLoadMidiFileFromPath).not.toHaveBeenCalled()
+    expect(useAppStore.getState().currentPieceId).toBe('project-1')
+    expect(screen.getByText('PROJECT')).toBeTruthy()
   })
 })
 

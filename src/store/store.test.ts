@@ -1,8 +1,16 @@
+/*
+INPUT: Store actions and isolated application-state fixtures.
+OUTPUT: Regression coverage for persistent-in-memory app state transitions.
+PURPOSE: Verifies mode configuration remains safe when project and creation features evolve.
+*/
+
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { ProjectData, Track } from '../midi/types'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
+import { CREATE_PITCH_CLASS_PALETTES } from './createNoteColorPalettes'
+import { PARTICLE_PRESETS } from './particlePresets'
 import {
   getAppState,
   resetStore,
@@ -39,8 +47,11 @@ describe('initial state', () => {
       cropLeft: 0,
       cropRight: 0,
       cropTop: 0,
+      flipHorizontal: false,
+      flipVertical: false,
       offsetX: 0,
       offsetY: 0,
+      rotation: 0,
       scale: 1,
     })
     expect(state.recordModeConfig).toEqual({
@@ -50,6 +61,7 @@ describe('initial state', () => {
       useMic: false,
       useMidiAudio: true,
     })
+    expect(state.handVisualization).toEqual({ enabled: false, opacity: 35 })
     expect(state.createNoteColors).toEqual({
       mode: 'single',
       pitchClassColors: {
@@ -66,8 +78,41 @@ describe('initial state', () => {
         10: '#7a4ff7',
         11: '#f74ff0',
       },
-      singleColor: '#2e65a2',
+      singleColor: '#4f8ef7',
+      velocityHighColor: '#62e8ff',
+      velocityLowColor: '#4b2f83',
     })
+  })
+})
+
+describe('note appearance', () => {
+  it('clamps note glow to its supported range', () => {
+    useAppStore.getState().setNoteGlow(260)
+    expect(getAppState().noteGlow).toBe(200)
+
+    useAppStore.getState().setNoteGlow(-20)
+    expect(getAppState().noteGlow).toBe(0)
+  })
+
+  it('updates and clamps synchronized score presentation', () => {
+    useAppStore.getState().setScoreOverlaySize('large')
+    useAppStore.getState().setScoreOverlayOpacity(20)
+
+    expect(getAppState().scoreOverlaySize).toBe('large')
+    expect(getAppState().scoreOverlayOpacity).toBe(50)
+
+    useAppStore.getState().setScoreOverlayOpacity(140)
+    expect(getAppState().scoreOverlayOpacity).toBe(100)
+  })
+})
+
+describe('ghost hand settings', () => {
+  it('updates the enabled state and clamps translucent opacity', () => {
+    useAppStore.getState().setHandVisualization({ enabled: true, opacity: 95 })
+    expect(getAppState().handVisualization).toEqual({ enabled: true, opacity: 80 })
+
+    useAppStore.getState().setHandVisualization({ opacity: 2 })
+    expect(getAppState().handVisualization).toEqual({ enabled: true, opacity: 10 })
   })
 })
 
@@ -294,7 +339,7 @@ describe('create camera mode', () => {
 })
 
 describe('create record mode', () => {
-  it('enters record mode and resets the second bar to pieces', () => {
+  it('enters performance recording with camera framing controls visible', () => {
     useAppStore.setState({
       activeSecondBarTab: 'camera',
       alignStep: 'waiting-high-c',
@@ -306,7 +351,7 @@ describe('create record mode', () => {
     useAppStore.getState().enterRecordMode()
 
     expect(getAppState().appMode).toBe('createRecord')
-    expect(getAppState().activeSecondBarTab).toBe('pieces')
+    expect(getAppState().activeSecondBarTab).toBe('camera')
     expect(getAppState().alignStep).toBe('idle')
     expect(getAppState().lowAPoint).toBeNull()
     expect(getAppState().highCPoint).toBeNull()
@@ -330,11 +375,113 @@ describe('create record mode', () => {
   })
 })
 
+describe('Transcriptor mode', () => {
+  it('carries selected MIDI, camera, and microphone devices between Record views', () => {
+    useAppStore.getState().setRecordModeConfig({
+      audioSourceDeviceId: 'mic-1',
+      cameraDeviceId: 'camera-1',
+      midiDeviceId: 'midi-1',
+      useMic: true,
+    })
+
+    useAppStore.getState().setRecordModeView('transcription')
+
+    expect(getAppState().transcriptionSettings).toMatchObject({
+      cameraDeviceId: 'camera-1',
+      microphoneDeviceId: 'mic-1',
+      midiDeviceId: 'midi-1',
+    })
+    expect(getAppState().transcriptionSettings.mediaSources?.map((source) => [source.kind, source.deviceId])).toEqual([['video', 'camera-1'], ['audio', 'mic-1']])
+
+    useAppStore.getState().setTranscriptionSettings({
+      midiDeviceId: 'midi-2',
+      mediaSources: getAppState().transcriptionSettings.mediaSources?.map((source) => source.kind === 'video'
+        ? { ...source, deviceId: 'camera-2' }
+        : { ...source, deviceId: 'mic-2' }),
+    })
+    useAppStore.getState().setRecordModeView('video')
+
+    expect(getAppState().recordModeConfig).toMatchObject({
+      audioSourceDeviceId: 'mic-2',
+      cameraDeviceId: 'camera-2',
+      midiDeviceId: 'midi-2',
+      useMic: true,
+    })
+  })
+
+  it('keeps custom Transcription inputs while synchronizing the shared Performance inputs', () => {
+    useAppStore.getState().setTranscriptionSettings({
+      mediaSources: [{ id: 'piano-camera', kind: 'video', role: 'piano', name: 'Piano camera', deviceId: 'piano-1', enabled: true, volume: 1, latencyMs: 0 }],
+    })
+    useAppStore.getState().setRecordModeConfig({ cameraDeviceId: 'face-1', audioSourceDeviceId: 'mic-1', useMic: false })
+
+    useAppStore.getState().setRecordModeView('transcription')
+
+    expect(getAppState().transcriptionSettings.mediaSources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'piano-camera', deviceId: 'piano-1', enabled: true }),
+      expect.objectContaining({ id: 'shared-face-camera', deviceId: 'face-1', enabled: true }),
+      expect.objectContaining({ id: 'shared-audio-input', deviceId: 'mic-1', enabled: false }),
+    ]))
+  })
+
+  it('does not revive stale devices when a shared input is disabled or set to system default', () => {
+    useAppStore.getState().setRecordModeConfig({ cameraDeviceId: 'old-camera', audioSourceDeviceId: 'old-mic', useMic: true })
+    useAppStore.getState().setTranscriptionSettings({
+      mediaSources: [
+        { id: 'shared-face-camera', kind: 'video', role: 'face', name: 'Face camera', deviceId: null, enabled: true, volume: 1, latencyMs: 0 },
+        { id: 'shared-audio-input', kind: 'audio', role: 'microphone', name: 'Audio input', deviceId: null, enabled: false, volume: 1, latencyMs: 0 },
+      ],
+    })
+
+    useAppStore.getState().setRecordModeView('video')
+
+    expect(getAppState().recordModeConfig).toMatchObject({ cameraDeviceId: null, audioSourceDeviceId: null, useMic: false })
+  })
+
+  it('reopens Create in the last selected recording workspace', () => {
+    useAppStore.getState().setRecordModeView('transcription')
+    useAppStore.getState().setAppMode('create')
+
+    useAppStore.getState().enterRecordMode()
+
+    expect(getAppState().recordModeView).toBe('transcription')
+  })
+
+  it('starts a transient 120 BPM 4/4 session and clears its reviewable score', () => {
+    useAppStore.getState().enterRecordMode()
+    useAppStore.getState().setRecordModeView('transcription')
+
+    expect(getAppState().appMode).toBe('createRecord')
+    expect(getAppState().recordModeView).toBe('transcription')
+    expect(getAppState().transcriptionSettings).toMatchObject({
+      bpm: 120,
+      chordNamesEnabled: true,
+      keyLabelsEnabled: false,
+      meter: '4/4',
+    })
+
+    useAppStore.getState().setTranscriptionNotes([{
+      channel: 0,
+      endMs: 250,
+      id: 'captured-0',
+      pitch: 60,
+      startMs: 0,
+      velocity: 100,
+    }])
+    useAppStore.getState().setTranscriptionPhase('stopped')
+    useAppStore.getState().clearTranscription()
+
+    expect(getAppState().transcriptionNotes).toEqual([])
+    expect(getAppState().transcriptionPhase).toBe('idle')
+  })
+})
+
 describe('create note colors', () => {
   it('updates the Create Mode note color mode and values', () => {
     useAppStore.getState().setCreateNoteColorMode('pitchClass')
     useAppStore.getState().setCreateSingleNoteColor('#123456')
     useAppStore.getState().setCreatePitchClassColor(9, '#abcdef')
+    useAppStore.getState().setCreateVelocityColors('#112233', '#ddeeff')
 
     expect(getAppState().createNoteColors).toEqual({
       mode: 'pitchClass',
@@ -342,12 +489,31 @@ describe('create note colors', () => {
         9: '#abcdef',
       }),
       singleColor: '#123456',
+      velocityHighColor: '#ddeeff',
+      velocityLowColor: '#112233',
     })
   })
 
   it('validates Create Mode colors and pitch classes', () => {
     expect(() => useAppStore.getState().setCreateSingleNoteColor('red')).toThrowError(StoreError)
     expect(() => useAppStore.getState().setCreatePitchClassColor(12, '#ffffff')).toThrowError(StoreError)
+    expect(() => useAppStore.getState().setCreatePitchClassColors({ 0: '#ffffff' })).toThrowError(StoreError)
+  })
+
+  it('atomically replaces all Create Mode pitch-class colors', () => {
+    const aurora = CREATE_PITCH_CLASS_PALETTES.find((palette) => palette.id === 'aurora')!
+    let updates = 0
+    const unsubscribe = useAppStore.subscribe((state, previousState) => {
+      if (state.createNoteColors.pitchClassColors !== previousState.createNoteColors.pitchClassColors) {
+        updates += 1
+      }
+    })
+
+    useAppStore.getState().setCreatePitchClassColors(aurora.colors)
+    unsubscribe()
+
+    expect(updates).toBe(1)
+    expect(getAppState().createNoteColors.pitchClassColors).toEqual(aurora.colors)
   })
 
   it('does not replace Create Mode color state for identical values', () => {
@@ -361,13 +527,88 @@ describe('create note colors', () => {
   })
 })
 
+describe('Create Mode particle settings', () => {
+  it('defaults to enabled 100% multipliers and clamps patches to their supported ranges', () => {
+    expect(getAppState().particleSettings).toEqual({
+      colorMode: 'note',
+      customColor: '#7ec8ff',
+      density: 100,
+      enabled: true,
+      style: 'spark',
+      glow: 100,
+      lifetime: 100,
+      size: 100,
+      speed: 100,
+      spread: 100,
+    })
+
+    useAppStore.getState().setParticleSettings({
+      density: 0,
+      glow: 400,
+      lifetime: 0,
+      size: 400,
+      speed: 0,
+      spread: -1,
+    })
+
+    expect(getAppState().particleSettings).toMatchObject({
+      density: 25,
+      glow: 200,
+      lifetime: 50,
+      size: 200,
+      speed: 50,
+      spread: 0,
+    })
+  })
+
+  it('rejects invalid particle setting values', () => {
+    expect(() => useAppStore.getState().setParticleSettings({ density: Number.NaN })).toThrowError(StoreError)
+    expect(() => useAppStore.getState().setParticleSettings({ enabled: 'yes' as never })).toThrowError(StoreError)
+    expect(() => useAppStore.getState().setParticleSettings({ style: 'fog' as never })).toThrowError(StoreError)
+  })
+
+  it('atomically applies each named particle preset', () => {
+    for (const preset of PARTICLE_PRESETS) {
+      let notifications = 0
+      const unsubscribe = useAppStore.subscribe(() => {
+        notifications += 1
+      })
+
+      useAppStore.getState().setParticlePreset(preset.id)
+      unsubscribe()
+
+      expect(notifications).toBe(1)
+      expect(getAppState().particleSettings).toEqual(preset.settings)
+    }
+  })
+
+  it('resets particle settings to the default preset in one action', () => {
+    useAppStore.getState().setParticleSettings({
+      density: 175,
+      enabled: false,
+      glow: 50,
+      lifetime: 200,
+      size: 75,
+      speed: 150,
+      spread: 0,
+    })
+
+    useAppStore.getState().resetParticleSettings()
+
+    expect(getAppState().particleSettings).toEqual(PARTICLE_PRESETS[0].settings)
+  })
+})
+
 describe('camera overlay settings', () => {
   it('updates the overlay transform and crop values through setCameraOverlay', () => {
     useAppStore.getState().setCameraOverlay({
       cropLeft: 12,
       cropTop: 24,
+      flipHorizontal: false,
+      flipVertical: false,
       offsetX: 100,
       offsetY: -50,
+      rotation: 0,
       scale: 1.5,
     })
 
@@ -376,10 +617,29 @@ describe('camera overlay settings', () => {
       cropLeft: 12,
       cropRight: 0,
       cropTop: 24,
+      flipHorizontal: false,
+      flipVertical: false,
       offsetX: 100,
       offsetY: -50,
+      rotation: 0,
       scale: 1.5,
     })
+  })
+
+  it('normalizes quarter-turn rotation and rejects invalid camera orientation values', () => {
+    useAppStore.getState().setCameraOverlay({
+      flipHorizontal: true,
+      flipVertical: true,
+      rotation: -90,
+    })
+
+    expect(getAppState().cameraOverlay).toMatchObject({
+      flipHorizontal: true,
+      flipVertical: true,
+      rotation: 270,
+    })
+    expect(() => useAppStore.getState().setCameraOverlay({ rotation: 45 as 0 })).toThrow('multiple of 90')
+    expect(() => useAppStore.getState().setCameraOverlay({ flipHorizontal: 'yes' as unknown as boolean })).toThrow('must be a boolean')
   })
 })
 

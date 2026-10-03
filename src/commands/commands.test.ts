@@ -219,6 +219,7 @@ describe('PasteNotesCommand', () => {
     const command = new PasteNotesCommand([
       {
         endTick: 120,
+        fingering: { hand: 'right', finger: 2, source: 'manual' },
         pitch: 72,
         startTick: 0,
         trackId: 'track-1',
@@ -243,6 +244,7 @@ describe('PasteNotesCommand', () => {
 
     const pastedNotes = selectedIds.map((noteId) => getNote(noteId))
     expect(pastedNotes[0].startTick).toBe(480)
+    expect(pastedNotes[0].fingering).toEqual({ hand: 'right', finger: 2, source: 'manual' })
     expect(pastedNotes[1].startTick).toBe(540)
 
     command.undo()

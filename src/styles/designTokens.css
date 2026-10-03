@@ -1,7 +1,42 @@
 :root {
   --color-bg: #000000;
   --color-icon: #2e65a2;
+  --color-icon-muted: #727b85;
+  --color-focus: #9bd3ff;
   --color-text-header: #2e65a2;
   --color-text-body: #ffffff;
   --font-family-base: Arial, sans-serif;
+}
+
+:where(
+  button,
+  a[href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  :where(
+    button,
+    a[href],
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline-color: Highlight;
+  }
 }

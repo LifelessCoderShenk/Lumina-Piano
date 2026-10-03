@@ -1,23 +1,24 @@
 import { useCallback, useRef, useState } from 'react'
 
 export function useCountdown() {
-  const countdownTimeoutIdsRef = useRef<Array<ReturnType<typeof globalThis.setTimeout>>>([])
+  const countdownWaitersRef = useRef<Array<{ id: ReturnType<typeof globalThis.setTimeout>; resolve: () => void }>>([])
   const [countdownValue, setCountdownValue] = useState<number | null>(null)
 
   const clearCountdown = useCallback(() => {
-    countdownTimeoutIdsRef.current.forEach((timeoutId) => {
-      globalThis.clearTimeout(timeoutId)
+    const waiters = countdownWaitersRef.current.splice(0)
+    waiters.forEach(({ id, resolve }) => {
+      globalThis.clearTimeout(id)
+      resolve()
     })
-    countdownTimeoutIdsRef.current.length = 0
   }, [])
 
   const waitForCountdownStep = useCallback((ms: number): Promise<void> => {
     return new Promise((resolve) => {
       const timeoutId = globalThis.setTimeout(() => {
-        countdownTimeoutIdsRef.current = countdownTimeoutIdsRef.current.filter((id) => id !== timeoutId)
+        countdownWaitersRef.current = countdownWaitersRef.current.filter((waiter) => waiter.id !== timeoutId)
         resolve()
       }, ms)
-      countdownTimeoutIdsRef.current.push(timeoutId)
+      countdownWaitersRef.current.push({ id: timeoutId, resolve })
     })
   }, [])
 

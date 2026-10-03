@@ -1,8 +1,21 @@
+/*
+INPUT: ThreeRenderer with mocked WebGL and application state dependencies.
+OUTPUT: Rendering behavior regression coverage without a browser GPU.
+PURPOSE: Protects keyboard, visual-effect, postprocessing, and view-mode contracts at the renderer boundary.
+*/
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetStore, useAppStore } from '../store/store'
+import { CREATE_PITCH_CLASS_PALETTES } from '../store/createNoteColorPalettes'
+import { getAppState, resetStore, useAppStore } from '../store/store'
+import { spatialIndex } from '../spatial/SpatialIndex'
 
 const mockBufferGeometryDispose = vi.hoisted(() => vi.fn())
 const mockCanvasTextureDispose = vi.hoisted(() => vi.fn())
+const mockCanvasFillRect = vi.hoisted(() => vi.fn())
+const mockCanvasGradientAddColorStop = vi.hoisted(() => vi.fn())
+const mockCanvasCreateLinearGradient = vi.hoisted(() => vi.fn(() => ({
+  addColorStop: mockCanvasGradientAddColorStop,
+})))
 const mockMaterialColorSetHex = vi.hoisted(() => vi.fn())
 const mockMeshBasicMaterialDispose = vi.hoisted(() => vi.fn())
 const mockMeshLambertMaterialDispose = vi.hoisted(() => vi.fn())
@@ -37,10 +50,11 @@ const mockUnrealBloomPassDispose = vi.hoisted(() => vi.fn())
 const mockPlaybackEngineOn = vi.hoisted(() => vi.fn())
 const mockPlaybackEngineOff = vi.hoisted(() => vi.fn())
 const mockPlaybackSeekListeners = vi.hoisted(() => new Set<(tick: number) => void>())
-const createdMeshMaterials = vi.hoisted(() => [] as Array<{ opacity: number }>)
+const createdMeshMaterials = vi.hoisted(() => [] as Array<{ map?: unknown; opacity: number }>)
 
 vi.mock('three', () => {
   const AdditiveBlending = 'AdditiveBlending'
+  const LinearFilter = 'LinearFilter'
   const LinearToneMapping = 'LinearToneMapping'
 
   class AmbientLight {
@@ -57,7 +71,12 @@ vi.mock('three', () => {
   }
 
   class CanvasTexture {
-    constructor(_canvas: HTMLCanvasElement) {}
+    generateMipmaps = true
+    magFilter: unknown = null
+    minFilter: unknown = null
+    needsUpdate = false
+
+    constructor(public canvas: HTMLCanvasElement) {}
 
     dispose = mockCanvasTextureDispose
   }
@@ -127,11 +146,14 @@ vi.mock('three', () => {
       },
     }
     needsUpdate = false
+    map: unknown
     opacity: number
+    toneMapped = true
     transparent: boolean
 
-    constructor(options: { color?: number; opacity?: number; transparent?: boolean }) {
+    constructor(options: { color?: number; map?: unknown; opacity?: number; transparent?: boolean }) {
       this.color.value = options.color ?? 0
+      this.map = options.map
       this.opacity = options.opacity ?? 1
       this.transparent = options.transparent ?? false
       createdMeshMaterials.push(this)
@@ -238,16 +260,22 @@ vi.mock('three', () => {
   }
 
   class ShaderMaterial {
+    fragmentShader: string
     needsUpdate = false
     transparent: boolean
     uniforms: Record<string, { value: unknown }>
+    vertexShader: string
 
     constructor(options: {
+      fragmentShader?: string
       transparent?: boolean
       uniforms?: Record<string, { value: unknown }>
+      vertexShader?: string
     }) {
+      this.fragmentShader = options.fragmentShader ?? ''
       this.transparent = options.transparent ?? false
       this.uniforms = options.uniforms ?? {}
+      this.vertexShader = options.vertexShader ?? ''
     }
 
     dispose = mockShaderMaterialDispose
@@ -263,7 +291,14 @@ vi.mock('three', () => {
       set: mockLayersSet,
     }
     position = {
-      set: vi.fn(),
+      x: 0,
+      y: 0,
+      z: 0,
+      set: vi.fn((x: number, y: number, z: number) => {
+        this.position.x = x
+        this.position.y = y
+        this.position.z = z
+      }),
     }
     rotation = {
       z: 0,
@@ -372,6 +407,7 @@ vi.mock('three', () => {
     CanvasTexture,
     Color,
     Group,
+    LinearFilter,
     LinearToneMapping,
     Mesh,
     MeshBasicMaterial,
@@ -472,16 +508,18 @@ vi.mock('../playback/PlaybackEngine', () => ({
 }))
 
 const {
+  DEFAULT_NOTE_BLOOM_CALIBRATION,
   ThreeRenderer,
-  calculateNoteDepthFalloff,
   createNoteMaterialPalette,
+  getColorLinearRelativeLuminance,
   getColorRelativeLuminance,
 } = await import('./ThreeRenderer')
 const { getKeyAtScreenX } = await import('./pianoMath')
+const { resolveCreateModeNoteColor } = await import('./colorUtils')
 
 describe('createNoteMaterialPalette', () => {
   const paletteCases = [
-    { color: 0x2e65a2, name: 'default blue' },
+    { color: 0x4f8ef7, name: 'default blue' },
     { color: 0xff0000, name: 'saturated red' },
     { color: 0x00ff00, name: 'saturated green' },
     { color: 0x0000ff, name: 'saturated blue' },
@@ -499,8 +537,8 @@ describe('createNoteMaterialPalette', () => {
     emissiveColor: number,
     emissiveStrength: number,
   ) => (
-    getColorRelativeLuminance(diffuseColor) +
-    (getColorRelativeLuminance(emissiveColor) * emissiveStrength)
+    getColorLinearRelativeLuminance(diffuseColor) +
+    (getColorLinearRelativeLuminance(emissiveColor) * emissiveStrength)
   )
   const getChannelSpread = (color: number) => {
     const red = (color >> 16) & 0xff
@@ -508,6 +546,63 @@ describe('createNoteMaterialPalette', () => {
     const blue = color & 0xff
 
     return Math.max(red, green, blue) - Math.min(red, green, blue)
+  }
+  const getHaloBloomEnergy = (color: number) => {
+    const palette = createNoteMaterialPalette(color)
+    return getEstimatedTotalLuminance(
+      palette.haloDiffuseColor,
+      palette.haloEmissiveColor,
+      palette.haloEmissiveStrength,
+    )
+  }
+  // A compact CPU reference raster: it turns the material's actual HDR core /
+  // edge radiance into pixels, then applies the current fixed bloom threshold
+  // and strength. This catches spatial halo regressions that a scalar palette
+  // energy assertion cannot see.
+  const renderBloomMeasurement = (color: number, calibration = DEFAULT_NOTE_BLOOM_CALIBRATION) => {
+    const palette = createNoteMaterialPalette(color, calibration)
+    const coreRadiance = getEstimatedTotalLuminance(
+      palette.coreDiffuseColor,
+      palette.coreEmissiveColor,
+      palette.coreEmissiveStrength,
+    )
+    const edgeRadiance = getEstimatedTotalLuminance(
+      palette.haloDiffuseColor,
+      palette.haloEmissiveColor,
+      palette.haloEmissiveStrength,
+    )
+    const halfNoteWidth = 18
+    const samples = Array.from({ length: 161 }, (_, index) => {
+      const distance = Math.abs(index - 80)
+      if (distance > halfNoteWidth) {
+        return 0
+      }
+      const normalizedDistance = distance / halfNoteWidth
+      const coreMix = 1 - (normalizedDistance * normalizedDistance)
+      return edgeRadiance + ((coreRadiance - edgeRadiance) * coreMix)
+    })
+    const gaussianSigma = 6
+    const bloomStrength = 0.7
+    const bloomThreshold = 0.25
+    const rendered = samples.map((source, index) => {
+      let blurTotal = 0
+      let weightTotal = 0
+      for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
+        const distance = sampleIndex - index
+        const weight = Math.exp(-(distance * distance) / (2 * gaussianSigma * gaussianSigma))
+        blurTotal += Math.max(0, samples[sampleIndex] - bloomThreshold) * weight
+        weightTotal += weight
+      }
+      return source + ((blurTotal / weightTotal) * bloomStrength)
+    })
+    const footprintPixels = rendered.filter((value, index) => (
+      Math.abs(index - 80) > halfNoteWidth && value > 0.11
+    )).length
+
+    return {
+      centerIntensity: rendered[80],
+      footprintPixels,
+    }
   }
 
   it.each(paletteCases)('keeps total bloom luminance consistent for $name', ({ color }) => {
@@ -524,13 +619,13 @@ describe('createNoteMaterialPalette', () => {
     )
 
     expect(palette.coreEmissiveStrength).toBeGreaterThanOrEqual(0.2)
-    expect(palette.coreEmissiveStrength).toBeLessThanOrEqual(3.6)
+    expect(palette.coreEmissiveStrength).toBeLessThanOrEqual(8)
     expect(palette.haloEmissiveStrength).toBeGreaterThanOrEqual(0.45)
-    expect(palette.haloEmissiveStrength).toBeLessThanOrEqual(3.6)
-    expect(coreBloomLuminance).toBeGreaterThanOrEqual(1.06)
-    expect(coreBloomLuminance).toBeLessThanOrEqual(1.1)
-    expect(haloBloomLuminance).toBeGreaterThanOrEqual(1.55)
-    expect(haloBloomLuminance).toBeLessThanOrEqual(1.61)
+    expect(palette.haloEmissiveStrength).toBeLessThanOrEqual(8)
+    expect(coreBloomLuminance).toBeGreaterThanOrEqual(0.8)
+    expect(coreBloomLuminance).toBeLessThanOrEqual(1.06)
+    expect(haloBloomLuminance).toBeGreaterThanOrEqual(1.19)
+    expect(haloBloomLuminance).toBeLessThanOrEqual(1.23)
   })
 
   it.each(paletteCases)('preserves readable swirl contrast for $name', ({ color }) => {
@@ -551,8 +646,8 @@ describe('createNoteMaterialPalette', () => {
       palette.haloEmissiveStrength,
     )
 
-    expect(swirlBrightTotalLuminance).toBeGreaterThanOrEqual(1.62)
-    expect(swirlBrightTotalLuminance).toBeLessThanOrEqual(1.76)
+    expect(swirlBrightTotalLuminance).toBeGreaterThanOrEqual(1.25)
+    expect(swirlBrightTotalLuminance).toBeLessThanOrEqual(1.42)
   })
 
   it('does not collapse white or black inputs to one flat palette color', () => {
@@ -580,42 +675,113 @@ describe('createNoteMaterialPalette', () => {
       expect(getChannelSpread(palette.swirlRecessColor)).toBeGreaterThanOrEqual(36)
     }
   })
-})
 
-describe('calculateNoteDepthFalloff', () => {
-  it('keeps notes at full brightness and saturation near the boundary', () => {
-    expect(calculateNoteDepthFalloff(0)).toEqual({
-      brightnessScale: 1,
-      desaturation: 0,
-      emissiveScale: 1,
-      fade: 0,
-    })
-    expect(calculateNoteDepthFalloff(72)).toEqual({
-      brightnessScale: 1,
-      desaturation: 0,
-      emissiveScale: 1,
-      fade: 0,
-    })
+  it('preserves the material palette contrast for Gradient base colors', () => {
+    const gradientColors = {
+      mode: 'gradient' as const,
+      pitchClassColors: {},
+      singleColor: '#000000',
+    }
+
+    for (const position of [0, 0.5, 1]) {
+      const palette = createNoteMaterialPalette(
+        resolveCreateModeNoteColor(60, gradientColors, position),
+      )
+      const haloLuminance = getColorRelativeLuminance(palette.haloDiffuseColor)
+      const brightLuminance = getColorRelativeLuminance(palette.swirlBrightColor)
+      const recessLuminance = getColorRelativeLuminance(palette.swirlRecessColor)
+
+      expect(brightLuminance - haloLuminance).toBeGreaterThanOrEqual(0.075)
+      expect(haloLuminance - recessLuminance).toBeGreaterThanOrEqual(0.19)
+    }
   })
 
-  it('plateaus distant notes at the target diffuse and emissive falloff', () => {
-    const farFalloff = calculateNoteDepthFalloff(360)
-    const beyondPlateauFalloff = calculateNoteDepthFalloff(720)
+  it('normalizes Gradient bloom energy across the keyboard spectrum', () => {
+    const gradientColors = {
+      mode: 'gradient' as const,
+      pitchClassColors: {},
+      singleColor: '#000000',
+    }
+    const bloomEnergies = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]
+      .map((position) => getHaloBloomEnergy(
+        resolveCreateModeNoteColor(60, gradientColors, position),
+      ))
 
-    expect(farFalloff.fade).toBeCloseTo(1, 6)
-    expect(farFalloff.brightnessScale).toBeCloseTo(0.68, 6)
-    expect(farFalloff.desaturation).toBeCloseTo(0.22, 6)
-    expect(farFalloff.emissiveScale).toBeCloseTo(farFalloff.brightnessScale, 6)
-
-    expect(beyondPlateauFalloff).toEqual(farFalloff)
+    expect(Math.max(...bloomEnergies) - Math.min(...bloomEnergies)).toBeLessThan(0.03)
   })
+
+  it('normalizes bloom energy across every curated pitch-class preset', () => {
+    const bloomEnergies = CREATE_PITCH_CLASS_PALETTES.flatMap(({ colors }) => (
+      Object.values(colors).map((hex) => getHaloBloomEnergy(Number.parseInt(hex.slice(1), 16)))
+    ))
+
+    expect(Math.max(...bloomEnergies) - Math.min(...bloomEnergies)).toBeLessThan(0.03)
+  })
+
+  it('keeps all Gradient and preset halo emissions above the bloom threshold', () => {
+    const gradientColors = {
+      mode: 'gradient' as const,
+      pitchClassColors: {},
+      singleColor: '#000000',
+    }
+    const colors = [0, 0.25, 0.5, 0.75, 1].map((position) => (
+      resolveCreateModeNoteColor(60, gradientColors, position)
+    ))
+    CREATE_PITCH_CLASS_PALETTES.forEach(({ colors: paletteColors }) => {
+      Object.values(paletteColors).forEach((hex) => {
+        colors.push(Number.parseInt(hex.slice(1), 16))
+      })
+    })
+
+    for (const color of colors) {
+      const palette = createNoteMaterialPalette(color)
+      const emissionEnergy = (
+        getColorLinearRelativeLuminance(palette.haloEmissiveColor) * palette.haloEmissiveStrength
+      )
+
+      expect(emissionEnergy).toBeGreaterThan(0.25)
+    }
+  })
+
+  it('renders a smaller, hue-consistent halo footprint for Gradient and every curated preset', () => {
+    const preRecalibration = {
+      ...DEFAULT_NOTE_BLOOM_CALIBRATION,
+      coreEmissiveStrengthMax: 11.2,
+      coreTargetTotalLuminance: 1.08,
+      haloEmissiveStrengthMax: 11.2,
+      haloTargetTotalLuminance: 1.58,
+    }
+    const gradientColors = {
+      mode: 'gradient' as const,
+      pitchClassColors: {},
+      singleColor: '#000000',
+    }
+    const colors = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1].map((position) => (
+      resolveCreateModeNoteColor(60, gradientColors, position)
+    ))
+    CREATE_PITCH_CLASS_PALETTES.forEach(({ colors: paletteColors }) => {
+      Object.values(paletteColors).forEach((hex) => colors.push(Number.parseInt(hex.slice(1), 16)))
+    })
+
+    const recalibrated = colors.map((color) => renderBloomMeasurement(color))
+    const preFix = colors.map((color) => renderBloomMeasurement(color, preRecalibration))
+    const footprints = recalibrated.map(({ footprintPixels }) => footprintPixels)
+    const centerIntensities = recalibrated.map(({ centerIntensity }) => centerIntensity)
+
+    expect(Math.max(...footprints)).toBeLessThan(Math.max(...preFix.map(({ footprintPixels }) => footprintPixels)))
+    expect(Math.max(...footprints) - Math.min(...footprints)).toBeLessThanOrEqual(2)
+    expect(Math.max(...centerIntensities) - Math.min(...centerIntensities)).toBeLessThan(0.3)
+  })
+
 })
 
 describe('ThreeRenderer', () => {
   beforeEach(() => {
-    resetStore()
     mockBufferGeometryDispose.mockReset()
     mockCanvasTextureDispose.mockReset()
+    mockCanvasFillRect.mockReset()
+    mockCanvasGradientAddColorStop.mockReset()
+    mockCanvasCreateLinearGradient.mockClear()
     mockMaterialColorSetHex.mockReset()
     mockMeshBasicMaterialDispose.mockReset()
     mockMeshLambertMaterialDispose.mockReset()
@@ -663,15 +829,27 @@ describe('ThreeRenderer', () => {
       }
 
       return {
+        beginPath: vi.fn(),
+        closePath: vi.fn(),
         clearRect: vi.fn(),
+        createLinearGradient: mockCanvasCreateLinearGradient,
+        fill: vi.fn(),
+        fillRect: mockCanvasFillRect,
         fillStyle: '#000000',
         fillText: vi.fn(),
         font: '',
+        lineTo: vi.fn(),
+        strokeText: vi.fn(),
         measureText: (text: string) => ({ width: text.length * 7 }),
+        moveTo: vi.fn(),
+        quadraticCurveTo: vi.fn(),
+        scale: vi.fn(),
         textAlign: 'center',
         textBaseline: 'middle',
       } as unknown as CanvasRenderingContext2D
     })
+    resetStore()
+    vi.clearAllMocks()
   })
 
   afterEach(() => {
@@ -694,14 +872,17 @@ describe('ThreeRenderer', () => {
     await renderer.init(canvas)
 
     expect(mockRendererConstructor).toHaveBeenCalledWith(expect.objectContaining({ canvas }))
-    expect(mockRendererSetClearColor).toHaveBeenCalledWith(0x000000, 1)
+    expect(mockRendererSetClearColor).toHaveBeenCalledWith(
+      expect.objectContaining({ value: '#000000' }),
+      1,
+    )
     expect(mockRendererSetPixelRatio).toHaveBeenCalledWith(2)
     expect(mockRendererSetSize).toHaveBeenCalledWith(640, 360, false)
     expect(mockEffectComposerAddPass).toHaveBeenCalledTimes(5)
     expect(mockEffectComposerSetPixelRatio).toHaveBeenCalledWith(2)
     expect(mockEffectComposerSetSize).toHaveBeenCalledWith(640, 360)
     expect(mockCameraUpdateProjectionMatrix).toHaveBeenCalled()
-    expect(mockSceneAdd).toHaveBeenCalledTimes(6)
+    expect(mockSceneAdd).toHaveBeenCalledTimes(9)
     expect(mockGroupAdd).toHaveBeenCalled()
     expect(mockLayersEnable).toHaveBeenCalled()
     expect(renderer.getCanvas()).toBe(canvas)
@@ -715,15 +896,251 @@ describe('ThreeRenderer', () => {
     expect((renderer as any).bloomCompositePass.uniforms.bloomTexture.value).toBe((renderer as any).bloomComposer.renderTarget2.texture)
     expect((renderer as any).bloomComposer.renderToScreen).toBe(false)
     expect((renderer as any).bloomCompositePass.uniforms.bloomDebugView.value).toBe(0)
-    expect((renderer as any).bloomCompositePass.uniforms.bloomClipY.value).toBeCloseTo(1 - (101 / 360))
-    expect((renderer as any).bloomCompositePass.uniforms.bloomClipFeather.value).toBeCloseTo(3 / 360)
-    expect((renderer as any).bloomCompositePass.uniforms.bloomDebugLineHalfThickness.value).toBeCloseTo(0.5 / 360)
+    const keyboardHeightRatio = 270 / 720
+    const keyboardHeight = 360 * keyboardHeightRatio
+    const keyboardY = 360 - keyboardHeight
+    const layoutScale = keyboardHeight / 270
+    expect((renderer as any).bloomCompositePass.uniforms.bloomClipY.value).toBeCloseTo(
+      1 - ((keyboardY + ((16 * layoutScale) / 2) + (3 * layoutScale)) / 360),
+    )
+    expect((renderer as any).bloomCompositePass.uniforms.bloomClipFeather.value).toBeCloseTo((3 * layoutScale) / 360)
+    expect((renderer as any).bloomCompositePass.uniforms.bloomDebugLineHalfThickness.value).toBeCloseTo((0.5 * layoutScale) / 360)
     expect(mockMaterialColorSetHex).toHaveBeenCalled()
-    expect(createdMeshMaterials.some((material) => Math.abs(material.opacity - 0.18) < 0.001)).toBe(true)
+    const keyboardSurfaceMaterials = createdMeshMaterials.filter((material) => material.map != null)
+    expect(keyboardSurfaceMaterials).toHaveLength(3)
+    expect(keyboardSurfaceMaterials.every((material) => Math.abs(material.opacity - 0.4) < 0.001)).toBe(true)
+    const keyboardTextures = (renderer as any).staticResources.filter(
+      (resource: { canvas?: HTMLCanvasElement }) => resource.canvas != null,
+    ) as Array<{
+      canvas: HTMLCanvasElement
+      generateMipmaps: boolean
+      magFilter: unknown
+      minFilter: unknown
+      needsUpdate: boolean
+    }>
+    expect(keyboardTextures).toHaveLength(3)
+    expect(keyboardTextures.every((texture) => texture.canvas.width === 1_280)).toBe(true)
+    expect(keyboardTextures.every((texture) => texture.canvas.height === 270)).toBe(true)
+    expect(keyboardTextures.every((texture) => texture.generateMipmaps === false)).toBe(true)
+    expect(keyboardTextures.every((texture) => texture.minFilter === 'LinearFilter')).toBe(true)
+    expect(keyboardTextures.every((texture) => texture.magFilter === 'LinearFilter')).toBe(true)
+    expect(keyboardTextures.every((texture) => texture.needsUpdate)).toBe(true)
+    expect(mockCanvasCreateLinearGradient).toHaveBeenCalled()
+    expect(mockCanvasGradientAddColorStop).toHaveBeenCalled()
+    expect(mockCanvasFillRect).toHaveBeenCalled()
     expect(mockLayersSet).toHaveBeenCalled()
     expect(mockEffectComposerRender).toHaveBeenCalled()
     expect((renderer as any).particleSystem.geometry.drawRange.count).toBe(0)
     expect((renderer as any).particleSystem.positionAttribute.array.length).toBe(4_096 * 3)
+  })
+
+  it('lets isolated live MIDI notes finish falling after release without changing file playback data', async () => {
+    loadProjectWithNotes([
+      {
+        endTick: 480,
+        id: 'file-note',
+        pitch: 64,
+        startTick: 0,
+        velocity: 100,
+        visualEndTick: 480,
+      },
+    ])
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    const projectBefore = useAppStore.getState().projectData
+    const indexedNoteCountBefore = spatialIndex.getTotalNoteCount()
+    const currentTickBefore = useAppStore.getState().currentTick
+    const startedAtMs = performance.now()
+    renderer.setLiveMidiNotes([
+      { id: '0:60', pitch: 60, startedAtMs, velocity: 100 },
+      { id: '0:64', pitch: 64, startedAtMs, velocity: 100 },
+    ])
+
+    expect((renderer as any).liveNoteMeshes).toHaveLength(2)
+    expect((renderer as any).liveNoteMeshes[0].visible).toBe(true)
+    expect((renderer as any).liveNoteMeshes[1].visible).toBe(true)
+    expect(useAppStore.getState().projectData).toBe(projectBefore)
+    expect(spatialIndex.getTotalNoteCount()).toBe(indexedNoteCountBefore)
+    expect(useAppStore.getState().currentTick).toBe(currentTickBefore)
+
+    renderer.setLiveMidiNotes([])
+
+    renderer.renderFrame(0, { animationTimeSeconds: (startedAtMs + 699) / 1000 })
+    expect((renderer as any).liveNoteMeshes[0].visible).toBe(true)
+    expect((renderer as any).liveNoteMeshes[1].visible).toBe(true)
+
+    renderer.renderFrame(0, { animationTimeSeconds: (startedAtMs + 701) / 1000 })
+    expect((renderer as any).liveNoteMeshes[0].visible).toBe(false)
+    expect((renderer as any).liveNoteMeshes[1].visible).toBe(false)
+    expect(useAppStore.getState().projectData).toBe(projectBefore)
+    expect(spatialIndex.getTotalNoteCount()).toBe(indexedNoteCountBefore)
+  })
+
+  it('updates the scene background and rebuilds keyboard note-name sprites from appearance settings', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+
+    await renderer.init(canvas)
+
+    expect((renderer as any).keyboardLabelSprites).toHaveLength(0)
+    useAppStore.getState().setBackgroundColor('#393939')
+    expect(mockRendererSetClearColor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ value: '#393939' }),
+      1,
+    )
+
+    useAppStore.getState().setNoteLabelsOnKeys(false)
+    expect((renderer as any).keyboardLabelSprites).toHaveLength(0)
+    useAppStore.getState().setNoteLabelsOnKeys(true)
+    expect((renderer as any).keyboardLabelSprites).toHaveLength(88)
+  })
+
+  it('switches the animated background material without rebuilding the scene', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    const material = (renderer as any).backgroundMesh.material as {
+      fragmentShader: string
+      uniforms: {
+        backgroundAspect: { value: number }
+        backgroundStyle: { value: number }
+      }
+    }
+    expect(material.uniforms.backgroundStyle.value).toBe(0)
+    expect(material.uniforms.backgroundAspect.value).toBeCloseTo(640 / 360)
+
+    useAppStore.getState().setBackgroundStyle('aurora')
+
+    expect(material.uniforms.backgroundStyle.value).toBe(2)
+    expect(material.fragmentShader).toContain('ribbonA')
+    expect(material.fragmentShader).toContain('studioColor')
+
+    useAppStore.getState().setBackgroundStyle('stage')
+
+    expect(material.uniforms.backgroundStyle.value).toBe(3)
+    expect(material.fragmentShader).toContain('stagePerspectiveDepth')
+    expect(material.fragmentShader).toContain('stageHorizontalGrid')
+  })
+
+  it('renders only the static keyboard in guide mode without mutating playback data', async () => {
+    loadProjectWithNotes([
+      { endTick: 480, id: 'file-note', pitch: 64, startTick: 0, velocity: 100, visualEndTick: 480 },
+    ])
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    const projectBefore = useAppStore.getState().projectData
+    renderer.setLiveMidiNotes([{ id: 'guide-live', pitch: 60, startedAtMs: performance.now(), velocity: 100 }])
+    renderer.setGuideOnly(true)
+
+    expect((renderer as any).visibleNoteMeshCount).toBe(0)
+    expect((renderer as any).visibleLiveNoteMeshCount).toBe(0)
+    expect((renderer as any).particleSystem.geometry.drawRange.count).toBe(0)
+    expect((renderer as any).waveGroup.visible).toBe(false)
+    expect(useAppStore.getState().projectData).toBe(projectBefore)
+
+    renderer.setGuideOnly(false)
+    expect((renderer as any).waveGroup.visible).toBe(true)
+  })
+
+  it('renders ghost hands from the project timeline only when the feature is enabled', async () => {
+    loadProjectWithNotes([
+      { endTick: 480, id: 'hand-note', pitch: 64, startTick: 240, velocity: 100, visualEndTick: 480 },
+    ])
+    useAppStore.getState().setHandVisualization({ enabled: true, opacity: 42 })
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+
+    await renderer.init(canvas)
+    renderer.renderFrame(240)
+
+    const layer = (renderer as any).ghostHandsLayer
+    expect(layer.group.visible).toBe(true)
+    expect(layer.hands.right.group.visible).toBe(true)
+    expect(layer.hands.right.material.uniforms.ghostOpacity.value).toBeCloseTo(0.42)
+
+    renderer.setKeyboardOnly(true)
+    expect(layer.group.visible).toBe(false)
+
+    renderer.setKeyboardOnly(false)
+    expect(layer.group.visible).toBe(true)
+
+    useAppStore.getState().setHandVisualization({ enabled: false })
+    expect(layer.group.visible).toBe(false)
+  })
+
+  it('keeps ghost hands deterministic through seeking, loop-back, portrait export, and live toggles', async () => {
+    loadProjectWithNotes([
+      { endTick: 480, id: 'loop-hand', pitch: 48, startTick: 240, velocity: 100, visualEndTick: 480 },
+      { endTick: 1_200, id: 'seek-hand', pitch: 84, startTick: 960, velocity: 100, visualEndTick: 1_200 },
+    ])
+    useAppStore.getState().setHandVisualization({ enabled: true, opacity: 40 })
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+    const layer = (renderer as any).ghostHandsLayer
+    const visibleContacts = () => ['left', 'right'].flatMap((hand) => (
+      Object.values(layer.hands[hand].contactNodes) as Array<{
+        position: { x: number; y: number }
+        visible: boolean
+      }>
+    )).filter(({ visible }) => visible)
+
+    renderer.renderFrame(240)
+    const loopContact = visibleContacts()[0]
+    expect(loopContact).toBeDefined()
+    const initialLoopPosition = { x: loopContact.position.x, y: loopContact.position.y }
+
+    renderer.renderFrame(700)
+    expect(visibleContacts()).toHaveLength(0)
+    renderer.renderFrame(240)
+    expect(visibleContacts()[0]?.position).toMatchObject(initialLoopPosition)
+
+    renderer.setReviewTimelineTick(960)
+    expect(visibleContacts()).toHaveLength(1)
+    expect(visibleContacts()[0].position.x).not.toBe(initialLoopPosition.x)
+    renderer.setReviewTimelineTick(null)
+    expect(visibleContacts()[0]?.position).toMatchObject(initialLoopPosition)
+
+    renderer.beginOfflineRender()
+    renderer.resize(1_080, 1_920, { layoutContext: { keyboardHeightRatio: 0.375 } })
+    renderer.renderFrame(240, { animationTimeSeconds: 0 })
+    const portraitPalm = layer.hands.left.group.visible
+      ? layer.hands.left.palm
+      : layer.hands.right.palm
+    expect(portraitPalm.position.x - portraitPalm.scale.x / 2).toBeGreaterThanOrEqual(0)
+    expect(portraitPalm.position.x + portraitPalm.scale.x / 2).toBeLessThanOrEqual(1_080)
+
+    useAppStore.getState().setHandVisualization({ enabled: false })
+    expect(layer.group.visible).toBe(false)
+    useAppStore.getState().setHandVisualization({ enabled: true })
+    expect(layer.group.visible).toBe(true)
+    expect(visibleContacts()).toHaveLength(1)
+    renderer.endOfflineRender()
+  })
+
+  it('accepts Transcriptor keyboard-only state before a canvas has initialized', () => {
+    const renderer = new ThreeRenderer()
+
+    expect(() => renderer.setKeyboardOnly(true)).not.toThrow()
+    expect((renderer as any).keyboardOnly).toBe(true)
+    expect(() => renderer.setKeyboardOnly(false)).not.toThrow()
   })
 
   it('fades playback-driven key highlights in and out over time', async () => {
@@ -768,6 +1185,58 @@ describe('ThreeRenderer', () => {
     ;(renderer as any).applyActiveKeyHighlights(1.24)
 
     expect(highlightState.material.opacity).toBeCloseTo(0, 3)
+  })
+
+  it('shows keyboard beams only when enabled and follows the key highlight fade', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    const saberState = (renderer as any).keyboardSaberStates.get(60) as {
+      uniforms: { beamStrength: { value: number } }
+    }
+    ;(renderer as any).playbackActiveKeyPitches = new Set([60])
+    ;(renderer as any).applyActiveKeyHighlights(1)
+    ;(renderer as any).applyActiveKeyHighlights(1.06)
+
+    expect(saberState.uniforms.beamStrength.value).toBe(0)
+
+    useAppStore.getState().setKeyboardSaber(true)
+    ;(renderer as any).applyActiveKeyHighlights(1.07)
+
+    expect(saberState.uniforms.beamStrength.value).toBeCloseTo(1)
+
+    useAppStore.getState().setKeyboardSaber(false)
+    expect(saberState.uniforms.beamStrength.value).toBe(0)
+
+    await renderer.destroy()
+  })
+
+  it('adds independently adjustable reactive lighting behind active keys', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+    const layer = (renderer as any).reactiveLightingLayer
+
+    expect(layer.group.visible).toBe(false)
+    ;(renderer as any).playbackActiveKeyPitches = new Set([60])
+    ;(renderer as any).applyActiveKeyHighlights(1)
+    ;(renderer as any).applyActiveKeyHighlights(1.06)
+
+    expect(layer.group.visible).toBe(true)
+    expect(layer.lights.some(({ mesh }: { mesh: { visible: boolean } }) => mesh.visible)).toBe(true)
+
+    useAppStore.getState().setLightingIntensity(0)
+    ;(renderer as any).applyActiveKeyHighlights(1.07)
+    expect(layer.group.visible).toBe(false)
+
+    useAppStore.getState().setLightingIntensity(100)
+    renderer.setKeyboardOnly(true)
+    expect(layer.group.visible).toBe(false)
   })
 
   it('lets explicit and playback-driven keys fade independently across chords', async () => {
@@ -818,6 +1287,89 @@ describe('ThreeRenderer', () => {
     expect(eHighlight.material.opacity).toBeCloseTo(0, 3)
     expect(middleCHighlight.material.opacity).toBeCloseTo(0.45, 3)
     expect(gHighlight.material.opacity).toBeCloseTo(0.45, 3)
+  })
+
+  it('advances playback-driven key highlight fades from simulated renderFrame time during export', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    loadProjectWithNotes([
+      {
+        endTick: 120,
+        id: 'export-highlight',
+        pitch: 60,
+        startTick: 0,
+        velocity: 127,
+        visualEndTick: 120,
+      },
+    ])
+
+    await renderer.init(canvas)
+
+    const highlightState = (renderer as any).keyHighlightStates.get(60) as {
+      material: { opacity: number }
+    }
+
+    renderer.renderFrame(0, { animationTimeSeconds: 0 })
+    expect(highlightState.material.opacity).toBeCloseTo(0, 3)
+
+    renderer.renderFrame(0, { animationTimeSeconds: 0.03 })
+    expect(highlightState.material.opacity).toBeGreaterThan(0)
+    expect(highlightState.material.opacity).toBeLessThan(0.45)
+
+    renderer.renderFrame(0, { animationTimeSeconds: 0.06 })
+    expect(highlightState.material.opacity).toBeCloseTo(0.45, 3)
+
+    renderer.renderFrame(121, { animationTimeSeconds: 0.12 })
+    expect(highlightState.material.opacity).toBeCloseTo(0.45, 3)
+
+    renderer.renderFrame(121, { animationTimeSeconds: 0.21 })
+    expect(highlightState.material.opacity).toBeGreaterThan(0)
+    expect(highlightState.material.opacity).toBeLessThan(0.45)
+
+    renderer.renderFrame(121, { animationTimeSeconds: 0.3 })
+    expect(highlightState.material.opacity).toBeCloseTo(0, 3)
+  })
+
+  it('suspends and restores the WebGL animation loop for offline rendering', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 800,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    })
+
+    await renderer.init(canvas)
+
+    ;(renderer as any).particleBurstSerial = 27
+    ;(renderer as any).lastParticleUpdateTimeSeconds = 4.2
+    ;(renderer as any).particleSystem.activeCount = 12
+    ;(renderer as any).particleSystem.geometry.drawRange.count = 12
+    mockRendererSetAnimationLoop.mockClear()
+
+    renderer.beginOfflineRender()
+    expect(mockRendererSetAnimationLoop).toHaveBeenNthCalledWith(1, null)
+    expect((renderer as any).particleBurstSerial).toBe(0)
+    expect(Number.isNaN((renderer as any).lastParticleUpdateTimeSeconds)).toBe(true)
+    expect((renderer as any).particleSystem.activeCount).toBe(0)
+    expect((renderer as any).particleSystem.geometry.drawRange.count).toBe(0)
+
+    renderer.endOfflineRender()
+    expect(mockRendererSetAnimationLoop).toHaveBeenNthCalledWith(2, expect.any(Function))
   })
 
   it('gives each note mesh its own rounded note size uniforms while sharing animation time', async () => {
@@ -978,7 +1530,7 @@ describe('ThreeRenderer', () => {
 
     expect(reflectionState.uniforms.reflectionStrength.value).toBe(0)
     expect(reflectionState.mesh.layers.mask).toBe(1)
-    expect(reflectionState.uniforms.reflectionColor.value.value).toBe(0x2e65a2)
+    expect(reflectionState.uniforms.reflectionColor.value.value).toBe(0x4f8ef7)
 
     useAppStore.setState({ currentTick: 239 })
     ;(renderer as any).handleAnimationFrame(1000)
@@ -1068,7 +1620,7 @@ describe('ThreeRenderer', () => {
     }>
 
     expect(visibleNoteMesh).toBeDefined()
-    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0x2e65a2)
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0x4f8ef7)
     expect(particleSystem.activeCount).toBeGreaterThan(0)
     expect(cWaveSegmentIndex).toBeGreaterThanOrEqual(0)
 
@@ -1103,8 +1655,9 @@ describe('ThreeRenderer', () => {
     expect(midWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(singleModePalette.haloDiffuseColor)
     expect(coreWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(singleModePalette.haloEmissiveColor)
 
+    const aurora = CREATE_PITCH_CLASS_PALETTES.find((palette) => palette.id === 'aurora')!
     useAppStore.getState().setCreateNoteColorMode('pitchClass')
-    useAppStore.getState().setCreatePitchClassColor(0, '#ffaa00')
+    useAppStore.getState().setCreatePitchClassColors(aurora.colors)
     ;(renderer as any).handleAnimationFrame(1064)
 
     useAppStore.setState({ currentTick: 239 })
@@ -1112,13 +1665,45 @@ describe('ThreeRenderer', () => {
     useAppStore.setState({ currentTick: 240 })
     ;(renderer as any).handleAnimationFrame(1096)
 
-    const pitchClassPalette = createNoteMaterialPalette(0xffaa00)
-    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(0xffaa00)
-    expect(keyHighlightState.material.color.value).toBe(0xffaa00)
-    expect(impactReflectionState.uniforms.reflectionColor.value.value).toBe(0xffaa00)
+    const auroraColor = Number.parseInt(aurora.colors[0].slice(1), 16)
+    const pitchClassPalette = createNoteMaterialPalette(auroraColor)
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(auroraColor)
+    expect(keyHighlightState.material.color.value).toBe(auroraColor)
+    expect(impactReflectionState.uniforms.reflectionColor.value.value).toBe(auroraColor)
     expect(outerWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(pitchClassPalette.coreDiffuseColor)
     expect(midWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(pitchClassPalette.haloDiffuseColor)
     expect(coreWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(pitchClassPalette.haloEmissiveColor)
+
+    useAppStore.getState().setCreateNoteColorMode('gradient')
+    ;(renderer as any).handleAnimationFrame(1112)
+
+    const gradientColor = resolveCreateModeNoteColor(
+      60,
+      useAppStore.getState().createNoteColors,
+      (renderer as any).getNormalizedKeyboardPosition(60),
+    )
+    const gradientPalette = createNoteMaterialPalette(gradientColor)
+    const gradientRed = (gradientColor >> 16) & 0xff
+    const gradientGreen = (gradientColor >> 8) & 0xff
+    const gradientBlue = gradientColor & 0xff
+
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(gradientColor)
+    expect(keyHighlightState.material.color.value).toBe(gradientColor)
+    expect(impactReflectionState.uniforms.reflectionColor.value.value).toBe(gradientColor)
+    expect(outerWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(gradientPalette.coreDiffuseColor)
+    expect(midWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(gradientPalette.haloDiffuseColor)
+    expect(coreWaveLayer?.materials[cWaveSegmentIndex].color.value).toBe(gradientPalette.haloEmissiveColor)
+    expect((particleSystem as { pitches: Int8Array }).pitches[0]).toBe(60)
+    expect(particleSystem.colors[0]).toBeCloseTo(gradientRed / 0xff, 6)
+    expect(particleSystem.colors[1]).toBeCloseTo(gradientGreen / 0xff, 6)
+    expect(particleSystem.colors[2]).toBeCloseTo(gradientBlue / 0xff, 6)
+
+    useAppStore.getState().setParticleSettings({ colorMode: 'custom', customColor: '#336699' })
+
+    expect(particleSystem.colors[0]).toBeCloseTo(0x33 / 0xff, 6)
+    expect(particleSystem.colors[1]).toBeCloseTo(0x66 / 0xff, 6)
+    expect(particleSystem.colors[2]).toBeCloseTo(0x99 / 0xff, 6)
+    expect(visibleNoteMesh?.material.userData.noteMaterialColor).toBe(gradientColor)
   })
 
   it('updates rounded note uniforms from the current note dimensions', async () => {
@@ -1154,9 +1739,10 @@ describe('ThreeRenderer', () => {
       roundedRectRadius: { value: number }
       roundedRectSize: { value: { x: number; y: number } }
     }
-    const expectedPalette = createNoteMaterialPalette(0x2e65a2)
+    const expectedPalette = createNoteMaterialPalette(0x4f8ef7)
 
-    expect(roundedNoteUniforms.noteMaterialTime.value).toBe(0)
+    expect(roundedNoteUniforms.noteMaterialTime.value).toBeCloseTo((renderer as any).noteMaterialTimeSeconds, 6)
+    expect(roundedNoteUniforms.noteMaterialTime.value).toBeGreaterThanOrEqual(0)
     expect(roundedNoteUniforms.noteCoreDiffuseColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteHaloDiffuseColor.value).toBeDefined()
     expect(roundedNoteUniforms.noteCoreEmissiveColor.value).toBeDefined()
@@ -1170,7 +1756,7 @@ describe('ThreeRenderer', () => {
     expect(roundedNoteUniforms.roundedRectRadius.value).toBeCloseTo(1.08)
   })
 
-  it('uses the same depth brightness scale for diffuse and emissive note shading', async () => {
+  it('updates existing note materials when style and glow change', async () => {
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -1188,8 +1774,50 @@ describe('ThreeRenderer', () => {
     const noteGroup = (renderer as any).requireNoteGroup()
     const noteMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 0)
     const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as {
-      noteDistanceFromBoundary: { value: number }
+      noteGlowStrength: { value: number }
+      noteStyleMode: { value: number }
     }
+
+    expect(roundedNoteUniforms.noteStyleMode.value).toBe(1)
+    expect(roundedNoteUniforms.noteGlowStrength.value).toBe(1)
+
+    useAppStore.getState().setNoteStyle('saber')
+    useAppStore.getState().setNoteGlow(160)
+    useAppStore.getState().setNoteOpacity(72)
+
+    expect(roundedNoteUniforms.noteStyleMode.value).toBe(2)
+    expect(roundedNoteUniforms.noteGlowStrength.value).toBeCloseTo(1.6)
+    expect(noteMesh.material.opacity).toBeCloseTo(0.72)
+
+    useAppStore.getState().setNoteStyle('outline')
+    expect(roundedNoteUniforms.noteStyleMode.value).toBe(3)
+
+    useAppStore.getState().setNoteStyle('crystal')
+    expect(roundedNoteUniforms.noteStyleMode.value).toBe(4)
+
+    useAppStore.getState().setNoteStyle('gem')
+    expect(roundedNoteUniforms.noteStyleMode.value).toBe(5)
+
+    await renderer.destroy()
+  })
+
+  it('keeps diffuse and emissive note shading independent of fall position', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 640,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 360,
+    })
+
+    await renderer.init(canvas)
+
+    const noteGroup = (renderer as any).requireNoteGroup()
+    const noteMesh = (renderer as any).getOrCreateNoteMesh(noteGroup, 0)
     const shader = {
       fragmentShader: `#include <common>
 void main() {
@@ -1209,13 +1837,17 @@ void main() {
       vertexShader: string
     })
 
-    expect(shader.uniforms.noteDistanceFromBoundary).toBe(roundedNoteUniforms.noteDistanceFromBoundary)
-    expect(shader.fragmentShader).toContain('smoothstep(72.0, 360.0, noteDistanceFromBoundary)')
-    expect(shader.fragmentShader).toContain('mix(1.0, 0.68, noteDepthFade)')
-    expect(shader.fragmentShader).toContain('noteDepthFade * 0.22')
-    expect(shader.fragmentShader).toContain('noteFaceColor = mix(noteFaceColor, vec3(noteFaceLuminance), noteDepthDesaturation);')
-    expect(shader.fragmentShader).toContain('noteFaceColor *= noteDepthBrightnessScale;')
-    expect(shader.fragmentShader).toContain('roundedNoteEmissiveRadiance *= noteDepthBrightnessScale;')
+    expect(shader.uniforms.noteDistanceFromBoundary).toBeUndefined()
+    expect(shader.fragmentShader).not.toContain('noteDepthFade')
+    expect(shader.fragmentShader).not.toContain('noteDepthBrightnessScale')
+    expect(shader.fragmentShader).not.toContain('noteDepthDesaturation')
+    expect(shader.fragmentShader).toContain('noteFaceColor *= 0.68;')
+    expect(shader.fragmentShader).toContain('roundedNoteEmissiveRadiance *= 0.68;')
+    expect(shader.fragmentShader).toContain('noteMaterialTime')
+    expect(shader.fragmentShader).toContain('noteSwirlBrightField')
+    expect(shader.fragmentShader).toContain('noteOutlineMask')
+    expect(shader.fragmentShader).toContain('noteCrystalFacetLight')
+    expect(shader.fragmentShader).toContain('noteGemCenterRidge')
   })
 
   it('updates the shared note material animation time from real-time frames', async () => {
@@ -1296,6 +1928,284 @@ void main() {
     expect(Math.max(...Array.from(particleSystem.baseSizes.slice(0, particleSystem.activeCount)))).toBeLessThan(6.2)
     expect(Math.min(...Array.from(particleSystem.baseBrightnesses.slice(0, particleSystem.activeCount)))).toBeGreaterThan(0.45)
     expect(Math.min(...Array.from({ length: particleSystem.activeCount }, (_, index) => particleSystem.velocities[(index * 3) + 1]))).toBeGreaterThan(0)
+  })
+
+  it('does not emit particle bursts while particles are disabled', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    useAppStore.getState().setParticleSettings({ enabled: false })
+    loadProjectWithNotes([
+      { endTick: 480, id: 'particles-disabled', pitch: 60, startTick: 240, velocity: 127, visualEndTick: 480 },
+    ])
+
+    await renderer.init(canvas)
+    useAppStore.setState({ currentTick: 239 })
+    ;(renderer as any).handleAnimationFrame(1000)
+    useAppStore.getState().setIsPlaying(true)
+    ;(renderer as any).handleAnimationFrame(1016)
+    useAppStore.setState({ currentTick: 240 })
+    ;(renderer as any).handleAnimationFrame(1032)
+
+    expect((renderer as any).particleSystem.activeCount).toBe(0)
+  })
+
+  it('scales density, size, speed, spread, lifetime, and glow for new bursts', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    const baseSettings = getAppState().particleSettings
+    const indexedNote = {
+      note: { endTick: 480, id: 'particle-controls', pitch: 60, startTick: 240, velocity: 127, visualEndTick: 480 },
+    }
+    const emit = (patch: Partial<typeof baseSettings>) => {
+      useAppStore.getState().setParticleSettings({ ...baseSettings, ...patch })
+      ;(renderer as any).clearParticleSystem(false)
+      ;(renderer as any).particleBurstSerial = 0
+      ;(renderer as any).emitBurstForNote(indexedNote, getAppState().particleSettings)
+      const particleSystem = (renderer as any).particleSystem as {
+        activeCount: number
+        baseBrightnesses: Float32Array
+        baseSizes: Float32Array
+        lifetimes: Float32Array
+        velocities: Float32Array
+      }
+      return {
+        activeCount: particleSystem.activeCount,
+        baseBrightness: particleSystem.baseBrightnesses[0],
+        baseSize: particleSystem.baseSizes[0],
+        lifetime: particleSystem.lifetimes[0],
+        velocityX: particleSystem.velocities[0],
+        velocityY: particleSystem.velocities[1],
+      }
+    }
+
+    const baseline = emit({})
+    const density = emit({ density: 200 })
+    const size = emit({ size: 200 })
+    const speed = emit({ speed: 200 })
+    const spread = emit({ spread: 0 })
+    const lifetime = emit({ lifetime: 200 })
+    const glow = emit({ glow: 200 })
+
+    expect(density.activeCount).toBe(baseline.activeCount * 2)
+    expect(size.baseSize).toBeCloseTo(baseline.baseSize * 2, 6)
+    expect(speed.velocityY).toBeCloseTo(baseline.velocityY * 2, 6)
+    expect(spread.velocityX).toBe(0)
+    expect(Math.abs(baseline.velocityX)).toBeGreaterThan(0)
+    expect(lifetime.lifetime).toBeCloseTo(baseline.lifetime * 2, 6)
+    expect(glow.baseBrightness).toBeCloseTo(baseline.baseBrightness * 2, 6)
+  })
+
+  it('keeps velocity-oriented Wisp trails after motion settings are edited', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    useAppStore.getState().setParticlePreset('wisp')
+    ;(renderer as any).emitBurstForNote(
+      {
+        note: { endTick: 480, id: 'wisp-trail', pitch: 60, startTick: 240, velocity: 127, visualEndTick: 480 },
+      },
+      getAppState().particleSettings,
+    )
+    ;(renderer as any).syncParticleMaterialAnimationTime()
+
+    const particleSystem = (renderer as any).particleSystem as {
+      activeCount: number
+      geometry: { attributes: Record<string, { array: Float32Array }> }
+      material: { fragmentShader: string; vertexShader: string }
+      uniforms: { wispMode: { value: number } }
+      velocities: Float32Array
+    }
+
+    expect(particleSystem.activeCount).toBeGreaterThan(0)
+    expect(particleSystem.geometry.attributes.aVelocity.array).toBe(particleSystem.velocities)
+    expect(particleSystem.uniforms.wispMode.value).toBe(1)
+    expect(particleSystem.material.vertexShader).toContain('attribute vec3 aVelocity')
+    expect(particleSystem.material.vertexShader).toContain('vWispStretch')
+    expect(particleSystem.material.fragmentShader).toContain('wispTail')
+    expect(particleSystem.material.fragmentShader).toContain('wispMask')
+
+    useAppStore.getState().setParticleSettings({ speed: 189 })
+    ;(renderer as any).syncParticleMaterialAnimationTime()
+
+    expect(particleSystem.uniforms.wispMode.value).toBe(1)
+    expect(particleSystem.activeCount).toBeGreaterThan(0)
+  })
+
+  it('switches active particles to the Ray shader shape immediately', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    useAppStore.getState().setParticleSettings({ style: 'ray' })
+    ;(renderer as any).syncParticleMaterialAnimationTime()
+
+    const particleSystem = (renderer as any).particleSystem as {
+      material: { fragmentShader: string }
+      uniforms: { wispMode: { value: number } }
+    }
+    expect(particleSystem.uniforms.wispMode.value).toBe(2)
+    expect(particleSystem.material.fragmentShader).toContain('rayMask')
+    expect(particleSystem.material.fragmentShader).toContain('rayCore')
+  })
+
+  it('emits particle bursts during offline export frames without relying on live playback state', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 1280,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 720,
+    })
+
+    loadProjectWithNotes([
+      {
+        endTick: 360,
+        id: 'offline-burst-note',
+        pitch: 60,
+        startTick: 240,
+        velocity: 127,
+        visualEndTick: 360,
+      },
+    ])
+
+    await renderer.init(canvas)
+    renderer.beginOfflineRender()
+    ;(renderer as any).hasPendingSeekSuppression = true
+    ;(renderer as any).lastBurstDetectionTick = 9_999
+
+    renderer.renderFrame(239, { animationTimeSeconds: 0 })
+    renderer.renderFrame(240, { animationTimeSeconds: 1 / 30 })
+
+    const particleSystem = (renderer as any).particleSystem as {
+      activeCount: number
+      geometry: { drawRange: { count: number } }
+    }
+
+    expect(particleSystem.activeCount).toBe(60)
+    expect(particleSystem.geometry.drawRange.count).toBe(60)
+  })
+
+  it('advances the Create-mode boundary wave during offline export frames', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 1280,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 720,
+    })
+
+    await renderer.init(canvas)
+    renderer.beginOfflineRender()
+
+    const updateWaveMeshesSpy = vi.spyOn(renderer as any, 'updateWaveMeshes')
+    updateWaveMeshesSpy.mockClear()
+
+    renderer.renderFrame(0, { animationTimeSeconds: 0 })
+    expect((renderer as any).boundaryWaveTime).toBeCloseTo(0, 6)
+
+    renderer.renderFrame(0, { animationTimeSeconds: 1 / 30 })
+
+    expect((renderer as any).boundaryWaveTime).toBeCloseTo(0.04, 6)
+    expect(updateWaveMeshesSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the export canvas at DPR 1 while supersampling postprocessing internally', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', {
+      configurable: true,
+      value: 1280,
+    })
+    Object.defineProperty(canvas, 'clientHeight', {
+      configurable: true,
+      value: 720,
+    })
+
+    await renderer.init(canvas)
+    mockRendererSetPixelRatio.mockClear()
+    mockRendererSetSize.mockClear()
+    mockEffectComposerSetPixelRatio.mockClear()
+    mockEffectComposerSetSize.mockClear()
+
+    renderer.resize(1920, 1080, {
+      pixelRatio: 1,
+      postprocessScale: 2,
+    })
+
+    const particleSystem = (renderer as any).particleSystem as {
+      uniforms: { pixelRatio: { value: number } }
+    }
+
+    expect(mockRendererSetPixelRatio).toHaveBeenCalledWith(1)
+    expect(mockRendererSetSize).toHaveBeenCalledWith(1920, 1080, false)
+    expect(mockEffectComposerSetPixelRatio).toHaveBeenNthCalledWith(1, 2)
+    expect(mockEffectComposerSetPixelRatio).toHaveBeenNthCalledWith(2, 2)
+    expect(mockEffectComposerSetSize).toHaveBeenNthCalledWith(1, 1920, 1080)
+    expect(mockEffectComposerSetSize).toHaveBeenNthCalledWith(2, 1920, 1080)
+    expect(particleSystem.uniforms.pixelRatio.value).toBe(2)
+  })
+
+  it('does not rebuild GPU resources when resize receives the current dimensions and render settings', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1280 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 720 })
+
+    await renderer.init(canvas)
+    mockRendererSetSize.mockClear()
+    mockEffectComposerSetSize.mockClear()
+    const rebuildStaticScene = vi.spyOn(renderer as any, 'rebuildStaticScene')
+    const rebuildWaveMeshes = vi.spyOn(renderer as any, 'rebuildWaveMeshes')
+
+    renderer.resize(1280, 720)
+
+    expect(mockRendererSetSize).not.toHaveBeenCalled()
+    expect(mockEffectComposerSetSize).not.toHaveBeenCalled()
+    expect(rebuildStaticScene).not.toHaveBeenCalled()
+    expect(rebuildWaveMeshes).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [1280, 720, 270],
+    [1920, 1080, 270],
+    [3840, 2160, 270],
+  ])('keeps composer dimensions and the compact live keyboard aligned at %ix%i', async (width, height, keyboardHeight) => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1280 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 720 })
+    await renderer.init(canvas)
+    mockEffectComposerSetSize.mockClear()
+
+    renderer.resize(width, height, { pixelRatio: 1, postprocessScale: 1 })
+
+    expect(renderer.getKeyboardY()).toBe(height - keyboardHeight)
+    expect(renderer.getRenderLayoutContext().keyboardHeightRatio).toBeCloseTo(keyboardHeight / height)
+    expect(renderer.getRenderLayoutContext().preserveKeyboardHeightRatio).toBe(true)
+    expect(mockEffectComposerSetSize).toHaveBeenNthCalledWith(1, width, height)
+    expect(mockEffectComposerSetSize).toHaveBeenNthCalledWith(2, width, height)
   })
 
   it('uses deterministic flow noise sampling and drifts active particles sideways over time', async () => {
@@ -1592,6 +2502,8 @@ void main() {
   })
 
   it('disposes static scene resources and releases the WebGL context on destroy', async () => {
+    useAppStore.getState().setNoteLabelsOnKeys(true)
+    vi.clearAllMocks()
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -1608,21 +2520,48 @@ void main() {
     await renderer.destroy()
 
     expect(mockGroupRemove).toHaveBeenCalled()
-    expect(mockCanvasTextureDispose).not.toHaveBeenCalled()
+    expect(mockCanvasTextureDispose).toHaveBeenCalledTimes(15)
     expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(1)
     expect(mockMeshBasicMaterialDispose).toHaveBeenCalled()
     expect(mockMeshLambertMaterialDispose).toHaveBeenCalled()
-    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(89)
-    expect(mockSpriteMaterialDispose).not.toHaveBeenCalled()
+    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(194)
+    expect(mockSpriteMaterialDispose).toHaveBeenCalledTimes(88)
     expect(mockUnrealBloomPassDispose).toHaveBeenCalledTimes(1)
     expect(mockOutputPassDispose).toHaveBeenCalledTimes(1)
     expect(mockShaderPassDispose).toHaveBeenCalledTimes(1)
     expect(mockEffectComposerDispose).toHaveBeenCalledTimes(2)
     expect(mockPlaneGeometryDispose).toHaveBeenCalledTimes(1)
-    expect(mockSceneRemove).toHaveBeenCalledTimes(6)
+    expect(mockSceneRemove).toHaveBeenCalledTimes(9)
     expect(mockRendererSetAnimationLoop).toHaveBeenCalledWith(null)
     expect(mockRendererForceContextLoss).toHaveBeenCalledTimes(1)
     expect(mockRendererDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('merges live note sources without allowing pointer notes to override active Record MIDI', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    renderer.setLiveNoteSource('pointer-keyboard', [{
+      id: 'pointer:60', pitch: 60, startedAtMs: performance.now(), velocity: 100,
+    }])
+    expect((renderer as any).liveMidiNotes.map((note: { pitch: number }) => note.pitch)).toEqual([60])
+
+    renderer.setLiveNoteSource('record-midi', [{
+      id: 'midi:64', pitch: 64, startedAtMs: performance.now(), velocity: 96,
+    }])
+    expect((renderer as any).liveMidiNotes.map((note: { pitch: number }) => note.pitch)).toEqual([64])
+    expect((renderer as any).liveSourceActiveKeyPitches).toEqual(new Set([64]))
+
+    renderer.setLiveNoteSource('pointer-keyboard', [{
+      id: 'pointer:67', pitch: 67, startedAtMs: performance.now(), velocity: 100,
+    }])
+    expect((renderer as any).liveMidiNotes.map((note: { pitch: number }) => note.pitch)).toEqual([64])
+
+    renderer.setLiveNoteSource('record-midi', [])
+    expect(renderer.isLiveNoteSourceActiveOrRecent('record-midi', 600)).toBe(true)
   })
 })
 
@@ -1634,46 +2573,47 @@ function loadProjectWithNotes(notes: Array<{
   velocity: number
   visualEndTick: number
 }>): void {
-  useAppStore.getState().loadProject(
-    {
-      tempoMap: [
-        {
-          bpm: 120,
-          microsecondsPerBeat: 500_000,
-          tick: 0,
-        },
-      ],
-      ticksPerQuarter: 480,
-      timeSignatures: [
-        {
-          denominator: 4,
-          numerator: 4,
-          tick: 0,
-        },
-      ],
-      totalTicks: 5_000,
-      tracks: [
-        {
-          channel: 0,
-          id: 'track-1',
-          name: 'Track 1',
-          notes,
-        },
-      ],
-    },
-    {
-      segments: [
-        {
-          bpm: 120,
-          endTick: Number.POSITIVE_INFINITY,
-          microsecondsPerBeat: 500_000,
-          startSeconds: 0,
-          startTick: 0,
-          ticksPerSecond: 960,
-        },
-      ],
-    },
-  )
+  const projectData = {
+    tempoMap: [
+      {
+        bpm: 120,
+        microsecondsPerBeat: 500_000,
+        tick: 0,
+      },
+    ],
+    ticksPerQuarter: 480,
+    timeSignatures: [
+      {
+        denominator: 4,
+        numerator: 4,
+        tick: 0,
+      },
+    ],
+    totalTicks: 5_000,
+    tracks: [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes,
+      },
+    ],
+  }
+  const tempoMap = {
+    segments: [
+      {
+        bpm: 120,
+        endTick: Number.POSITIVE_INFINITY,
+        microsecondsPerBeat: 500_000,
+        startSeconds: 0,
+        startTick: 0,
+        ticksPerSecond: 960,
+      },
+    ],
+  }
+
+  useAppStore.getState().loadProject(projectData, tempoMap)
+  spatialIndex.build(projectData)
 }
 
 function emitPlaybackSeek(tick: number): void {

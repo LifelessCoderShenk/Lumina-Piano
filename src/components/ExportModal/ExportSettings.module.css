@@ -161,7 +161,8 @@
 
 .startButton:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  background: #26313b;
+  color: var(--color-icon-muted);
 }
 
 .startIcon {

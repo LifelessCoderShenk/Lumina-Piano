@@ -1,6 +1,5 @@
 .editPanel {
-  flex: 0 0 25%;
-  width: 25%;
+  flex-shrink: 0;
   min-width: 0;
   height: 100%;
   display: flex;
@@ -11,6 +10,23 @@
   background: var(--color-bg);
   border-right: 1px solid rgba(255, 255, 255, 0.16);
   overflow: hidden;
+  transition: width 160ms ease, flex-basis 160ms ease;
+}
+
+.isResizing,
+.isResizing * {
+  user-select: none;
+}
+
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
 }
 
 .body {
@@ -24,18 +40,19 @@
   background: var(--color-bg);
 }
 
+.transcriptionSidebarHost {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  background: var(--color-bg);
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  scrollbar-width: thin;
+}
+
 .divider {
   width: 1px;
   background: rgba(46, 101, 162, 0.45);
   flex: 0 0 1px;
-}
-
-.placeholderPanel {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #cfcfcf;
-  font-size: 13px;
-  padding: 16px;
 }

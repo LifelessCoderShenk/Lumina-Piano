@@ -4,12 +4,14 @@ import {
   PIANO_MAX_PITCH,
   PIANO_MIN_PITCH,
   getBlackKeyWidth,
+  getKeyAtCanvasPoint,
   getKeyAtScreenX,
   getWhiteKeyIndex,
   getWhiteKeyWidth,
   isBlackKey,
   pitchToKeyX,
 } from './pianoMath'
+import { getKeyboardLayoutMetrics } from './layoutConstants'
 
 const CANVAS_WIDTH = 1920
 
@@ -121,5 +123,21 @@ describe('getKeyAtScreenX', () => {
     const middleOfASharp0 = pitchToKeyX(22, CANVAS_WIDTH) + (blackKeyWidth / 2)
 
     expect(getKeyAtScreenX(middleOfASharp0, CANVAS_WIDTH)).toBe(22)
+  })
+})
+
+describe('getKeyAtCanvasPoint', () => {
+  it('only resolves points inside the rendered keyboard region', () => {
+    const { keyboardY } = getKeyboardLayoutMetrics(600)
+    expect(getKeyAtCanvasPoint(100, keyboardY - 1, CANVAS_WIDTH, 600)).toBeNull()
+    expect(getKeyAtCanvasPoint(100, 600, CANVAS_WIDTH, 600)).toBeNull()
+  })
+
+  it('gives black keys priority only in their visible upper region', () => {
+    const blackKeyCenter = pitchToKeyX(22, CANVAS_WIDTH) + (getBlackKeyWidth(CANVAS_WIDTH) / 2)
+    const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(600)
+
+    expect(getKeyAtCanvasPoint(blackKeyCenter, keyboardY + (keyboardHeight * 0.3), CANVAS_WIDTH, 600)).toBe(22)
+    expect(getKeyAtCanvasPoint(blackKeyCenter, keyboardY + (keyboardHeight * 0.85), CANVAS_WIDTH, 600)).toBe(23)
   })
 })

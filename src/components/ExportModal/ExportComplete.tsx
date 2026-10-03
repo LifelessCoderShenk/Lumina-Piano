@@ -17,7 +17,7 @@ export function ExportComplete({
   return (
     <div className={styles.content}>
       <div className={styles.iconBadge}>
-        <CheckIcon />
+        <AppIcon className={styles.checkIcon} icon={CircleCheck} size={24} />
       </div>
 
       <div className={styles.textBlock}>
@@ -46,7 +46,7 @@ export function ExportComplete({
           onClick={onOpenFile}
           type="button"
         >
-          <FolderIcon />
+          <AppIcon className={styles.folderIcon} icon={FolderOpen} size={16} />
           <span>Open File</span>
         </button>
       </div>
@@ -60,46 +60,6 @@ function getFileName(path: string): string {
   return segments[segments.length - 1] || path
 }
 
-function CheckIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className={styles.checkIcon}
-      fill="none"
-      viewBox="0 0 20 20"
-    >
-      <path
-        d="m5.5 10.25 2.75 2.75 6.25-6.25"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-      <circle
-        cx="10"
-        cy="10"
-        r="7"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
-  )
-}
+import { CircleCheck, FolderOpen } from 'lucide-react'
 
-function FolderIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className={styles.folderIcon}
-      fill="none"
-      viewBox="0 0 20 20"
-    >
-      <path
-        d="M3.5 6.25a1.25 1.25 0 0 1 1.25-1.25h3l1.25 1.75h6a1.25 1.25 0 0 1 1.25 1.25V13.5a1.25 1.25 0 0 1-1.25 1.25H4.75A1.25 1.25 0 0 1 3.5 13.5V6.25Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  )
-}
+import { AppIcon } from '../AppIcon/AppIcon'

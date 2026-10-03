@@ -1,21 +1,25 @@
+/*
+INPUT: All Zustand state slices and app orchestration actions.
+OUTPUT: The singleton typed Lumina Piano application store and selectors.
+PURPOSE: Composes UI, visualizer, recording, and Transcriptor state into one reactive store.
+*/
+
 import { enableMapSet } from 'immer'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
 import { createOrchestrationActions } from './orchestration'
-import { registerLearnV3ActivityReader } from './learnV3Activity'
 import { registerProjectDataStoreAccess } from './projectDataAccess'
 import { registerProjectLoadingStoreAccess } from './projectLoadingAccess'
 import { createStoreSelectors } from './selectors'
 import { createCameraViewportSlice } from './slices/cameraViewportSlice'
 import { createCreateModeSlice } from './slices/createModeSlice'
-import { createLearnSlice } from './slices/learnSlice'
-import { createLearnVisualsSlice } from './slices/learnVisualsSlice'
 import { createPiecesSlice } from './slices/piecesSlice'
 import { createPlaybackSlice } from './slices/playbackSlice'
 import { createProjectSlice } from './slices/projectSlice'
 import { createSelectionSlice } from './slices/selectionSlice'
 import { createTrackSlice } from './slices/trackSlice'
+import { createTranscriptionSlice } from './slices/transcriptionSlice'
 import { createUISlice } from './slices/uiSlice'
 import { createVisualizerAppearanceSlice } from './slices/visualizerAppearanceSlice'
 import { StoreError } from './errors'
@@ -32,15 +36,13 @@ export const useAppStore = create<AppStore>()(
     ...createTrackSlice(set, get),
     ...createPiecesSlice(set, get),
     ...createCreateModeSlice(set, get),
+    ...createTranscriptionSlice(set, get),
     ...createUISlice(set, get),
-    ...createLearnSlice(set, get),
-    ...createLearnVisualsSlice(set, get),
     ...createVisualizerAppearanceSlice(set, get),
     ...createOrchestrationActions(set, get),
   })),
 )
 
-registerLearnV3ActivityReader(() => useAppStore.getState().learnV3.isActive)
 registerProjectDataStoreAccess({
   getCurrentProjectData: () => useAppStore.getState().projectData,
   subscribeToProjectData: (listener) => {
@@ -73,9 +75,9 @@ export const resetStore = () => useAppStore.getState().resetStore()
 export { StoreError }
 export {
   cameraOverlayInitial,
+  handVisualizationInitial,
   DEFAULT_PITCH_CLASS_COLORS,
   DEFAULT_TRACK_COLORS,
-  learnVisualsInitial,
   recordModeConfigInitial,
   visualizerSettingsInitial,
 } from './defaults'
@@ -86,18 +88,11 @@ export type {
   AppMode,
   AppState,
   CameraOverlaySettings,
+  HandVisualizationSettings,
   CreateTab,
-  LearnHand,
-  LearnMode,
-  LearnNoteColorMode,
-  LearnSessionConfig,
-  LearnStats,
-  LearnV3State,
-  LearnVisuals,
-  MidiConnectionStatus,
-  MidiDeviceInfo,
   Piece,
   PieceType,
   RecordModeConfig,
+  RecordModeView,
   VisualizerSettings,
 } from './types'

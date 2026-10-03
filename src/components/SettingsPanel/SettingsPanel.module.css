@@ -44,6 +44,11 @@
   letter-spacing: 0.08em;
 }
 
+.controlLabel {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+}
+
 .segmentedControl {
   display: flex;
   flex-wrap: wrap;
@@ -62,6 +67,71 @@
 
 .segmentButtonActive {
   border-color: var(--color-icon);
+}
+
+.colorControl,
+.toggleControl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.rangeControl {
+  display: grid;
+  grid-template-columns: auto minmax(80px, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.rangeControl input {
+  width: 100%;
+  accent-color: var(--color-icon);
+}
+
+.rangeControl output {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  text-align: right;
+}
+
+.subControl {
+  margin-left: 24px;
+}
+
+.colorInputGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.colorInputGroup input[type="color"] {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.colorInputGroup output {
+  min-width: 60px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.toggleControl {
+  justify-content: flex-start;
+  cursor: pointer;
+}
+
+.toggleControl input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-icon);
 }
 
 .footerNote {

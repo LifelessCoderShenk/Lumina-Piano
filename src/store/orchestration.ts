@@ -1,3 +1,9 @@
+/*
+INPUT: Store mutations and cross-slice project lifecycle commands.
+OUTPUT: High-level app-mode and project orchestration actions.
+PURPOSE: Coordinates transitions without embedding mode-specific rendering or MIDI behavior.
+*/
+
 import type { StateCreator } from 'zustand'
 
 import { getMidiPieceLoader } from './midiPieceLoaderAccess'
@@ -143,7 +149,6 @@ export const createOrchestrationActions: StateCreator<
           state.loadPieceError = null
         })
 
-        await midiPieceLoader.warmUpAudioAndStartPlayback()
       }
 
       return loaded

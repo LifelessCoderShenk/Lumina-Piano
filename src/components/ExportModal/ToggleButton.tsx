@@ -23,6 +23,7 @@ export function ToggleButton({
 
   return (
     <button
+      aria-pressed={selected}
       className={className}
       disabled={disabled}
       onClick={onClick}

@@ -2,65 +2,34 @@ import { ArrayBufferTarget, Muxer } from 'webm-muxer'
 
 import { mkdirExportDir, rmExportDir } from './exportFileSystem'
 import { writeAudioBufferToWav } from './wavWriter'
-
-import * as Tone from 'tone'
+import { ExportQualityProbe } from './exportQuality'
+import { renderOfflineMidiAudioBuffer } from '../audio/renderOfflineMidiAudio'
 
 import { cameraSystem } from '../camera/CameraSystem'
-import { getActiveVisualizerCanvas } from '../renderer/activeCanvas'
+import { getActiveVisualizerRenderer } from '../renderer/activeVisualizerRenderer'
 import { playbackEngine } from '../playback/PlaybackEngine'
-import { renderer } from '../renderer/Renderer'
+import type { VisualizerRenderer } from '../renderer/VisualizerRenderer'
 import type { AppState } from '../store/store'
 import { getAppState } from '../store/store'
+import type { VisualizerSettings } from '../store/types'
 import { secondsToTick, tickToSeconds } from '../tempo/tempoMap'
+import { resolveExportDimensions } from './exportDimensions'
 import { ExportError } from './errors'
 import type { ExportProgress, ExportResolution, ExportSettings } from './types'
-import { RESOLUTIONS } from './types'
 
 const AUDIO_PROGRESS_START = 0.85
 const COMBINING_PROGRESS = 0.95
 const KEYFRAME_INTERVAL_SECONDS = 2
-const STANDARD_VIDEO_BITRATE = 8_000_000
-const UHD_VIDEO_BITRATE = 40_000_000
+const MIN_VP9_VIDEO_BITRATE = 8_000_000
+const MAX_VP9_VIDEO_BITRATE = 80_000_000
+const VP9_BITS_PER_PIXEL_PER_FRAME = 0.16
 const AUDIO_PROGRESS_STEPS_PER_SECOND = 10
-const OFFLINE_AUDIO_ATTACK_SECONDS = 0.01
-const OFFLINE_AUDIO_RELEASE_SECONDS = 0.5
-const OFFLINE_AUDIO_LEAD_IN_SECONDS = 0.1
-const OFFLINE_AUDIO_TAIL_SECONDS = 0.1
+const EXPORT_LEAD_IN_SECONDS = 0
+const EXPORT_TAIL_SECONDS = 0
+const EXPORT_POSTPROCESS_SCALE = 2
+const EXPORT_POSTPROCESS_MAX_WIDTH = 3840
+const EXPORT_POSTPROCESS_MAX_HEIGHT = 2160
 const OFFLINE_AUDIO_MIN_SCHEDULE_OFFSET_SECONDS = 0.001
-const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/'
-
-const SALAMANDER_SAMPLE_URLS = {
-  A0: 'A0.mp3',
-  C1: 'C1.mp3',
-  'D#1': 'Ds1.mp3',
-  'F#1': 'Fs1.mp3',
-  A1: 'A1.mp3',
-  C2: 'C2.mp3',
-  'D#2': 'Ds2.mp3',
-  'F#2': 'Fs2.mp3',
-  A2: 'A2.mp3',
-  C3: 'C3.mp3',
-  'D#3': 'Ds3.mp3',
-  'F#3': 'Fs3.mp3',
-  A3: 'A3.mp3',
-  C4: 'C4.mp3',
-  'D#4': 'Ds4.mp3',
-  'F#4': 'Fs4.mp3',
-  A4: 'A4.mp3',
-  C5: 'C5.mp3',
-  'D#5': 'Ds5.mp3',
-  'F#5': 'Fs5.mp3',
-  A5: 'A5.mp3',
-  C6: 'C6.mp3',
-  'D#6': 'Ds6.mp3',
-  'F#6': 'Fs6.mp3',
-  A6: 'A6.mp3',
-  C7: 'C7.mp3',
-  'D#7': 'Ds7.mp3',
-  'F#7': 'Fs7.mp3',
-  A7: 'A7.mp3',
-  C8: 'C8.mp3',
-} as const
 
 export type ProgressCallback = (
   framesRendered: number,
@@ -70,6 +39,20 @@ export type ProgressCallback = (
 
 export type ExportProgressListener = (progress: ExportProgress) => void
 export type ExportErrorListener = (message: string) => void
+
+interface ExportTimeline {
+  leadInSeconds: number
+  songDurationSeconds: number
+  tailSeconds: number
+  totalDurationSeconds: number
+}
+
+export interface ExportJobSettings extends ExportSettings {
+  fps: VisualizerSettings['framerate']
+  resolution: ExportResolution
+  aspectRatio: VisualizerSettings['aspectRatio']
+  resolutionTier: VisualizerSettings['resolution']
+}
 
 export class ExportEngine {
   private isRunning = false
@@ -101,14 +84,16 @@ export class ExportEngine {
       throw new ExportError('No project is loaded.', 'NO_PROJECT')
     }
 
-    if (!renderer.isReady()) {
+    const activeRenderer = getActiveVisualizerRenderer()
+    if (activeRenderer == null || !activeRenderer.isReady()) {
       throw new ExportError('Renderer has not been initialized.', 'NOT_INITIALIZED')
     }
 
     assertWebCodecsAvailable()
 
-    const resolution = validateSettings(settings)
-    const totalFrames = getTotalFrames(settings.fps, state.projectData.totalTicks, state.precomputedTempoMap)
+    const jobSettings = validateSettings(settings, state.visualizerSettings)
+    const exportTimeline = createExportTimeline(state.projectData.totalTicks, state.precomputedTempoMap)
+    const totalFrames = getTotalFrames(jobSettings.fps, exportTimeline.totalDurationSeconds)
     const store = getAppState()
     const previousPlayback = {
       currentTick: store.currentTick,
@@ -118,6 +103,7 @@ export class ExportEngine {
       height: store.viewportHeight,
       width: store.viewportWidth,
     }
+    const liveLayoutContext = activeRenderer.getRenderLayoutContext?.()
 
     this.isRunning = true
     this.shouldCancel = false
@@ -127,16 +113,25 @@ export class ExportEngine {
       playbackEngine.pause()
     }
 
+    let beganOfflineRender = false
     try {
+      activeRenderer.beginOfflineRender()
+      beganOfflineRender = true
       await mkdirExportDir(this.tempDir)
-      renderer.resize(resolution.width, resolution.height)
-      cameraSystem.setViewportSize(resolution.width, resolution.height)
+      const exportResizeOptions = {
+        pixelRatio: 1,
+        postprocessScale: getExportPostprocessScale(jobSettings.resolution),
+        ...(liveLayoutContext == null ? {} : { layoutContext: liveLayoutContext }),
+      }
+      activeRenderer.resize(jobSettings.resolution.width, jobSettings.resolution.height, exportResizeOptions)
+      cameraSystem.setViewportSize(jobSettings.resolution.width, jobSettings.resolution.height)
       await delay(50)
 
       const webmBuffer = await this.exportWithWebCodecs(
-        settings,
-        resolution,
+        jobSettings,
         totalFrames,
+        exportTimeline,
+        activeRenderer,
         (framesRendered, total, remaining) => {
           this.emitProgress({
             estimatedSecondsRemaining: remaining,
@@ -150,10 +145,11 @@ export class ExportEngine {
 
       const tempWebmPath = joinExportPath(this.tempDir, 'export.webm')
       await saveEncodedVideoFile(webmBuffer, tempWebmPath)
-      const audioPath = settings.includeAudio
+      const audioPath = jobSettings.includeAudio
         ? await this.renderOfflineAudio(
           joinExportPath(this.tempDir, 'export-audio.wav'),
           state,
+          exportTimeline,
           (stepsCompleted, totalSteps, remaining) => {
             this.emitProgress({
               estimatedSecondsRemaining: remaining,
@@ -174,7 +170,7 @@ export class ExportEngine {
         totalFrames,
       })
 
-      await this.combineWithFFmpeg(tempWebmPath, audioPath, settings.outputPath)
+      await this.combineWithFFmpeg(tempWebmPath, audioPath, jobSettings.outputPath)
 
       this.emitProgress({
         estimatedSecondsRemaining: 0,
@@ -184,7 +180,7 @@ export class ExportEngine {
         totalFrames,
       })
 
-      this.completeListener?.(settings.outputPath)
+      this.completeListener?.(jobSettings.outputPath)
     } catch (error: unknown) {
       console.error('[Export] Inner error caught:', error)
 
@@ -200,13 +196,21 @@ export class ExportEngine {
       throw exportError
     } finally {
       playbackEngine.pause()
+      if (liveLayoutContext == null) {
+        activeRenderer.resize(previousViewport.width, previousViewport.height)
+      } else {
+        activeRenderer.resize(previousViewport.width, previousViewport.height, { layoutContext: liveLayoutContext })
+      }
+      cameraSystem.setViewportSize(previousViewport.width, previousViewport.height)
       playbackEngine.seek(previousPlayback.currentTick)
+
+      if (beganOfflineRender) {
+        activeRenderer.endOfflineRender()
+      }
+
       if (previousPlayback.isPlaying) {
         playbackEngine.play()
       }
-
-      renderer.resize(previousViewport.width, previousViewport.height)
-      cameraSystem.setViewportSize(previousViewport.width, previousViewport.height)
 
       if (this.tempDir != null) {
         await this.cleanup(this.tempDir)
@@ -224,9 +228,10 @@ export class ExportEngine {
   }
 
   private async exportWithWebCodecs(
-    settings: ExportSettings,
-    resolution: ExportResolution,
+    settings: ExportJobSettings,
     totalFrames: number,
+    exportTimeline: ExportTimeline,
+    activeRenderer: VisualizerRenderer,
     onVideoProgress: ProgressCallback,
   ): Promise<ArrayBuffer> {
     const state = getAppState()
@@ -237,26 +242,24 @@ export class ExportEngine {
       throw new ExportError('No project is loaded.', 'NO_PROJECT')
     }
 
-    const ticksPerFrame = Math.max(1, secondsToTick(1 / settings.fps, tempoMap))
     const target = new ArrayBufferTarget()
-    const canvas = getActiveVisualizerCanvas()
-    if (canvas == null) {
-      throw new ExportError('Renderer has not been initialized.', 'NOT_INITIALIZED')
-    }
+    const canvas = activeRenderer.getCanvas()
     const muxer = new Muxer({
       firstTimestampBehavior: 'offset',
       target,
       video: {
         codec: 'V_VP9',
         frameRate: settings.fps,
-        height: resolution.height,
-        width: resolution.width,
+        height: settings.resolution.height,
+        width: settings.resolution.width,
       },
     })
     const frameDurationMicros = Math.round(1_000_000 / settings.fps)
     const keyframeInterval = Math.max(1, settings.fps * KEYFRAME_INTERVAL_SECONDS)
     const videoStartTime = performance.now()
     let videoEncoderError: unknown = null
+    const qualityProbe = new ExportQualityProbe(totalFrames, settings.resolution.width, settings.resolution.height)
+    let qualityProbeFinished = false
 
     const videoEncoder = new VideoEncoder({
       error: (error) => {
@@ -264,16 +267,17 @@ export class ExportEngine {
       },
       output: (chunk, meta) => {
         muxer.addVideoChunk(chunk, meta)
+        qualityProbe.decode(chunk)
       },
     })
 
     videoEncoder.configure({
-      bitrate: resolution.width >= 3840 ? UHD_VIDEO_BITRATE : STANDARD_VIDEO_BITRATE,
+      bitrate: getVp9VideoBitrate(settings.resolution.width, settings.resolution.height, settings.fps),
       codec: 'vp09.00.10.08',
       framerate: settings.fps,
-      height: resolution.height,
+      height: settings.resolution.height,
       latencyMode: 'quality',
-      width: resolution.width,
+      width: settings.resolution.width,
     })
 
     try {
@@ -281,14 +285,26 @@ export class ExportEngine {
         this.assertNotCancelled()
         throwIfEncoderErrored(videoEncoderError, 'FRAME_RENDER_FAILED')
 
-        const tick = Math.min(frame * ticksPerFrame, projectData.totalTicks)
-        const timestampMicros = Math.round((frame / settings.fps) * 1_000_000)
+        const frameTimeSeconds = frame / settings.fps
+        const songTimeSeconds = clamp(
+          frameTimeSeconds - exportTimeline.leadInSeconds,
+          0,
+          exportTimeline.songDurationSeconds,
+        )
+        const tick = Math.min(projectData.totalTicks, secondsToTick(songTimeSeconds, tempoMap))
+        const timestampMicros = Math.round(frameTimeSeconds * 1_000_000)
 
-        renderer.renderFrame(tick)
+        activeRenderer.renderFrame(tick, {
+          animationTimeSeconds: frameTimeSeconds,
+        })
         const videoFrame = new VideoFrame(canvas, {
           duration: frameDurationMicros,
           timestamp: timestampMicros,
         })
+
+        if (qualityProbe.shouldCapture(frame)) {
+          await qualityProbe.captureRawFrame(frame, videoFrame)
+        }
 
         videoEncoder.encode(videoFrame, {
           keyFrame: frame % keyframeInterval === 0,
@@ -311,7 +327,19 @@ export class ExportEngine {
 
       await videoEncoder.flush()
       throwIfEncoderErrored(videoEncoderError, 'FRAME_RENDER_FAILED')
+      const qualityResults = await qualityProbe.finish()
+      qualityProbeFinished = true
+      if (qualityResults.length > 0) {
+        const averagePsnr = qualityResults.reduce((total, result) => total + result.psnrDb, 0) / qualityResults.length
+        console.info(
+          `[Export quality] ${settings.resolution.width}x${settings.resolution.height} @ ${settings.fps} FPS: `
+          + `${qualityResults.length} raw-vs-VP9 samples, ${formatPsnr(averagePsnr)} average PSNR.`,
+        )
+      }
     } finally {
+      if (!qualityProbeFinished) {
+        await qualityProbe.finish()
+      }
       videoEncoder.close()
     }
 
@@ -322,6 +350,7 @@ export class ExportEngine {
   private async renderOfflineAudio(
     outputPath: string,
     state: AppState,
+    exportTimeline: ExportTimeline,
     onAudioProgress: ProgressCallback,
   ): Promise<string> {
     const projectData = state.projectData
@@ -330,16 +359,11 @@ export class ExportEngine {
       throw new ExportError('No project is loaded.', 'NO_PROJECT')
     }
 
-    const songDurationSeconds = tickToSeconds(projectData.totalTicks, tempoMap)
-    const totalDurationSeconds = songDurationSeconds + OFFLINE_AUDIO_LEAD_IN_SECONDS + OFFLINE_AUDIO_TAIL_SECONDS
+    const totalDurationSeconds = Math.max(
+      exportTimeline.totalDurationSeconds,
+      OFFLINE_AUDIO_MIN_SCHEDULE_OFFSET_SECONDS,
+    )
     const totalSteps = Math.max(1, Math.ceil(totalDurationSeconds * AUDIO_PROGRESS_STEPS_PER_SECOND))
-    Tone.Transport.cancel()
-    Tone.Transport.swing = 0
-    Tone.Transport.loop = false
-    Tone.Transport.loopStart = 0
-    Tone.Transport.loopEnd = 0
-    Tone.Transport.position = 0
-
     const renderStartedAt = performance.now()
     const progressTimer = setInterval(() => {
       const elapsedSeconds = (performance.now() - renderStartedAt) / 1000
@@ -349,37 +373,15 @@ export class ExportEngine {
     }, 100)
 
     try {
-      const audioBuffer = await Tone.Offline(async () => {
-        const sampler = new Tone.Sampler({
-          attack: OFFLINE_AUDIO_ATTACK_SECONDS,
-          baseUrl: SALAMANDER_BASE_URL,
-          release: OFFLINE_AUDIO_RELEASE_SECONDS,
-          urls: SALAMANDER_SAMPLE_URLS,
-        }).toDestination()
-
-        await Tone.loaded()
-
-        for (const track of projectData.tracks) {
-          if (!shouldPlayTrack(track.id, state)) {
-            continue
-          }
-
-          for (const note of track.notes) {
-            const noteStartSeconds = OFFLINE_AUDIO_LEAD_IN_SECONDS + tickToSeconds(note.startTick, tempoMap)
-            const noteEndSeconds = OFFLINE_AUDIO_LEAD_IN_SECONDS + tickToSeconds(note.endTick, tempoMap)
-            const durationSeconds = Math.max(0, noteEndSeconds - noteStartSeconds)
-            const scheduleTime = Math.max(noteStartSeconds, OFFLINE_AUDIO_MIN_SCHEDULE_OFFSET_SECONDS)
-            const pitch = Tone.Frequency(note.pitch, 'midi').toNote()
-
-            sampler.triggerAttackRelease(
-              pitch,
-              durationSeconds,
-              scheduleTime,
-              note.velocity / 127,
-            )
-          }
-        }
-      }, totalDurationSeconds)
+      const audioBuffer = await renderOfflineMidiAudioBuffer(
+        state,
+        totalDurationSeconds,
+        exportTimeline.leadInSeconds,
+        true,
+      )
+      if (audioBuffer == null) {
+        throw new ExportError('Unable to render MIDI audio.', 'AUDIO_RENDER_FAILED')
+      }
 
       this.assertNotCancelled()
       await writeAudioBufferToWav(audioBuffer, outputPath)
@@ -484,21 +486,46 @@ export async function runFFmpeg(args: string[]): Promise<void> {
   }
 }
 
-export function validateSettings(settings: ExportSettings): ExportResolution {
-  const resolution = RESOLUTIONS[settings.resolution]
-  if (resolution == null) {
+export function validateSettings(
+  settings: ExportSettings,
+  visualizerSettings: VisualizerSettings,
+): ExportJobSettings {
+  if (visualizerSettings.framerate !== 30 && visualizerSettings.framerate !== 60) {
+    throw new ExportError('Export fps is invalid.', 'INVALID_SETTINGS', settings)
+  }
+
+  if (!['720p', '1080p', '4K'].includes(visualizerSettings.resolution)) {
     throw new ExportError('Export resolution is invalid.', 'INVALID_SETTINGS', settings)
   }
 
-  if (settings.fps !== 30 && settings.fps !== 60) {
-    throw new ExportError('Export fps is invalid.', 'INVALID_SETTINGS', settings)
+  if (!['fit', '16:9', '9:16', '1:1', '4:3'].includes(visualizerSettings.aspectRatio)) {
+    throw new ExportError('Export aspect ratio is invalid.', 'INVALID_SETTINGS', settings)
   }
 
   if (!settings.outputPath.toLowerCase().endsWith('.mp4')) {
     throw new ExportError('Export output path must end with .mp4.', 'INVALID_SETTINGS', settings)
   }
 
-  return resolution
+  return {
+    ...settings,
+    aspectRatio: visualizerSettings.aspectRatio,
+    fps: visualizerSettings.framerate,
+    resolution: resolveExportDimensions(visualizerSettings.resolution, visualizerSettings.aspectRatio),
+    resolutionTier: visualizerSettings.resolution,
+  }
+}
+
+export function getVp9VideoBitrate(width: number, height: number, fps: number): number {
+  const pixelsPerSecond = Math.max(1, width) * Math.max(1, height) * Math.max(1, fps)
+  return Math.round(clamp(
+    pixelsPerSecond * VP9_BITS_PER_PIXEL_PER_FRAME,
+    MIN_VP9_VIDEO_BITRATE,
+    MAX_VP9_VIDEO_BITRATE,
+  ))
+}
+
+function formatPsnr(psnrDb: number): string {
+  return Number.isFinite(psnrDb) ? `${psnrDb.toFixed(1)} dB` : 'lossless'
 }
 
 function shouldPlayTrack(trackId: string, state: AppState): boolean {
@@ -528,12 +555,22 @@ function countScheduledNotes(
 }
 
 function getTotalFrames(
-  fps: ExportSettings['fps'],
-  totalTicks: number,
-  tempoMap: NonNullable<AppState['precomputedTempoMap']>,
+  fps: VisualizerSettings['framerate'],
+  totalDurationSeconds: number,
 ): number {
-  const ticksPerFrame = Math.max(1, secondsToTick(1 / fps, tempoMap))
-  return Math.max(1, Math.ceil(totalTicks / ticksPerFrame))
+  return Math.max(1, Math.ceil(totalDurationSeconds * fps))
+}
+
+function getExportPostprocessScale(resolution: ExportResolution): number {
+  return clamp(
+    Math.min(
+      EXPORT_POSTPROCESS_SCALE,
+      EXPORT_POSTPROCESS_MAX_WIDTH / resolution.width,
+      EXPORT_POSTPROCESS_MAX_HEIGHT / resolution.height,
+    ),
+    1,
+    EXPORT_POSTPROCESS_SCALE,
+  )
 }
 
 function isEnospcError(error: unknown): boolean {
@@ -570,6 +607,24 @@ async function delay(milliseconds: number): Promise<void> {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, milliseconds)
   })
+}
+
+function createExportTimeline(
+  totalTicks: number,
+  tempoMap: NonNullable<AppState['precomputedTempoMap']>,
+): ExportTimeline {
+  const songDurationSeconds = tickToSeconds(totalTicks, tempoMap)
+
+  return {
+    leadInSeconds: EXPORT_LEAD_IN_SECONDS,
+    songDurationSeconds,
+    tailSeconds: EXPORT_TAIL_SECONDS,
+    totalDurationSeconds: EXPORT_LEAD_IN_SECONDS + songDurationSeconds + EXPORT_TAIL_SECONDS,
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 export const exportEngine = new ExportEngine()

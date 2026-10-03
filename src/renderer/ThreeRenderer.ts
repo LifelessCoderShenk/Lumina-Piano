@@ -3,8 +3,10 @@ import {
   AmbientLight,
   BufferAttribute,
   BufferGeometry,
+  CanvasTexture,
   Color,
   Group,
+  LinearFilter,
   LinearToneMapping,
   Mesh,
   MeshBasicMaterial,
@@ -14,6 +16,8 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  Sprite,
+  SpriteMaterial,
   Vector2,
   WebGLRenderer,
 } from 'three'
@@ -23,18 +27,26 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
+import {
+  buildHandMotionTimeline,
+  sampleHandMotionTimeline,
+  type HandMotionTimeline,
+} from '../hands'
 import type { Note } from '../midi/types'
 import { type PlaybackEventMap, playbackEngine } from '../playback/PlaybackEngine'
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
 import { getAppState, subscribeToStore } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
-import { resolveCreateModeNoteColor } from './colorUtils'
+import { hexToPixi, resolveCreateModeNoteColor } from './colorUtils'
+import { GhostHandsLayer } from './GhostHandsLayer'
+import { ReactiveLightingLayer } from './ReactiveLightingLayer'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
   BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
   BLACK_KEY_COLOR,
   BLACK_KEY_HIGHLIGHT_COLOR,
   BLACK_KEY_SHADOW_COLOR,
+  KEYBOARD_HEIGHT,
   NOTE_MIN_HEIGHT,
   WHITE_KEY_ACTIVE_ALPHA,
   WHITE_KEY_BOTTOM_SHADOW_HEIGHT,
@@ -42,9 +54,18 @@ import {
   WHITE_KEY_SEPARATOR_COLOR,
   WHITE_KEY_SEPARATOR_WIDTH,
   WHITE_KEY_SHADOW_COLOR,
+  DEFAULT_RENDER_LAYOUT_CONTEXT,
   getKeyboardLayoutMetrics,
+  normalizeRenderLayoutContext,
+  type RenderLayoutContext,
 } from './layoutConstants'
 import { getNoteScreenRect, getVisibleTickWindow } from './noteMotion'
+/*
+INPUT: Application playback state, note data, and WebGL canvas dimensions.
+OUTPUT: Lumina Piano's Three.js keyboard and visualizer scene renderer.
+PURPOSE: Draws the shared keyboard scene and exposes narrowly-scoped view modes for camera, recording, and Transcriptor surfaces.
+*/
+
 import {
   PIANO_MAX_PITCH,
   PIANO_MIN_PITCH,
@@ -56,11 +77,15 @@ import {
   isBlackKey,
   pitchToKeyX,
 } from './pianoMath'
-import type { VisualizerRenderer } from './VisualizerRenderer'
+import type {
+  LiveMidiNote,
+  VisualizerRenderFrameOptions,
+  VisualizerRenderer,
+  VisualizerResizeOptions,
+} from './VisualizerRenderer'
 
 type AppState = ReturnType<typeof getAppState>
 
-const CREATE_MODE_BACKGROUND_COLOR = 0x000000
 const CREATE_MODE_LANE_LINE_COLOR = 0x444444
 const CREATE_MODE_LANE_LINE_ALPHA = 0.4
 const CREATE_MODE_BLACK_KEY_HEIGHT_RATIO = 0.6
@@ -77,22 +102,53 @@ const CREATE_MODE_BOUNDARY_SEGMENT_WIDTH = 12
 const ACTIVE_QUERY_TICK_SPAN = 1
 const WHITE_KEY_BOTTOM_INSET = 4
 const BLACK_KEY_BOTTOM_INSET = 2
-const BLACK_KEY_SHADOW_ALPHA = 0.22
+const BLACK_KEY_SHADOW_ALPHA = 0.55
 const WHITE_KEY_SHADOW_ALPHA = 0.3
 const BLACK_KEY_HIGHLIGHT_ALPHA = 0.6
+const KEYBOARD_TEXTURE_MAX_WIDTH = 6_144
+const KEYBOARD_TEXTURE_MAX_HEIGHT = 1_536
+const KEYBOARD_RAIL_HEIGHT_RATIO = 0.032
+const WHITE_KEY_FRONT_FACE_RATIO = 0.085
+const BLACK_KEY_FRONT_FACE_RATIO = 0.14
+const KEYBOARD_WHITE_TOP = '#ffffff'
+const KEYBOARD_WHITE_MIDDLE = '#fbfaf7'
+const KEYBOARD_WHITE_BOTTOM = '#efede8'
+const KEYBOARD_WHITE_FRONT_TOP = '#d3d1cb'
+const KEYBOARD_WHITE_FRONT_BOTTOM = '#aaa8a3'
+const KEYBOARD_WHITE_SEPARATOR = 'rgba(93, 94, 96, 0.72)'
+const KEYBOARD_WHITE_EDGE_LIGHT = 'rgba(255, 255, 255, 0.9)'
+const KEYBOARD_BLACK_TOP = '#090a0b'
+const KEYBOARD_BLACK_MIDDLE = '#020203'
+const KEYBOARD_BLACK_BOTTOM = '#000000'
+const KEYBOARD_BLACK_SIDE_LIGHT = 'rgba(38, 42, 47, 0.72)'
+const KEYBOARD_BLACK_SIDE_DARK = 'rgba(0, 0, 0, 0.96)'
+const KEYBOARD_BLACK_FRONT_TOP = '#000000'
+const KEYBOARD_BLACK_FRONT_MIDDLE = '#0a0b0d'
+const KEYBOARD_BLACK_FRONT_BOTTOM = '#000000'
+const KEYBOARD_BLACK_EDGE_LIGHT = 'rgba(92, 98, 106, 0.46)'
 const BLACK_KEY_NOTE_INSET = 2
 const BLACK_KEY_VERTICAL_INSET = 3
 const LANE_GUIDE_Z = 0
 const WHITE_KEY_Z = 1
 const BLACK_KEY_Z = 2
+const WHITE_KEY_HIGHLIGHT_Z = WHITE_KEY_Z + 0.4
+const BLACK_KEY_SURFACE_Z = BLACK_KEY_Z
+const BLACK_KEY_HIGHLIGHT_Z = BLACK_KEY_Z + 0.4
+const KEYBOARD_DEPTH_Z = BLACK_KEY_Z + 0.7
 const BLACK_NOTE_Z = 4
 const WHITE_NOTE_Z = 6
 const WAVE_OUTER_Z = 8
 const WAVE_MID_Z = 9
 const WAVE_CORE_Z = 10
 const KEYBOARD_REFLECTION_Z = 3
+const KEYBOARD_SABER_Z = 0.5
+const KEYBOARD_SABER_HEIGHT_RATIO = 0.3
+const KEYBOARD_SABER_MIN_HEIGHT = 72
 const NOTE_AMBIENT_LIGHT_COLOR = 0xffffff
 const NOTE_AMBIENT_LIGHT_INTENSITY = 1
+const LIVE_MIDI_NOTE_TRAVEL_MS = 700
+const LIVE_MIDI_NOTE_MIN_HEIGHT = 22
+const LIVE_MIDI_NOTE_MAX_HEIGHT = 42
 const NOTE_ROUNDED_CORNER_RATIO = 0.18
 const NOTE_MAX_CORNER_RADIUS = 6
 const BLOOM_LAYER = 1
@@ -104,7 +160,6 @@ const SHOW_BLOOM_CLIP_DEBUG_LINE = false
 const BLOOM_CLIP_FEATHER_PIXELS = 3
 const BLOOM_CLIP_DEBUG_LINE_ALPHA = SHOW_BLOOM_CLIP_DEBUG_LINE ? 0.85 : 0
 const BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS = 3
-const NOTE_BLOOM_EMISSIVE_INTENSITY = 3
 const NOTE_SWIRL_SHORT_NOTE_START_HEIGHT = NOTE_MIN_HEIGHT
 const NOTE_SWIRL_SHORT_NOTE_END_HEIGHT = 24
 const NOTE_SWIRL_SHORT_NOTE_WARP_STRENGTH = 0.14
@@ -119,16 +174,17 @@ const NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY = 0.1
 const NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY = 0.18
 const NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY = 0.038
 const NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY = 0.06
-const NOTE_DEPTH_FADE_START_DISTANCE = 72
-const NOTE_DEPTH_FADE_END_DISTANCE = 360
-const NOTE_DEPTH_MIN_BRIGHTNESS = 0.68
-const NOTE_DEPTH_MAX_DESATURATION = 0.22
-const NOTE_CORE_TARGET_TOTAL_LUMINANCE = 1.08
-const NOTE_HALO_TARGET_TOTAL_LUMINANCE = 1.58
+// Hold the original soft, distant-note look throughout the fall. This is a
+// constant material treatment, not a depth/position effect, so the animated
+// swirl and shimmer remain visible from spawn through impact.
+const NOTE_BASE_BRIGHTNESS_SCALE = 0.68
+const NOTE_BASE_DESATURATION = 0.22
+const NOTE_CORE_TARGET_TOTAL_LUMINANCE = 0.9
+const NOTE_HALO_TARGET_TOTAL_LUMINANCE = 1.22
 const NOTE_CORE_EMISSIVE_STRENGTH_MIN = 0.2
-const NOTE_CORE_EMISSIVE_STRENGTH_MAX = 3.6
+const NOTE_CORE_EMISSIVE_STRENGTH_MAX = 8
 const NOTE_HALO_EMISSIVE_STRENGTH_MIN = 0.45
-const NOTE_HALO_EMISSIVE_STRENGTH_MAX = 3.6
+const NOTE_HALO_EMISSIVE_STRENGTH_MAX = 8
 const NOTE_ACHROMATIC_SATURATION_THRESHOLD = 0.05
 const NOTE_ACHROMATIC_FALLBACK_HUE = 0.61
 const NOTE_ACHROMATIC_FALLBACK_SATURATION = 0.72
@@ -174,6 +230,17 @@ const PARTICLE_SPAWN_LATERAL_JITTER = 18
 const PARTICLE_FLOW_SCALE = 28
 const PARTICLE_FLOW_STRENGTH_X = 175
 const PARTICLE_FLOW_STRENGTH_Y = 42
+const KEYBOARD_LABEL_Z = 7
+const KEYBOARD_LABEL_RENDER_ORDER = 70
+const NOTE_LABEL_Z_OFFSET = 0.25
+const NOTE_LABEL_RENDER_ORDER = 75
+const KEYBOARD_LABEL_VERTICAL_POSITION = 0.76
+const NOTE_LABEL_MIN_RECT_HEIGHT = 20
+const NOTE_LABEL_MIN_RECT_WIDTH = 12
+const LABEL_TEXTURE_WIDTH = 256
+const LABEL_TEXTURE_HEIGHT = 96
+const WHITE_KEY_LABEL_COLOR = '#171717'
+const BLACK_KEY_LABEL_COLOR = '#f5f5f5'
 const PARTICLE_FLOW_TIME_SCROLL = 0.52
 const PARTICLE_BURST_WIND_BIAS_X = 60
 const PARTICLE_FLOW_SAMPLE_EPSILON = 8
@@ -199,7 +266,10 @@ interface RoundedNoteUniforms {
   noteTravelPhaseOffset: {
     value: number
   }
-  noteDistanceFromBoundary: {
+  noteStyleMode: {
+    value: number
+  }
+  noteGlowStrength: {
     value: number
   }
   noteCoreDiffuseColor: {
@@ -274,8 +344,25 @@ interface ImpactReflectionState {
   mesh: Mesh<PlaneGeometry, ReflectionMaterial>
   peakStrength: number
   pitch: number
+  velocity: number
   startTimeSeconds: number
   uniforms: ImpactReflectionUniforms
+}
+
+interface KeyboardSaberUniforms {
+  beamColor: {
+    value: Color
+  }
+  beamStrength: {
+    value: number
+  }
+}
+
+interface KeyboardSaberState {
+  material: ShaderMaterial
+  mesh: Mesh<PlaneGeometry, ShaderMaterial>
+  pitch: number
+  uniforms: KeyboardSaberUniforms
 }
 
 export interface NoteMaterialPalette {
@@ -289,12 +376,23 @@ export interface NoteMaterialPalette {
   haloEmissiveStrength: number
 }
 
-export interface NoteDepthFalloff {
-  brightnessScale: number
-  desaturation: number
-  emissiveScale: number
-  fade: number
+/**
+ * Note-local HDR calibration. UnrealBloomPass remains intentionally separate:
+ * changing it would also alter particles, keys, and boundary waves.
+ */
+export interface NoteBloomCalibration {
+  coreEmissiveStrengthMax: number
+  coreTargetTotalLuminance: number
+  haloEmissiveStrengthMax: number
+  haloTargetTotalLuminance: number
 }
+
+export const DEFAULT_NOTE_BLOOM_CALIBRATION: Readonly<NoteBloomCalibration> = Object.freeze({
+  coreEmissiveStrengthMax: NOTE_CORE_EMISSIVE_STRENGTH_MAX,
+  coreTargetTotalLuminance: NOTE_CORE_TARGET_TOTAL_LUMINANCE,
+  haloEmissiveStrengthMax: NOTE_HALO_EMISSIVE_STRENGTH_MAX,
+  haloTargetTotalLuminance: NOTE_HALO_TARGET_TOTAL_LUMINANCE,
+})
 
 interface BoundaryWavePalette {
   coreColor: number
@@ -306,11 +404,21 @@ interface SharedFloatUniform {
   value: number
 }
 
+interface BackgroundUniforms {
+  backgroundAspect: { value: number }
+  backgroundColor: { value: Color }
+  backgroundStyle: { value: number }
+  backgroundTime: SharedFloatUniform
+}
+
 interface ParticleUniforms {
   particleTime: {
     value: number
   }
   pixelRatio: {
+    value: number
+  }
+  wispMode: {
     value: number
   }
 }
@@ -333,7 +441,8 @@ interface ParticleSystemState {
   geometry: BufferGeometry
   lifetimes: Float32Array
   material: ParticleMaterial
-  pitchClasses: Int8Array
+  noteVelocities: Uint8Array
+  pitches: Int8Array
   points: Points<BufferGeometry, ParticleMaterial>
   positionAttribute: BufferAttribute
   positions: Float32Array
@@ -342,7 +451,27 @@ interface ParticleSystemState {
   sizeAttribute: BufferAttribute
   sizes: Float32Array
   uniforms: ParticleUniforms
+  velocityAttribute: BufferAttribute
   velocities: Float32Array
+}
+
+interface LabelTextureState {
+  aspectRatio: number
+  texture: CanvasTexture
+}
+
+interface LabelSpriteState {
+  aspectRatio: number
+  color: string
+  material: SpriteMaterial
+  sprite: Sprite
+  text: string
+}
+
+interface KeyboardSurfaceTextures {
+  base: CanvasTexture
+  depth: CanvasTexture
+  details: CanvasTexture
 }
 
 export class ThreeRenderer implements VisualizerRenderer {
@@ -358,43 +487,75 @@ export class ThreeRenderer implements VisualizerRenderer {
   private scene: Scene | null = null
   private camera: OrthographicCamera | null = null
   private ambientLight: AmbientLight | null = null
+  private backgroundMesh: Mesh<PlaneGeometry, ShaderMaterial> | null = null
+  private backgroundUniforms: BackgroundUniforms | null = null
   private rectGeometry: PlaneGeometry | null = null
   private laneGroup: Group | null = null
   private keyboardGroup: Group | null = null
   private noteGroup: Group | null = null
   private particleGroup: Group | null = null
   private waveGroup: Group | null = null
+  private ghostHandsLayer: GhostHandsLayer | null = null
+  private reactiveLightingLayer: ReactiveLightingLayer | null = null
+  private handMotionTimeline: HandMotionTimeline | null = null
+  private lastHandProjectData: AppState['projectData'] | null = null
   private staticResources: Array<{ dispose(): void }> = []
   private persistentResources: Array<{ dispose(): void }> = []
   private keyboardMaterialStates: KeyboardMaterialState[] = []
   private keyHighlightStates = new Map<number, KeyHighlightState>()
   private impactReflectionStates = new Map<number, ImpactReflectionState>()
+  private keyboardSaberStates = new Map<number, KeyboardSaberState>()
   private explicitActiveKeyPitches = new Set<number>()
   private playbackActiveKeyPitches = new Set<number>()
+  private liveSourceActiveKeyPitches = new Set<number>()
   private keyboardOpacity = 1
   private viewportWidth = 1
   private viewportHeight = 1
+  private layoutContext: RenderLayoutContext = DEFAULT_RENDER_LAYOUT_CONTEXT
+  private effectivePixelRatio = resolveDevicePixelRatio()
+  private postprocessScale = 1
+  private composerPixelRatio = resolveComposerPixelRatio(this.effectivePixelRatio, this.postprocessScale)
+  private hasAppliedResize = false
   private currentTick = 0
   private boundaryWaveTime = 0
   private noteMeshes: Array<Mesh<PlaneGeometry, GlowMaterial>> = []
+  private keyboardLabelSprites: LabelSpriteState[] = []
+  private noteLabelSprites: LabelSpriteState[] = []
+  private liveMidiNotes: LiveMidiNote[] = []
+  private liveNoteSources = new Map<string, LiveMidiNote[]>()
+  /** Active source notes spawn entries here which finish their visual fall after release. */
+  private liveFallingNotes = new Map<string, LiveMidiNote>()
+  private liveNoteSourceActivityMs = new Map<string, number>()
+  private liveNoteMeshes: Array<Mesh<PlaneGeometry, GlowMaterial>> = []
+  private liveNoteLabelSprites: LabelSpriteState[] = []
+  private visibleLiveNoteMeshCount = 0
   private sharedNoteMaterialTimeUniform: SharedFloatUniform = { value: 0 }
   private waveLayers: WaveLayerState[] = []
   private waveSamplePoints: number[] = []
+  private labelTextures = new Map<string, LabelTextureState>()
   private notesDirty = true
   private noteMaterialTimeSeconds = 0
   private visibleNoteMeshCount = 0
   private lastRenderedTick = Number.NaN
   private lastRenderedWorldZoom = Number.NaN
-  private lastRenderedLearnActive: boolean | null = null
   private lastRenderedProjectData: AppState['projectData'] | null = null
   private lastRenderedTempoMap: AppState['precomputedTempoMap'] | null = null
   private particleSystem: ParticleSystemState | null = null
   private lastParticleUpdateTimeSeconds = Number.NaN
   private lastBurstDetectionTick = Number.NaN
+  private lastOfflineBurstDetectionTick = Number.NaN
+  private lastOfflineWaveAnimationTimeSeconds = Number.NaN
   private hasPendingSeekSuppression = false
   private particleBurstSerial = 0
   private storeUnsubscribe: (() => void) | null = null
   private hasPendingCreateNoteColorUpdate = false
+  private animationLoopAttached = false
+  private isOfflineRendering = false
+  private shouldRestoreAnimationLoopAfterOfflineRender = false
+  private savedBoundaryWaveTimeForOfflineRender = 0
+  private guideOnly = false
+  private keyboardOnly = false
+  private reviewTimelineTick: number | null = null
 
   private readonly handlePlaybackSeek: PlaybackEventMap['onSeek'] = (currentTick) => {
     this.hasPendingSeekSuppression = true
@@ -404,6 +565,74 @@ export class ThreeRenderer implements VisualizerRenderer {
   private readonly handleStoreChange = (nextState: AppState, previousState: AppState): void => {
     if (nextState.createNoteColors !== previousState.createNoteColors) {
       this.hasPendingCreateNoteColorUpdate = true
+    }
+
+    if (
+      nextState.particleSettings.colorMode !== previousState.particleSettings.colorMode
+      || nextState.particleSettings.customColor !== previousState.particleSettings.customColor
+    ) {
+      this.updateActiveParticleColors(nextState)
+      this.renderScene()
+    }
+
+    if (nextState.backgroundColor !== previousState.backgroundColor) {
+      this.applyBackgroundColor(nextState.backgroundColor)
+    }
+    if (nextState.backgroundStyle !== previousState.backgroundStyle) {
+      this.applyBackgroundAppearance(nextState)
+    }
+
+    const keyboardLabelSettingsChanged =
+      nextState.noteLabelsOnKeys !== previousState.noteLabelsOnKeys ||
+      nextState.noteLabelSize !== previousState.noteLabelSize ||
+      nextState.noteLabelFormat !== previousState.noteLabelFormat
+    const fallingNoteLabelSettingsChanged =
+      nextState.noteLabelsOnNotes !== previousState.noteLabelsOnNotes ||
+      nextState.noteLabelFormat !== previousState.noteLabelFormat ||
+      nextState.noteLabelColor !== previousState.noteLabelColor ||
+      nextState.noteLabelSize !== previousState.noteLabelSize
+
+    if (keyboardLabelSettingsChanged && this.renderer != null) {
+      this.rebuildStaticScene()
+    }
+    if (fallingNoteLabelSettingsChanged) {
+      this.notesDirty = true
+    }
+
+    if (
+      nextState.noteStyle !== previousState.noteStyle
+      || nextState.noteGlow !== previousState.noteGlow
+      || nextState.noteOpacity !== previousState.noteOpacity
+    ) {
+      this.applyNoteAppearance(nextState)
+    }
+
+    if (nextState.fallSpeed !== previousState.fallSpeed) {
+      this.notesDirty = true
+      this.renderFrame(this.currentTick)
+    }
+
+    if (nextState.noteWidth !== previousState.noteWidth) {
+      this.notesDirty = true
+      this.renderFrame(this.currentTick)
+    }
+
+    if (nextState.lightingIntensity !== previousState.lightingIntensity) {
+      this.updateReactiveLighting(nextState)
+      this.renderScene()
+    }
+
+    if (nextState.keyboardSaber !== previousState.keyboardSaber) {
+      this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+      this.renderScene()
+    }
+
+    if (
+      nextState.handVisualization !== previousState.handVisualization
+      || nextState.projectData !== previousState.projectData
+    ) {
+      this.updateGhostHands(this.reviewTimelineTick ?? this.currentTick, nextState)
+      this.renderScene()
     }
   }
 
@@ -424,12 +653,10 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.notesDirty = true
     this.lastRenderedTick = Number.NaN
     this.lastRenderedWorldZoom = Number.NaN
-    this.lastRenderedLearnActive = null
     this.lastRenderedProjectData = null
     this.lastRenderedTempoMap = null
 
     this.scene = new Scene()
-    this.scene.background = new Color(CREATE_MODE_BACKGROUND_COLOR)
 
     this.camera = new OrthographicCamera(0, 1, 0, 1, 0.1, 100)
     this.camera.position.set(0, 0, 10)
@@ -440,8 +667,11 @@ export class ThreeRenderer implements VisualizerRenderer {
       alpha: false,
       canvas,
     })
-    this.renderer.setClearColor(CREATE_MODE_BACKGROUND_COLOR, 1)
-    this.renderer.setPixelRatio(getDevicePixelRatio())
+    this.applyBackgroundColor(getAppState().backgroundColor)
+    this.effectivePixelRatio = resolveDevicePixelRatio()
+    this.postprocessScale = 1
+    this.composerPixelRatio = resolveComposerPixelRatio(this.effectivePixelRatio, this.postprocessScale)
+    this.renderer.setPixelRatio(this.effectivePixelRatio)
     this.renderer.toneMapping = LinearToneMapping
     this.renderer.toneMappingExposure = 1
 
@@ -451,13 +681,19 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.noteGroup = new Group()
     this.particleGroup = new Group()
     this.waveGroup = new Group()
+    this.ghostHandsLayer = new GhostHandsLayer(this.rectGeometry)
+    this.reactiveLightingLayer = new ReactiveLightingLayer(this.rectGeometry)
     this.ambientLight = new AmbientLight(NOTE_AMBIENT_LIGHT_COLOR, NOTE_AMBIENT_LIGHT_INTENSITY)
 
+    this.initBackgroundSurface()
+    if (this.backgroundMesh != null) this.scene.add(this.backgroundMesh)
     this.scene.add(this.laneGroup)
     this.scene.add(this.keyboardGroup)
     this.scene.add(this.noteGroup)
     this.scene.add(this.particleGroup)
     this.scene.add(this.waveGroup)
+    this.scene.add(this.reactiveLightingLayer.group)
+    this.scene.add(this.ghostHandsLayer.group)
     this.scene.add(this.ambientLight)
 
     this.initWaveLayers()
@@ -471,7 +707,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.initPostprocessing()
     playbackEngine.on('onSeek', this.handlePlaybackSeek)
     this.storeUnsubscribe = subscribeToStore(this.handleStoreChange)
-    this.renderer.setAnimationLoop(this.handleAnimationFrame)
+    this.attachAnimationLoop()
     this.renderFrame(this.currentTick)
   }
 
@@ -482,7 +718,10 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.clearDynamicNoteObjects()
     this.clearParticleSystem(true)
     this.disposeStaticScene()
+    this.disposeLabelTextures()
     this.disposeWaveMeshes()
+    this.ghostHandsLayer?.dispose()
+    this.reactiveLightingLayer?.dispose()
 
     if (this.noteGroup != null) {
       clearGroup(this.noteGroup)
@@ -497,6 +736,9 @@ export class ThreeRenderer implements VisualizerRenderer {
     if (this.laneGroup != null && this.scene != null) {
       this.scene.remove(this.laneGroup)
     }
+    if (this.backgroundMesh != null && this.scene != null) {
+      this.scene.remove(this.backgroundMesh)
+    }
     if (this.keyboardGroup != null && this.scene != null) {
       this.scene.remove(this.keyboardGroup)
     }
@@ -509,6 +751,12 @@ export class ThreeRenderer implements VisualizerRenderer {
     if (this.waveGroup != null && this.scene != null) {
       this.scene.remove(this.waveGroup)
     }
+    if (this.ghostHandsLayer != null && this.scene != null) {
+      this.scene.remove(this.ghostHandsLayer.group)
+    }
+    if (this.reactiveLightingLayer != null && this.scene != null) {
+      this.scene.remove(this.reactiveLightingLayer.group)
+    }
     if (this.ambientLight != null && this.scene != null) {
       this.scene.remove(this.ambientLight)
     }
@@ -520,7 +768,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.rectGeometry?.dispose()
 
     if (this.renderer != null) {
-      this.renderer.setAnimationLoop(null)
+      this.detachAnimationLoop()
       const rendererWithContextLoss = this.renderer as WebGLRenderer & {
         forceContextLoss?: () => void
       }
@@ -529,10 +777,16 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
 
     this.laneGroup = null
+    this.backgroundMesh = null
+    this.backgroundUniforms = null
     this.keyboardGroup = null
     this.noteGroup = null
     this.particleGroup = null
     this.waveGroup = null
+    this.ghostHandsLayer = null
+    this.reactiveLightingLayer = null
+    this.handMotionTimeline = null
+    this.lastHandProjectData = null
     this.rectGeometry = null
     this.camera = null
     this.ambientLight = null
@@ -548,9 +802,18 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.canvas = null
     this.explicitActiveKeyPitches.clear()
     this.playbackActiveKeyPitches.clear()
+    this.liveSourceActiveKeyPitches.clear()
+    this.liveNoteSources.clear()
+    this.liveFallingNotes.clear()
+    this.liveNoteSourceActivityMs.clear()
     this.keyboardOpacity = 1
     this.viewportWidth = 1
     this.viewportHeight = 1
+    this.hasAppliedResize = false
+    this.layoutContext = DEFAULT_RENDER_LAYOUT_CONTEXT
+    this.effectivePixelRatio = resolveDevicePixelRatio()
+    this.postprocessScale = 1
+    this.composerPixelRatio = resolveComposerPixelRatio(this.effectivePixelRatio, this.postprocessScale)
     this.currentTick = 0
     this.boundaryWaveTime = 0
     this.noteMaterialTimeSeconds = 0
@@ -559,35 +822,113 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.visibleNoteMeshCount = 0
     this.lastRenderedTick = Number.NaN
     this.lastRenderedWorldZoom = Number.NaN
-    this.lastRenderedLearnActive = null
     this.lastRenderedProjectData = null
     this.lastRenderedTempoMap = null
     this.particleSystem = null
     this.lastParticleUpdateTimeSeconds = Number.NaN
     this.lastBurstDetectionTick = Number.NaN
+    this.lastOfflineBurstDetectionTick = Number.NaN
+    this.lastOfflineWaveAnimationTimeSeconds = Number.NaN
     this.hasPendingSeekSuppression = false
     this.particleBurstSerial = 0
     this.storeUnsubscribe = null
     this.hasPendingCreateNoteColorUpdate = false
+    this.animationLoopAttached = false
+    this.isOfflineRendering = false
+    this.layoutContext = DEFAULT_RENDER_LAYOUT_CONTEXT
+    this.shouldRestoreAnimationLoopAfterOfflineRender = false
     this.noteMeshes = []
+    this.keyboardLabelSprites = []
+    this.noteLabelSprites = []
+    this.liveMidiNotes = []
+    this.liveNoteMeshes = []
+    this.liveNoteLabelSprites = []
+    this.visibleLiveNoteMeshCount = 0
     this.waveLayers = []
     this.waveSamplePoints = []
+    this.labelTextures.clear()
     this.persistentResources = []
+    this.guideOnly = false
+    this.reviewTimelineTick = null
   }
 
-  resize(width: number, height: number): void {
+  isReady(): boolean {
+    return this.canvas != null && this.renderer != null && this.scene != null && this.camera != null
+  }
+
+  beginOfflineRender(): void {
+    if (this.renderer == null || this.isOfflineRendering) {
+      return
+    }
+
+    this.shouldRestoreAnimationLoopAfterOfflineRender = this.animationLoopAttached
+    this.isOfflineRendering = true
+    this.lastOfflineBurstDetectionTick = Number.NaN
+    this.lastOfflineWaveAnimationTimeSeconds = Number.NaN
+    this.lastParticleUpdateTimeSeconds = Number.NaN
+    this.particleBurstSerial = 0
+    this.clearParticleSystem(true)
+    this.savedBoundaryWaveTimeForOfflineRender = this.boundaryWaveTime
+    this.boundaryWaveTime = 0
+    this.detachAnimationLoop()
+  }
+
+  endOfflineRender(): void {
+    if (!this.isOfflineRendering) {
+      return
+    }
+
+    this.isOfflineRendering = false
+    this.lastOfflineBurstDetectionTick = Number.NaN
+    this.lastOfflineWaveAnimationTimeSeconds = Number.NaN
+    this.boundaryWaveTime = this.savedBoundaryWaveTimeForOfflineRender
+    this.updateWaveMeshes()
+    const shouldRestoreAnimationLoop = this.shouldRestoreAnimationLoopAfterOfflineRender
+    this.shouldRestoreAnimationLoopAfterOfflineRender = false
+
+    if (shouldRestoreAnimationLoop) {
+      this.attachAnimationLoop()
+    }
+  }
+
+  resize(width: number, height: number, options?: VisualizerResizeOptions): void {
     if (this.renderer == null || this.camera == null || !Number.isFinite(width) || !Number.isFinite(height)) {
       return
     }
 
-    this.viewportWidth = Math.max(1, Math.round(width))
-    this.viewportHeight = Math.max(1, Math.round(height))
+    const nextViewportWidth = Math.max(1, Math.round(width))
+    const nextViewportHeight = Math.max(1, Math.round(height))
+    const nextLayoutContext = normalizeRenderLayoutContext(options?.layoutContext ?? this.layoutContext)
+    const nextEffectivePixelRatio = resolveDevicePixelRatio(options?.pixelRatio)
+    const nextPostprocessScale = resolvePostprocessScale(options?.postprocessScale)
+    const nextComposerPixelRatio = resolveComposerPixelRatio(nextEffectivePixelRatio, nextPostprocessScale)
 
-    this.renderer.setPixelRatio(getDevicePixelRatio())
+    if (
+      this.hasAppliedResize &&
+      this.viewportWidth === nextViewportWidth &&
+      this.viewportHeight === nextViewportHeight &&
+      this.effectivePixelRatio === nextEffectivePixelRatio &&
+      this.postprocessScale === nextPostprocessScale &&
+      this.layoutContext.keyboardHeightRatio === nextLayoutContext.keyboardHeightRatio &&
+      this.layoutContext.preserveKeyboardHeightRatio === nextLayoutContext.preserveKeyboardHeightRatio &&
+      this.layoutContext.noteFieldTravelSeconds === nextLayoutContext.noteFieldTravelSeconds
+    ) {
+      return
+    }
+
+    this.viewportWidth = nextViewportWidth
+    this.viewportHeight = nextViewportHeight
+    this.layoutContext = nextLayoutContext
+    this.effectivePixelRatio = nextEffectivePixelRatio
+    this.postprocessScale = nextPostprocessScale
+    this.composerPixelRatio = nextComposerPixelRatio
+    this.hasAppliedResize = true
+
+    this.renderer.setPixelRatio(this.effectivePixelRatio)
     this.renderer.setSize(this.viewportWidth, this.viewportHeight, false)
-    this.bloomComposer?.setPixelRatio(getDevicePixelRatio())
+    this.bloomComposer?.setPixelRatio(this.composerPixelRatio)
     this.bloomComposer?.setSize(this.viewportWidth, this.viewportHeight)
-    this.finalComposer?.setPixelRatio(getDevicePixelRatio())
+    this.finalComposer?.setPixelRatio(this.composerPixelRatio)
     this.finalComposer?.setSize(this.viewportWidth, this.viewportHeight)
     this.updateBloomCompositeUniforms()
 
@@ -597,22 +938,76 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.camera.bottom = 0
     this.camera.updateProjectionMatrix()
 
+    if (this.backgroundMesh != null) {
+      this.backgroundMesh.position.set(this.viewportWidth / 2, this.viewportHeight / 2, -10)
+      this.backgroundMesh.scale.set(this.viewportWidth, this.viewportHeight, 1)
+    }
+    if (this.backgroundUniforms != null) {
+      this.backgroundUniforms.backgroundAspect.value = this.viewportWidth / this.viewportHeight
+    }
+
     this.rebuildStaticScene()
     this.rebuildWaveMeshes()
     this.clearParticleSystem(false)
     this.resetBurstDetectionState(this.currentTick)
     this.notesDirty = true
     this.renderDynamicState(this.currentTick)
+    this.updateLiveMidiNoteLayer()
   }
 
-  renderFrame(tick: number): void {
+  renderFrame(tick: number, options?: VisualizerRenderFrameOptions): void {
     if (Number.isFinite(tick)) {
       this.currentTick = tick
     }
 
-    this.consumePendingCreateNoteColorUpdate(getAppState())
+    const state = getAppState()
+    const renderTick = this.reviewTimelineTick ?? this.currentTick
+    if (this.guideOnly) {
+      this.renderGuideOnlyFrame()
+      return
+    }
+    if (this.keyboardOnly) {
+      this.syncNoteMaterialAnimationTime()
+      this.renderKeyboardOnlyFrame()
+      return
+    }
+    this.consumePendingCreateNoteColorUpdate(state)
     this.notesDirty = true
-    this.renderDynamicState(this.currentTick)
+    const animationTimeSeconds = options?.animationTimeSeconds
+    const isOfflineAnimationFrame =
+      this.isOfflineRendering &&
+      Number.isFinite(animationTimeSeconds)
+    if (
+      Number.isFinite(animationTimeSeconds) &&
+      (animationTimeSeconds as number) < this.noteMaterialTimeSeconds
+    ) {
+      this.resetSimulatedAnimationState(animationTimeSeconds as number)
+    }
+
+    this.syncNoteMaterialAnimationTime(undefined, animationTimeSeconds)
+    this.syncParticleMaterialAnimationTime()
+    if (isOfflineAnimationFrame) {
+      this.updateParticleSystem(animationTimeSeconds as number)
+    }
+
+    const notesChanged = this.renderDynamicState(renderTick, state, false)
+    const hasLiveMidiNotes = this.updateLiveMidiNoteLayer()
+    const shouldAnimateHighlights = this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    const shouldAnimateImpactReflections = this.applyImpactReflections(this.noteMaterialTimeSeconds)
+    this.updateGhostHands(renderTick, state)
+
+    if (isOfflineAnimationFrame) {
+      this.detectOfflineNoteBursts(renderTick, state)
+      this.advanceOfflineWaveAnimation(animationTimeSeconds as number)
+    }
+
+    if (!isOfflineAnimationFrame) {
+      this.boundaryWaveTime += CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
+      this.updateWaveMeshes()
+    }
+    if (isOfflineAnimationFrame || notesChanged || hasLiveMidiNotes || shouldAnimateHighlights || shouldAnimateImpactReflections) {
+      this.renderScene()
+    }
   }
 
   getCanvas(): HTMLCanvasElement {
@@ -621,6 +1016,15 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
 
     return this.canvas
+  }
+
+  getRenderLayoutContext(): RenderLayoutContext {
+    const { keyboardHeight } = this.getKeyboardMetrics()
+    return {
+      keyboardHeightRatio: keyboardHeight / Math.max(1, this.viewportHeight),
+      preserveKeyboardHeightRatio: true,
+      noteFieldTravelSeconds: this.layoutContext.noteFieldTravelSeconds,
+    }
   }
 
   getKeyX(pitch: number): number {
@@ -632,8 +1036,209 @@ export class ThreeRenderer implements VisualizerRenderer {
     return x + (width / 2)
   }
 
+  private getNormalizedKeyboardPosition(pitch: number): number {
+    const lowKeyX = this.getKeyX(PIANO_MIN_PITCH)
+    const highKeyX = this.getKeyX(PIANO_MAX_PITCH)
+    const span = highKeyX - lowKeyX
+    if (span <= 0) {
+      return 0
+    }
+
+    return clamp((this.getKeyX(pitch) - lowKeyX) / span, 0, 1)
+  }
+
+  private getKeyboardMetrics() {
+    return getKeyboardLayoutMetrics(this.viewportHeight, this.layoutContext)
+  }
+
+  private updateGhostHands(tick: number, state = getAppState()): void {
+    const layer = this.ghostHandsLayer
+    const project = state.projectData
+    if (
+      layer == null
+      || project == null
+      || !state.handVisualization.enabled
+      || this.guideOnly
+      || this.keyboardOnly
+    ) {
+      layer?.hide()
+      return
+    }
+
+    if (this.lastHandProjectData !== project || this.handMotionTimeline == null) {
+      this.handMotionTimeline = buildHandMotionTimeline(project)
+      this.lastHandProjectData = project
+    }
+
+    const { keyboardHeight, keyboardY } = this.getKeyboardMetrics()
+    layer.update(sampleHandMotionTimeline(this.handMotionTimeline, tick), {
+      keyboardHeight,
+      keyboardY,
+      opacity: state.handVisualization.opacity / 100,
+      viewportHeight: this.viewportHeight,
+      viewportWidth: this.viewportWidth,
+    })
+  }
+
+  private updateReactiveLighting(state = getAppState()): void {
+    const layer = this.reactiveLightingLayer
+    if (layer == null || this.guideOnly || this.keyboardOnly || state.lightingIntensity <= 0) {
+      layer?.hide()
+      return
+    }
+
+    const { keyboardHeight, keyboardY } = this.getKeyboardMetrics()
+    layer.update(
+      [...this.keyHighlightStates.entries()].map(([pitch, highlight]) => ({
+        color: typeof highlight.material.color.getHex === 'function'
+          ? highlight.material.color.getHex()
+          : this.resolveCreateModeColor(pitch, state.createNoteColors),
+        pitch,
+        strength: highlight.currentStrength * this.keyboardOpacity,
+      })),
+      {
+        intensity: state.lightingIntensity / 100,
+        keyboardHeight,
+        keyboardY,
+        viewportHeight: this.viewportHeight,
+        viewportWidth: this.viewportWidth,
+      },
+    )
+  }
+
+  private getLayoutScale(): number {
+    return this.getKeyboardMetrics().keyboardHeight / KEYBOARD_HEIGHT
+  }
+
+  private resolveCreateModeColor(
+    pitch: number,
+    createNoteColors: AppState['createNoteColors'],
+    velocity = 80,
+    timelineTick = this.reviewTimelineTick ?? this.currentTick,
+  ): number {
+    const ticksPerQuarter = getAppState().projectData?.ticksPerQuarter ?? 480
+    const timelinePosition = Number.isFinite(timelineTick)
+      ? timelineTick / (ticksPerQuarter * 16)
+      : 0
+    return resolveCreateModeNoteColor(
+      pitch,
+      createNoteColors,
+      this.getNormalizedKeyboardPosition(pitch),
+      velocity,
+      timelinePosition,
+    )
+  }
+
+  /** Keeps the scene and WebGL clear pass in sync with appearance/preset background changes. */
+  private applyBackgroundColor(color: string): void {
+    const resolvedColor = new Color(color)
+    if (this.scene != null) {
+      this.scene.background = resolvedColor
+    }
+    this.renderer?.setClearColor(resolvedColor, 1)
+    this.backgroundUniforms?.backgroundColor.value.setHex(hexToPixi(color))
+  }
+
+  private applyBackgroundAppearance(state: AppState): void {
+    if (this.backgroundUniforms == null) {
+      return
+    }
+
+    this.backgroundUniforms.backgroundColor.value.setHex(hexToPixi(state.backgroundColor))
+    this.backgroundUniforms.backgroundStyle.value = backgroundStyleMode(state.backgroundStyle)
+    this.renderScene()
+  }
+
+  private initBackgroundSurface(): void {
+    const state = getAppState()
+    const uniforms: BackgroundUniforms = {
+      backgroundAspect: { value: 1 },
+      backgroundColor: { value: new Color(state.backgroundColor) },
+      backgroundStyle: { value: backgroundStyleMode(state.backgroundStyle) },
+      backgroundTime: this.sharedNoteMaterialTimeUniform,
+    }
+    const material = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms,
+      vertexShader: `
+varying vec2 vBackgroundUv;
+
+void main() {
+  vBackgroundUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`,
+      fragmentShader: `
+uniform float backgroundAspect;
+uniform vec3 backgroundColor;
+uniform float backgroundStyle;
+uniform float backgroundTime;
+varying vec2 vBackgroundUv;
+
+float backgroundHash(vec2 point) {
+  return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  vec2 uv = vBackgroundUv;
+  vec2 centered = (uv - 0.5) * vec2(backgroundAspect, 1.0);
+  vec3 color = backgroundColor;
+
+  float studioMix = step(0.5, backgroundStyle) * (1.0 - step(1.5, backgroundStyle));
+  float auroraMix = step(1.5, backgroundStyle) * (1.0 - step(2.5, backgroundStyle));
+  float stageMix = step(2.5, backgroundStyle);
+  float spotlight = exp(-pow(centered.x * 1.45, 2.0)) * smoothstep(0.0, 0.95, uv.y);
+  float horizon = exp(-pow((uv.y - 0.24) * 7.0, 2.0));
+  float vignette = smoothstep(0.3, 0.92, length(centered * vec2(0.78, 1.0)));
+  vec3 studioColor = backgroundColor + (vec3(0.12, 0.14, 0.18) * spotlight * 0.42);
+  studioColor += vec3(0.10, 0.12, 0.16) * horizon * 0.18;
+  studioColor *= 1.0 - (vignette * 0.58);
+  color = mix(color, studioColor, studioMix);
+
+  float ribbonA = exp(-pow((uv.y - (0.67 + sin((uv.x * 4.8) + (backgroundTime * 0.18)) * 0.10)) * 10.0, 2.0));
+  float ribbonB = exp(-pow((uv.y - (0.48 + sin((uv.x * 6.1) - (backgroundTime * 0.13) + 1.8) * 0.08)) * 13.0, 2.0));
+  vec3 accentA = backgroundColor.brg + vec3(0.08, 0.16, 0.24);
+  vec3 accentB = backgroundColor.gbr + vec3(0.20, 0.08, 0.24);
+  float starCell = backgroundHash(floor(uv * vec2(180.0, 100.0)));
+  float stars = step(0.992, starCell) * (0.35 + (0.65 * sin((backgroundTime * 0.7) + (starCell * 20.0))));
+  vec3 auroraColor = backgroundColor * (0.72 - (vignette * 0.34));
+  auroraColor += accentA * ribbonA * 0.34;
+  auroraColor += accentB * ribbonB * 0.26;
+  auroraColor += vec3(max(0.0, stars)) * 0.25;
+  color = mix(color, auroraColor, auroraMix);
+
+  float stageFloorMask = 1.0 - smoothstep(0.38, 0.46, uv.y);
+  float stageFloorDepth = clamp((0.44 - uv.y) / 0.44, 0.0, 1.0);
+  float stagePerspectiveDepth = 1.0 / max(0.055, 0.46 - uv.y);
+  float stageHorizontalCell = abs(fract(stagePerspectiveDepth * 0.16) - 0.5);
+  float stageHorizontalGrid = (1.0 - smoothstep(0.43, 0.49, stageHorizontalCell)) * stageFloorMask;
+  float stagePerspectiveX = centered.x / max(0.09, 0.52 - uv.y);
+  float stageVerticalCell = abs(fract(stagePerspectiveX * 1.6) - 0.5);
+  float stageVerticalGrid = (1.0 - smoothstep(0.44, 0.49, stageVerticalCell)) * stageFloorMask;
+  float stageLeftSpot = exp(-pow((centered.x + 0.34 + ((uv.y - 0.42) * 0.24)) * 4.1, 2.0));
+  float stageRightSpot = exp(-pow((centered.x - 0.34 - ((uv.y - 0.42) * 0.24)) * 4.1, 2.0));
+  float stageSpotMask = smoothstep(0.30, 0.96, uv.y) * (1.0 - (stageFloorMask * 0.72));
+  float stageHorizon = exp(-pow((uv.y - 0.43) * 24.0, 2.0));
+  vec3 stageAccent = backgroundColor.brg + vec3(0.14, 0.10, 0.22);
+  vec3 stageColor = backgroundColor * (0.42 - (vignette * 0.18));
+  stageColor += stageAccent * (stageLeftSpot + stageRightSpot) * stageSpotMask * 0.12;
+  stageColor += stageAccent * (stageHorizontalGrid + stageVerticalGrid) * stageFloorDepth * 0.18;
+  stageColor += stageAccent * stageHorizon * 0.24;
+  color = mix(color, stageColor, stageMix);
+
+  gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
+}`,
+    })
+    material.toneMapped = false
+    const mesh = new Mesh(this.requireRectGeometry(), material)
+    mesh.renderOrder = -100
+    this.backgroundUniforms = uniforms
+    this.backgroundMesh = mesh
+    this.persistentResources.push(material)
+  }
+
   getKeyboardY(): number {
-    return getKeyboardLayoutMetrics(this.viewportHeight).keyboardY
+    return this.getKeyboardMetrics().keyboardY
   }
 
   setKeyboardOpacity(opacity: number): void {
@@ -644,10 +1249,145 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.renderScene()
   }
 
+  setGuideOnly(guideOnly: boolean): void {
+    if (this.guideOnly === guideOnly) {
+      return
+    }
+
+    this.guideOnly = guideOnly
+    this.notesDirty = true
+    if (guideOnly) {
+      this.renderGuideOnlyFrame()
+      return
+    }
+
+    this.syncWaveVisibility()
+    this.syncParticleVisibility()
+    this.renderFrame(this.currentTick)
+  }
+
+  setKeyboardOnly(keyboardOnly: boolean): void {
+    if (this.keyboardOnly === keyboardOnly) {
+      return
+    }
+
+    this.keyboardOnly = keyboardOnly
+    this.notesDirty = true
+    // CanvasArea applies view-mode effects before async renderer init and
+    // during teardown. Persist the requested state, but never render into a
+    // disposed scene.
+    if (!this.isReady()) {
+      return
+    }
+    if (keyboardOnly) {
+      this.renderKeyboardOnlyFrame()
+      return
+    }
+
+    this.syncWaveVisibility()
+    this.syncParticleVisibility()
+    for (const label of this.keyboardLabelSprites) {
+      label.sprite.visible = true
+    }
+    this.renderFrame(this.currentTick)
+  }
+
+  setReviewTimelineTick(tick: number | null): void {
+    this.reviewTimelineTick = tick != null && Number.isFinite(tick) ? Math.max(0, tick) : null
+    this.notesDirty = true
+    this.renderFrame(this.currentTick)
+  }
+
   setActiveKeyPitches(pitches: Iterable<number>): void {
     this.explicitActiveKeyPitches = new Set(Array.from(pitches, (pitch) => Math.round(pitch)))
     this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
     this.renderScene()
+  }
+
+  setLiveMidiNotes(notes: readonly LiveMidiNote[]): void {
+    this.setLiveNoteSource('legacy-midi', notes)
+  }
+
+  setLiveNoteSource(sourceId: string, notes: readonly LiveMidiNote[]): void {
+    const previousNoteStarts = new Map(this.liveMidiNotes.map((note) => [note.id, note.startedAtMs]))
+    const normalizedNotes = notes
+      .filter((note) => (
+        typeof note.id === 'string' &&
+        Number.isFinite(note.pitch) &&
+        Number.isFinite(note.startedAtMs) &&
+        Number.isFinite(note.velocity)
+      ))
+      .map((note) => ({
+        id: note.id,
+        pitch: Math.round(note.pitch),
+        startedAtMs: note.startedAtMs,
+        velocity: Math.max(0, Math.min(127, note.velocity)),
+      }))
+
+    if (sourceId === 'pointer-keyboard' && (this.liveNoteSources.get('record-midi')?.length ?? 0) > 0) {
+      this.liveNoteSources.delete(sourceId)
+    } else if (normalizedNotes.length === 0) {
+      this.liveNoteSources.delete(sourceId)
+    } else {
+      this.liveNoteSources.set(sourceId, normalizedNotes)
+    }
+
+    // Record MIDI activity is tracked for both note-on and note-off messages:
+    // a just-released physical key should still suppress a competing pointer
+    // drag for the short hand-off window.
+    if (normalizedNotes.length > 0 || sourceId === 'record-midi') {
+      this.liveNoteSourceActivityMs.set(sourceId, getMonotonicNowMs())
+    }
+
+    // A physical keyboard takes precedence immediately, including over a
+    // pointer note that began just before the device's first message.
+    if (sourceId === 'record-midi' && normalizedNotes.length > 0) {
+      this.liveNoteSources.delete('pointer-keyboard')
+    }
+
+    this.liveMidiNotes = [...this.liveNoteSources.values()].flat()
+    this.liveSourceActiveKeyPitches = new Set(this.liveMidiNotes.map((note) => note.pitch))
+    const createColors = getAppState().createNoteColors
+    if (createColors.mode === 'dynamic' || createColors.mode === 'random') {
+      for (const note of this.liveMidiNotes) {
+        const keyHighlight = this.keyHighlightStates.get(note.pitch)
+        keyHighlight?.material.color.setHex(this.resolveCreateModeColor(
+          note.pitch,
+          createColors,
+          note.velocity,
+          note.startedAtMs,
+        ))
+      }
+    }
+
+    for (const note of this.liveMidiNotes) {
+      if (previousNoteStarts.get(note.id) !== note.startedAtMs) {
+        this.liveFallingNotes.set(`${note.id}:${note.startedAtMs}`, note)
+      }
+    }
+
+    if (this.renderer == null) {
+      return
+    }
+
+    if (this.keyboardOnly) {
+      this.syncNoteMaterialAnimationTime()
+      this.renderKeyboardOnlyFrame()
+      return
+    }
+
+    this.updateLiveMidiNoteLayer()
+    this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    this.renderScene()
+  }
+
+  isLiveNoteSourceActiveOrRecent(sourceId: string, recentWindowMs = 600): boolean {
+    if ((this.liveNoteSources.get(sourceId)?.length ?? 0) > 0) {
+      return true
+    }
+
+    const lastActivity = this.liveNoteSourceActivityMs.get(sourceId)
+    return lastActivity != null && getMonotonicNowMs() - lastActivity <= Math.max(0, recentWindowMs)
   }
 
   private consumePendingCreateNoteColorUpdate(state: AppState): boolean {
@@ -657,6 +1397,7 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.hasPendingCreateNoteColorUpdate = false
     this.updateKeyHighlightColors(state)
+    this.updateKeyboardSaberColors(state)
     this.updateImpactReflectionColors(state)
     this.updateVisibleNoteMaterialColors(state)
     this.updateWaveLayerColors(state)
@@ -666,32 +1407,48 @@ export class ThreeRenderer implements VisualizerRenderer {
 
   private updateKeyHighlightColors(state: AppState): void {
     for (const [pitch, keyHighlight] of this.keyHighlightStates) {
-      keyHighlight.material.color.setHex(resolveCreateModeNoteColor(pitch, state.createNoteColors))
+      keyHighlight.material.color.setHex(this.resolveCreateModeColor(pitch, state.createNoteColors))
       keyHighlight.material.needsUpdate = true
+    }
+  }
+
+  private updateKeyboardSaberColors(state: AppState): void {
+    for (const keyboardSaber of this.keyboardSaberStates.values()) {
+      keyboardSaber.uniforms.beamColor.value.setHex(
+        this.resolveCreateModeColor(keyboardSaber.pitch, state.createNoteColors),
+      )
+      keyboardSaber.material.needsUpdate = true
     }
   }
 
   private updateImpactReflectionColors(state: AppState): void {
     for (const impactReflection of this.impactReflectionStates.values()) {
       impactReflection.uniforms.reflectionColor.value.setHex(
-        resolveCreateModeNoteColor(impactReflection.pitch, state.createNoteColors),
+        this.resolveCreateModeColor(impactReflection.pitch, state.createNoteColors, impactReflection.velocity),
       )
       impactReflection.material.needsUpdate = true
     }
   }
 
   private updateVisibleNoteMaterialColors(state: AppState): void {
-    for (const noteMesh of this.noteMeshes) {
+    for (const noteMesh of [...this.noteMeshes, ...this.liveNoteMeshes]) {
       if (!noteMesh.visible) {
         continue
       }
 
       const notePitch = noteMesh.userData.notePitch as number | undefined
+      const noteVelocity = noteMesh.userData.noteVelocity as number | undefined
+      const noteStartTick = noteMesh.userData.noteStartTick as number | undefined
       if (notePitch == null) {
         continue
       }
 
-      this.assignNoteMaterial(noteMesh, resolveCreateModeNoteColor(notePitch, state.createNoteColors))
+      this.assignNoteMaterial(noteMesh, this.resolveCreateModeColor(
+        notePitch,
+        state.createNoteColors,
+        noteVelocity,
+        noteStartTick,
+      ))
     }
   }
 
@@ -701,6 +1458,15 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
 
     const state = getAppState()
+    if (this.guideOnly) {
+      this.renderGuideOnlyFrame()
+      return
+    }
+    if (this.keyboardOnly) {
+      this.syncNoteMaterialAnimationTime(frameTimeMs)
+      this.renderKeyboardOnlyFrame()
+      return
+    }
     this.consumePendingCreateNoteColorUpdate(state)
     if (Number.isFinite(state.currentTick) && state.currentTick !== this.currentTick) {
       this.currentTick = state.currentTick
@@ -710,22 +1476,76 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.syncNoteMaterialAnimationTime(frameTimeMs)
     this.syncParticleMaterialAnimationTime()
     this.updateParticleSystem(getAnimationTimeSeconds(frameTimeMs))
-    const notesChanged = this.renderDynamicState(this.currentTick, state, false)
-    const shouldAnimateNotes = this.visibleNoteMeshCount > 0
-    const shouldAnimateHighlights = this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
-    const shouldAnimateImpactReflections = this.applyImpactReflections(this.noteMaterialTimeSeconds)
-    this.detectNoteBursts(this.currentTick, state)
+    const renderTick = this.reviewTimelineTick ?? this.currentTick
+    this.renderDynamicState(renderTick, state, false)
+    this.updateLiveMidiNoteLayer()
+    this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    this.applyImpactReflections(this.noteMaterialTimeSeconds)
+    this.updateGhostHands(renderTick, state)
+    this.detectNoteBursts(renderTick, state)
 
-    if (!state.learnV3.isActive) {
-      this.boundaryWaveTime += CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
-      this.updateWaveMeshes()
-      this.renderScene()
-      return
-    }
+    this.boundaryWaveTime += CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
+    this.updateWaveMeshes()
+    this.renderScene()
+  }
 
-    if (notesChanged || shouldAnimateNotes || shouldAnimateHighlights || shouldAnimateImpactReflections) {
-      this.renderScene()
+  private renderGuideOnlyFrame(): void {
+    this.ghostHandsLayer?.hide()
+    this.reactiveLightingLayer?.hide()
+    hideObjects(this.noteMeshes, 0)
+    hideObjects(this.liveNoteMeshes, 0)
+    hideLabelSprites(this.noteLabelSprites, 0)
+    hideLabelSprites(this.liveNoteLabelSprites, 0)
+    this.visibleNoteMeshCount = 0
+    this.visibleLiveNoteMeshCount = 0
+    this.clearParticleSystem(false)
+    if (this.waveGroup != null) {
+      this.waveGroup.visible = false
     }
+    if (this.particleGroup != null) {
+      this.particleGroup.visible = false
+    }
+    for (const keyHighlight of this.keyHighlightStates.values()) {
+      keyHighlight.material.opacity = 0
+      keyHighlight.material.needsUpdate = true
+    }
+    for (const reflection of this.impactReflectionStates.values()) {
+      reflection.material.opacity = 0
+      reflection.material.needsUpdate = true
+    }
+    this.renderScene()
+  }
+
+  /**
+   * Transcriptor owns the upper canvas with an SVG score, but deliberately
+   * retains this exact full-canvas keyboard geometry and live key highlights.
+   * It does not derive timing from previous frames; only visible effects hide.
+   */
+  private renderKeyboardOnlyFrame(): void {
+    this.ghostHandsLayer?.hide()
+    this.reactiveLightingLayer?.hide()
+    hideObjects(this.noteMeshes, 0)
+    hideObjects(this.liveNoteMeshes, 0)
+    hideLabelSprites(this.noteLabelSprites, 0)
+    hideLabelSprites(this.liveNoteLabelSprites, 0)
+    // The Transcriptor's optional labels are rendered above active keys by
+    // its React overlay. Suppress static key names to keep the score clean.
+    hideLabelSprites(this.keyboardLabelSprites, 0)
+    this.visibleNoteMeshCount = 0
+    this.visibleLiveNoteMeshCount = 0
+    this.clearParticleSystem(false)
+    if (this.waveGroup != null) {
+      this.waveGroup.visible = false
+    }
+    if (this.particleGroup != null) {
+      this.particleGroup.visible = false
+    }
+    for (const reflection of this.impactReflectionStates.values()) {
+      reflection.material.opacity = 0
+      reflection.material.needsUpdate = true
+    }
+    this.applyActiveKeyHighlights(this.noteMaterialTimeSeconds)
+    this.renderScene()
   }
 
   private renderDynamicState(
@@ -736,12 +1556,10 @@ export class ThreeRenderer implements VisualizerRenderer {
     const projectOrTempoChanged =
       this.lastRenderedProjectData !== state.projectData ||
       this.lastRenderedTempoMap !== state.precomputedTempoMap
-    const learnStateChanged = this.lastRenderedLearnActive !== state.learnV3.isActive
     const shouldRefreshNotes =
       this.notesDirty ||
       this.lastRenderedTick !== currentTick ||
       this.lastRenderedWorldZoom !== state.worldZoom ||
-      learnStateChanged ||
       projectOrTempoChanged
 
     if (!shouldRefreshNotes) {
@@ -753,10 +1571,10 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.updateNoteLayer(currentTick, state)
     this.updatePlaybackActiveKeys(currentTick, state)
-    this.syncWaveVisibility(state.learnV3.isActive)
-    this.syncParticleVisibility(state.learnV3.isActive)
+    this.syncWaveVisibility()
+    this.syncParticleVisibility()
 
-    if (projectOrTempoChanged || learnStateChanged) {
+    if (projectOrTempoChanged) {
       this.clearParticleSystem(false)
       this.clearImpactReflections()
       this.particleBurstSerial = 0
@@ -766,7 +1584,6 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.notesDirty = false
     this.lastRenderedTick = currentTick
     this.lastRenderedWorldZoom = state.worldZoom
-    this.lastRenderedLearnActive = state.learnV3.isActive
     this.lastRenderedProjectData = state.projectData
     this.lastRenderedTempoMap = state.precomputedTempoMap
 
@@ -815,10 +1632,58 @@ export class ThreeRenderer implements VisualizerRenderer {
 
   private buildKeyboard(): void {
     const keyboardGroup = this.requireKeyboardGroup()
-    const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
+    const { keyboardHeight, keyboardY } = this.getKeyboardMetrics()
     const roundedKeyboardHeight = Math.round(keyboardHeight)
     const blackKeyWidth = Math.max(1, Math.round(getBlackKeyWidth(this.viewportWidth)))
     const blackKeyHeight = Math.max(1, Math.round(keyboardHeight * CREATE_MODE_BLACK_KEY_HEIGHT_RATIO))
+    const keyboardTextures = this.createKeyboardSurfaceTextures(
+      this.viewportWidth,
+      roundedKeyboardHeight,
+    )
+
+    if (keyboardTextures == null) {
+      this.buildFallbackKeyboardSurface(
+        keyboardGroup,
+        keyboardY,
+        roundedKeyboardHeight,
+        blackKeyWidth,
+        blackKeyHeight,
+      )
+    } else {
+      this.createStaticTextureRectMesh(
+        keyboardGroup,
+        0,
+        keyboardY,
+        this.viewportWidth,
+        roundedKeyboardHeight,
+        keyboardTextures.base,
+        1,
+        WHITE_KEY_Z,
+        true,
+      ).userData.keyboardLayer = 'base'
+      this.createStaticTextureRectMesh(
+        keyboardGroup,
+        0,
+        keyboardY,
+        this.viewportWidth,
+        roundedKeyboardHeight,
+        keyboardTextures.details,
+        1,
+        BLACK_KEY_SURFACE_Z,
+        true,
+      ).userData.keyboardLayer = 'details'
+      this.createStaticTextureRectMesh(
+        keyboardGroup,
+        0,
+        keyboardY,
+        this.viewportWidth,
+        roundedKeyboardHeight,
+        keyboardTextures.depth,
+        1,
+        KEYBOARD_DEPTH_Z,
+        true,
+      ).userData.keyboardLayer = 'depth'
+    }
 
     for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
       if (isBlackKey(pitch)) {
@@ -832,52 +1697,15 @@ export class ThreeRenderer implements VisualizerRenderer {
         : whiteKeyBounds.width
       const whiteKeyHeight = Math.max(1, roundedKeyboardHeight - WHITE_KEY_BOTTOM_INSET)
 
-      this.createStaticRectMesh(
-        keyboardGroup,
-        whiteKeyBounds.x,
-        keyboardY,
-        whiteKeyWidth,
-        whiteKeyHeight,
-        WHITE_KEY_COLOR,
-        1,
-        WHITE_KEY_Z,
-        true,
-      )
-      this.createStaticRectMesh(
-        keyboardGroup,
-        whiteKeyBounds.x,
-        keyboardY + roundedKeyboardHeight - WHITE_KEY_BOTTOM_SHADOW_HEIGHT - WHITE_KEY_BOTTOM_INSET,
-        whiteKeyWidth,
-        WHITE_KEY_BOTTOM_SHADOW_HEIGHT,
-        WHITE_KEY_SHADOW_COLOR,
-        WHITE_KEY_SHADOW_ALPHA,
-        WHITE_KEY_Z,
-        true,
-      )
-
-      if (hasSeparator) {
-        this.createStaticRectMesh(
-          keyboardGroup,
-          whiteKeyBounds.x + whiteKeyWidth,
-          keyboardY,
-          WHITE_KEY_SEPARATOR_WIDTH,
-          whiteKeyHeight,
-          WHITE_KEY_SEPARATOR_COLOR,
-          0.45,
-          WHITE_KEY_Z,
-          true,
-        )
-      }
-
       const highlight = this.createStaticRectMesh(
         keyboardGroup,
         whiteKeyBounds.x,
         keyboardY,
         whiteKeyWidth,
         whiteKeyHeight,
-        resolveCreateModeNoteColor(pitch, getAppState().createNoteColors),
+        this.resolveCreateModeColor(pitch, getAppState().createNoteColors),
         0,
-        WHITE_KEY_Z,
+        WHITE_KEY_HIGHLIGHT_Z,
       )
       highlight.layers.enable(BLOOM_LAYER)
       this.keyHighlightStates.set(pitch, {
@@ -889,6 +1717,13 @@ export class ThreeRenderer implements VisualizerRenderer {
         transitionDurationSeconds: 0,
         transitionStartSeconds: 0,
       })
+      this.createKeyboardSaberMesh(
+        keyboardGroup,
+        pitch,
+        whiteKeyBounds.x,
+        whiteKeyWidth,
+        keyboardY,
+      )
       this.createImpactReflectionMesh(
         keyboardGroup,
         pitch,
@@ -907,49 +1742,15 @@ export class ThreeRenderer implements VisualizerRenderer {
       const keyX = Math.round(pitchToKeyX(pitch, this.viewportWidth))
       const blackFaceHeight = Math.max(1, blackKeyHeight - BLACK_KEY_BOTTOM_INSET)
 
-      this.createStaticRectMesh(
-        keyboardGroup,
-        keyX,
-        keyboardY + 1,
-        blackKeyWidth,
-        Math.max(1, blackKeyHeight - 1),
-        BLACK_KEY_SHADOW_COLOR,
-        BLACK_KEY_SHADOW_ALPHA,
-        BLACK_KEY_Z,
-        true,
-      )
-      this.createStaticRectMesh(
-        keyboardGroup,
-        keyX,
-        keyboardY,
-        blackKeyWidth,
-        blackFaceHeight,
-        BLACK_KEY_COLOR,
-        1,
-        BLACK_KEY_Z,
-        true,
-      )
-      this.createStaticRectMesh(
-        keyboardGroup,
-        keyX + 1,
-        keyboardY + blackKeyHeight - BLACK_KEY_BOTTOM_SHADOW_HEIGHT - BLACK_KEY_BOTTOM_INSET,
-        Math.max(1, blackKeyWidth - 2),
-        BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
-        BLACK_KEY_HIGHLIGHT_COLOR,
-        BLACK_KEY_HIGHLIGHT_ALPHA,
-        BLACK_KEY_Z,
-        true,
-      )
-
       const highlight = this.createStaticRectMesh(
         keyboardGroup,
-        keyX,
-        keyboardY,
-        blackKeyWidth,
-        blackFaceHeight,
-        resolveCreateModeNoteColor(pitch, getAppState().createNoteColors),
+        keyX + 1,
+        keyboardY + 1,
+        Math.max(1, blackKeyWidth - 2),
+        Math.max(1, blackFaceHeight - 2),
+        this.resolveCreateModeColor(pitch, getAppState().createNoteColors),
         0,
-        BLACK_KEY_Z,
+        BLACK_KEY_HIGHLIGHT_Z,
       )
       highlight.layers.enable(BLOOM_LAYER)
       this.keyHighlightStates.set(pitch, {
@@ -961,6 +1762,13 @@ export class ThreeRenderer implements VisualizerRenderer {
         transitionDurationSeconds: 0,
         transitionStartSeconds: 0,
       })
+      this.createKeyboardSaberMesh(
+        keyboardGroup,
+        pitch,
+        keyX,
+        blackKeyWidth,
+        keyboardY,
+      )
       this.createImpactReflectionMesh(
         keyboardGroup,
         pitch,
@@ -970,24 +1778,160 @@ export class ThreeRenderer implements VisualizerRenderer {
         Math.max(6, Math.min(blackFaceHeight, Math.round(IMPACT_REFLECTION_HEIGHT * 0.82))),
       )
     }
+
+    if (getAppState().noteLabelsOnKeys) {
+      this.buildKeyboardLabels(keyboardGroup)
+    }
+  }
+
+  private buildFallbackKeyboardSurface(
+    keyboardGroup: Group,
+    keyboardY: number,
+    keyboardHeight: number,
+    blackKeyWidth: number,
+    blackKeyHeight: number,
+  ): void {
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (isBlackKey(pitch)) continue
+      const bounds = getWhiteKeyBounds(pitch, this.viewportWidth)
+      const hasSeparator = getWhiteKeyIndex(pitch) < PIANO_WHITE_KEY_COUNT - 1
+      const width = hasSeparator
+        ? Math.max(1, bounds.width - WHITE_KEY_SEPARATOR_WIDTH)
+        : bounds.width
+      const height = Math.max(1, keyboardHeight - WHITE_KEY_BOTTOM_INSET)
+      this.createStaticRectMesh(
+        keyboardGroup,
+        bounds.x,
+        keyboardY,
+        width,
+        height,
+        WHITE_KEY_COLOR,
+        1,
+        WHITE_KEY_Z,
+        true,
+      )
+      this.createStaticRectMesh(
+        keyboardGroup,
+        bounds.x,
+        keyboardY + keyboardHeight - WHITE_KEY_BOTTOM_SHADOW_HEIGHT - WHITE_KEY_BOTTOM_INSET,
+        width,
+        WHITE_KEY_BOTTOM_SHADOW_HEIGHT,
+        WHITE_KEY_SHADOW_COLOR,
+        WHITE_KEY_SHADOW_ALPHA,
+        BLACK_KEY_SURFACE_Z,
+        true,
+      )
+      if (hasSeparator) {
+        this.createStaticRectMesh(
+          keyboardGroup,
+          bounds.x + width,
+          keyboardY,
+          WHITE_KEY_SEPARATOR_WIDTH,
+          height,
+          WHITE_KEY_SEPARATOR_COLOR,
+          0.65,
+          BLACK_KEY_SURFACE_Z,
+          true,
+        )
+      }
+    }
+
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (!isBlackKey(pitch)) continue
+      const x = Math.round(pitchToKeyX(pitch, this.viewportWidth))
+      const faceHeight = Math.max(1, blackKeyHeight - BLACK_KEY_BOTTOM_INSET)
+      this.createStaticRectMesh(
+        keyboardGroup,
+        x + 2,
+        keyboardY + 3,
+        blackKeyWidth,
+        faceHeight,
+        BLACK_KEY_SHADOW_COLOR,
+        BLACK_KEY_SHADOW_ALPHA,
+        BLACK_KEY_SURFACE_Z,
+        true,
+      )
+      this.createStaticRectMesh(
+        keyboardGroup,
+        x,
+        keyboardY,
+        blackKeyWidth,
+        faceHeight,
+        BLACK_KEY_COLOR,
+        1,
+        BLACK_KEY_SURFACE_Z,
+        true,
+      )
+      this.createStaticRectMesh(
+        keyboardGroup,
+        x + 1,
+        keyboardY + blackKeyHeight - BLACK_KEY_BOTTOM_SHADOW_HEIGHT - BLACK_KEY_BOTTOM_INSET,
+        Math.max(1, blackKeyWidth - 2),
+        BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
+        BLACK_KEY_HIGHLIGHT_COLOR,
+        BLACK_KEY_HIGHLIGHT_ALPHA,
+        KEYBOARD_DEPTH_Z,
+        true,
+      )
+    }
+  }
+
+  private buildKeyboardLabels(keyboardGroup: Group): void {
+    const state = getAppState()
+    const { keyboardHeight, keyboardY } = this.getKeyboardMetrics()
+    const blackKeyHeight = Math.max(1, Math.round(keyboardHeight * CREATE_MODE_BLACK_KEY_HEIGHT_RATIO))
+
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      const blackKey = isBlackKey(pitch)
+      const bounds = blackKey
+        ? { width: Math.max(1, Math.round(getBlackKeyWidth(this.viewportWidth))), x: Math.round(pitchToKeyX(pitch, this.viewportWidth)) }
+        : getWhiteKeyBounds(pitch, this.viewportWidth)
+      const keyHeight = blackKey ? blackKeyHeight : keyboardHeight
+      const topDownY = keyboardY + (keyHeight * KEYBOARD_LABEL_VERTICAL_POSITION)
+      const label = this.createLabelSprite(
+        formatMidiNoteName(pitch, state.noteLabelFormat),
+        blackKey ? BLACK_KEY_LABEL_COLOR : WHITE_KEY_LABEL_COLOR,
+        true,
+      )
+      if (label == null) {
+        continue
+      }
+
+      const aspect = this.getLabelAspectRatio(label)
+      const desiredHeight = clamp(state.noteLabelSize * 1.4, 12, Math.max(12, keyHeight * 0.24))
+      const labelWidth = Math.min(bounds.width * 0.9, desiredHeight * aspect)
+      const labelHeight = labelWidth / aspect
+      label.sprite.position.set(
+        bounds.x + (bounds.width / 2),
+        this.toScenePointY(topDownY),
+        KEYBOARD_LABEL_Z,
+      )
+      label.sprite.scale.set(labelWidth, labelHeight, 1)
+      label.sprite.renderOrder = KEYBOARD_LABEL_RENDER_ORDER
+      label.sprite.visible = true
+      keyboardGroup.add(label.sprite)
+      this.keyboardLabelSprites.push(label)
+    }
   }
 
   private updateNoteLayer(currentTick: number, state: AppState): void {
     const noteGroup = this.requireNoteGroup()
     if (state.projectData == null || state.precomputedTempoMap == null || !this.isSpatialIndexReady()) {
       hideObjects(this.noteMeshes)
+      hideLabelSprites(this.noteLabelSprites)
       this.visibleNoteMeshCount = 0
       return
     }
 
-    const { keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
+    const { keyboardY } = this.getKeyboardMetrics()
     const currentSeconds = tickToSeconds(currentTick, state.precomputedTempoMap)
     const visibleTickWindow = getVisibleTickWindow(
       currentTick,
       currentSeconds,
       state.precomputedTempoMap,
       keyboardY,
-      state.worldZoom,
+      state.worldZoom * (state.fallSpeed / 100),
+      this.layoutContext,
     )
     const visibleNotes = spatialIndex.getNotesInRegion(
       PIANO_MIN_PITCH,
@@ -1033,7 +1977,81 @@ export class ThreeRenderer implements VisualizerRenderer {
     }
 
     hideObjects(this.noteMeshes, noteMeshIndex)
+    hideLabelSprites(this.noteLabelSprites, noteMeshIndex)
     this.visibleNoteMeshCount = noteMeshIndex
+  }
+
+  private updateLiveMidiNoteLayer(): boolean {
+    if (this.noteGroup == null || this.rectGeometry == null) {
+      return false
+    }
+
+    const nowMs = this.noteMaterialTimeSeconds * 1000
+    const { keyboardY } = this.getKeyboardMetrics()
+    let noteMeshIndex = 0
+
+    for (const [noteKey, note] of this.liveFallingNotes) {
+      const elapsedMs = Math.max(0, nowMs - note.startedAtMs)
+      if (elapsedMs >= LIVE_MIDI_NOTE_TRAVEL_MS || note.pitch < PIANO_MIN_PITCH || note.pitch > PIANO_MAX_PITCH) {
+        this.liveFallingNotes.delete(noteKey)
+        continue
+      }
+
+      const progress = elapsedMs / LIVE_MIDI_NOTE_TRAVEL_MS
+      const noteIsBlack = isBlackKey(note.pitch)
+      const whiteKeyBounds = noteIsBlack ? null : getWhiteKeyBounds(note.pitch, this.viewportWidth)
+      const baseWidth = noteIsBlack ? getBlackKeyWidth(this.viewportWidth) : whiteKeyBounds!.width
+      const inset = noteIsBlack ? BLACK_KEY_NOTE_INSET : 0
+      const fullWidth = Math.max(4, baseWidth - (inset * 2))
+      const width = Math.max(4, fullWidth * (getAppState().noteWidth / 100))
+      const height = LIVE_MIDI_NOTE_MIN_HEIGHT + (
+        (LIVE_MIDI_NOTE_MAX_HEIGHT - LIVE_MIDI_NOTE_MIN_HEIGHT) * (note.velocity / 127)
+      )
+      const baseX = noteIsBlack
+        ? pitchToKeyX(note.pitch, this.viewportWidth) + inset
+        : whiteKeyBounds!.x
+      const x = baseX + ((fullWidth - width) / 2)
+      const y = Math.max(0, (keyboardY - height) * progress)
+      const mesh = this.getOrCreateLiveNoteMesh(this.noteGroup, noteMeshIndex)
+      const noteCenterX = x + (width / 2)
+
+      mesh.userData.notePitch = note.pitch
+      mesh.userData.noteVelocity = note.velocity
+      mesh.userData.noteStartTick = note.startedAtMs
+      this.assignNoteMaterial(mesh, this.resolveCreateModeColor(
+        note.pitch,
+        getAppState().createNoteColors,
+        note.velocity,
+        note.startedAtMs,
+      ))
+      const roundedNoteUniforms = mesh.material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
+      if (roundedNoteUniforms != null) {
+        roundedNoteUniforms.noteTravelPhaseOffset.value = 0
+      }
+      mesh.position.set(
+        noteCenterX,
+        this.toSceneRectY(y, height),
+        noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z,
+      )
+      mesh.scale.set(width, height, 1)
+      mesh.renderOrder = Math.round((noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z) * 10)
+      mesh.visible = true
+      this.updateFallingNoteLabel(
+        this.liveNoteLabelSprites,
+        this.noteGroup,
+        noteMeshIndex,
+        note.pitch,
+        { h: height, w: width, x, y },
+        noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z,
+        getAppState(),
+      )
+      noteMeshIndex += 1
+    }
+
+    hideObjects(this.liveNoteMeshes, noteMeshIndex)
+    hideLabelSprites(this.liveNoteLabelSprites, noteMeshIndex)
+    this.visibleLiveNoteMeshCount = noteMeshIndex
+    return noteMeshIndex > 0
   }
 
   private renderCreateModeNote(
@@ -1054,8 +2072,10 @@ export class ThreeRenderer implements VisualizerRenderer {
         canvasWidth: this.viewportWidth,
         currentSeconds,
         currentTick,
+        layoutContext: this.layoutContext,
+        noteWidthScale: state.noteWidth / 100,
         tempoMap: state.precomputedTempoMap!,
-        worldZoom: state.worldZoom,
+        worldZoom: state.worldZoom * (state.fallSpeed / 100),
       },
       nextNote?.note ?? null,
     )
@@ -1075,21 +2095,22 @@ export class ThreeRenderer implements VisualizerRenderer {
       x: rect.x + inset,
       y: rect.y + verticalInset,
     }
-    const noteColor = resolveCreateModeNoteColor(indexedNote.note.pitch, state.createNoteColors)
+    const noteColor = this.resolveCreateModeColor(
+      indexedNote.note.pitch,
+      state.createNoteColors,
+      indexedNote.note.velocity,
+      indexedNote.note.startTick,
+    )
     const noteMesh = this.getOrCreateNoteMesh(group, noteMeshIndex)
     const noteCenterX = adjustedRect.x + (adjustedRect.w / 2)
-    const noteBottomY = adjustedRect.y + adjustedRect.h
-    const noteDistanceFromBoundary = Math.max(
-      0,
-      this.getBoundaryTopDownY(noteCenterX) - noteBottomY,
-    )
 
     noteMesh.userData.notePitch = indexedNote.note.pitch
+    noteMesh.userData.noteStartTick = indexedNote.note.startTick
+    noteMesh.userData.noteVelocity = indexedNote.note.velocity
     this.assignNoteMaterial(noteMesh, noteColor)
     const roundedNoteUniforms = noteMesh.material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
     if (roundedNoteUniforms != null) {
       roundedNoteUniforms.noteTravelPhaseOffset.value = resolveNoteTravelPhaseOffset(indexedNote.note)
-      roundedNoteUniforms.noteDistanceFromBoundary.value = noteDistanceFromBoundary
     }
     noteMesh.position.set(
       noteCenterX,
@@ -1099,6 +2120,15 @@ export class ThreeRenderer implements VisualizerRenderer {
     noteMesh.scale.set(adjustedRect.w, adjustedRect.h, 1)
     noteMesh.renderOrder = Math.round((noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z) * 10)
     noteMesh.visible = true
+    this.updateFallingNoteLabel(
+      this.noteLabelSprites,
+      group,
+      noteMeshIndex,
+      indexedNote.note.pitch,
+      adjustedRect,
+      noteIsBlack ? BLACK_NOTE_Z : WHITE_NOTE_Z,
+      state,
+    )
 
     return {
       noteMeshIndex: noteMeshIndex + 1,
@@ -1123,6 +2153,17 @@ export class ThreeRenderer implements VisualizerRenderer {
     for (const indexedNote of candidates) {
       if (indexedNote.note.startTick <= currentTick && indexedNote.note.visualEndTick >= currentTick) {
         activePitches.add(indexedNote.note.pitch)
+        if (state.createNoteColors.mode === 'dynamic' || state.createNoteColors.mode === 'random') {
+          const keyHighlight = this.keyHighlightStates.get(indexedNote.note.pitch)
+          if (keyHighlight != null) {
+            keyHighlight.material.color.setHex(this.resolveCreateModeColor(
+              indexedNote.note.pitch,
+              state.createNoteColors,
+              indexedNote.note.velocity,
+              indexedNote.note.startTick,
+            ))
+          }
+        }
       }
     }
 
@@ -1177,7 +2218,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       layer.materials = []
     }
     clearGroup(waveGroup)
-    this.waveSamplePoints = createWaveSamplePoints(this.viewportWidth)
+    this.waveSamplePoints = createWaveSamplePoints(this.viewportWidth, this.getLayoutScale())
 
     for (const layer of this.waveLayers) {
       layer.segments = []
@@ -1233,14 +2274,14 @@ export class ThreeRenderer implements VisualizerRenderer {
       return
     }
 
-    const { keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
+    const { keyboardY } = this.getKeyboardMetrics()
 
     for (const layer of this.waveLayers) {
       for (let index = 0; index < layer.segments.length; index += 1) {
         const x0 = this.waveSamplePoints[index]
         const x1 = this.waveSamplePoints[index + 1]
-        const y0 = keyboardY + Math.sin((x0 / CREATE_MODE_BOUNDARY_WAVE_LENGTH) + this.boundaryWaveTime) * CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE
-        const y1 = keyboardY + Math.sin((x1 / CREATE_MODE_BOUNDARY_WAVE_LENGTH) + this.boundaryWaveTime) * CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE
+        const y0 = keyboardY + Math.sin((x0 / this.getScaledWaveLength()) + this.boundaryWaveTime) * this.getScaledWaveAmplitude()
+        const y1 = keyboardY + Math.sin((x1 / this.getScaledWaveLength()) + this.boundaryWaveTime) * this.getScaledWaveAmplitude()
         const dx = x1 - x0
         const dy = y1 - y0
         const length = Math.max(1, Math.sqrt((dx * dx) + (dy * dy)))
@@ -1249,22 +2290,22 @@ export class ThreeRenderer implements VisualizerRenderer {
         const segment = layer.segments[index]
 
         segment.position.set(midpointX, this.toScenePointY(midpointY), layer.definition.z)
-        segment.scale.set(length, layer.definition.lineWidth, 1)
+        segment.scale.set(length, layer.definition.lineWidth * this.getLayoutScale(), 1)
         segment.rotation.z = Math.atan2(-dy, dx)
         segment.visible = true
       }
     }
   }
 
-  private syncWaveVisibility(isLearnModeActive: boolean): void {
+  private syncWaveVisibility(): void {
     if (this.waveGroup != null) {
-      this.waveGroup.visible = !isLearnModeActive
+      this.waveGroup.visible = true
     }
   }
 
-  private syncParticleVisibility(isLearnModeActive: boolean): void {
+  private syncParticleVisibility(): void {
     if (this.particleGroup != null) {
-      this.particleGroup.visible = !isLearnModeActive
+      this.particleGroup.visible = true
     }
   }
 
@@ -1272,7 +2313,8 @@ export class ThreeRenderer implements VisualizerRenderer {
     const particleGroup = this.requireParticleGroup()
     const positions = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
     const velocities = new Float32Array(PARTICLE_POOL_CAPACITY * 3)
-    const pitchClasses = new Int8Array(PARTICLE_POOL_CAPACITY)
+    const pitches = new Int8Array(PARTICLE_POOL_CAPACITY)
+    const noteVelocities = new Uint8Array(PARTICLE_POOL_CAPACITY)
     const lifetimes = new Float32Array(PARTICLE_POOL_CAPACITY)
     const ages = new Float32Array(PARTICLE_POOL_CAPACITY)
     const baseSizes = new Float32Array(PARTICLE_POOL_CAPACITY)
@@ -1289,17 +2331,20 @@ export class ThreeRenderer implements VisualizerRenderer {
     const geometry = new BufferGeometry()
     const positionAttribute = new BufferAttribute(positions, 3)
     const sizeAttribute = new BufferAttribute(sizes, 1)
+    const velocityAttribute = new BufferAttribute(velocities, 3)
     const alphaAttribute = new BufferAttribute(alphas, 1)
     const seedAttribute = new BufferAttribute(seeds, 1)
     const brightnessAttribute = new BufferAttribute(brightnesses, 1)
     const colorAttribute = new BufferAttribute(colors, 3)
     const uniforms: ParticleUniforms = {
       particleTime: { value: 0 },
-      pixelRatio: { value: getDevicePixelRatio() },
+      pixelRatio: { value: this.effectivePixelRatio },
+      wispMode: { value: 0 },
     }
 
     geometry.setAttribute('position', positionAttribute)
     geometry.setAttribute('aSize', sizeAttribute)
+    geometry.setAttribute('aVelocity', velocityAttribute)
     geometry.setAttribute('aAlpha', alphaAttribute)
     geometry.setAttribute('aSeed', seedAttribute)
     geometry.setAttribute('aBrightness', brightnessAttribute)
@@ -1312,21 +2357,51 @@ export class ThreeRenderer implements VisualizerRenderer {
       depthWrite: false,
       fragmentShader: `
 uniform float particleTime;
+uniform float wispMode;
 varying float vAlpha;
 varying float vBrightness;
 varying vec3 vColor;
+varying vec2 vVelocityDirection;
+varying float vWispStretch;
 
 void main() {
   vec2 centered = gl_PointCoord - vec2(0.5);
   float distanceFromCenter = length(centered);
-  if (distanceFromCenter > 0.5) {
+  float wispMix = step(0.5, wispMode) * (1.0 - step(1.5, wispMode));
+  float rayMix = step(1.5, wispMode);
+  vec2 perpendicular = vec2(-vVelocityDirection.y, vVelocityDirection.x);
+  float longitudinal = dot(centered, vVelocityDirection);
+  float transverse = dot(centered, perpendicular);
+  float wispHead = 1.0 - smoothstep(
+    0.0,
+    0.20,
+    length(vec2((longitudinal * vWispStretch) - 0.12, transverse * vWispStretch))
+  );
+  float wispTail =
+    exp(-pow(transverse * vWispStretch * 6.0, 2.0)) *
+    (1.0 - smoothstep(0.04, 0.5, longitudinal)) *
+    smoothstep(-0.5, -0.44, longitudinal);
+  float wispMask = max(wispHead, wispTail * 0.78);
+  float rayLength = 1.0 - smoothstep(0.12, 0.5, abs(longitudinal));
+  float rayHalo = exp(-pow(transverse * 13.0, 2.0)) * rayLength;
+  float rayCore = exp(-pow(transverse * 28.0, 2.0)) * rayLength;
+  float rayMask = max(rayHalo, rayCore);
+  float circularMask = distanceFromCenter > 0.5 ? 0.0 : 1.0;
+  float particleMask = mix(circularMask, wispMask, wispMix);
+  particleMask = mix(particleMask, rayMask, rayMix);
+  if (particleMask <= 0.0) {
     discard;
   }
 
   float halo = 1.0 - smoothstep(0.08, 0.32, distanceFromCenter);
   float core = 1.0 - smoothstep(0.0, 0.18, distanceFromCenter);
+  float wispHalo = max(wispTail, wispHead * 1.15);
+  halo = mix(halo, wispHalo, wispMix);
+  core = mix(core, wispHead, wispMix);
+  halo = mix(halo, rayHalo, rayMix);
+  core = mix(core, rayCore, rayMix);
   float shimmer = 1.0 + (sin((particleTime * 7.0) + (distanceFromCenter * 16.0)) * 0.03);
-  float alpha = halo * halo * vAlpha;
+  float alpha = halo * halo * vAlpha * particleMask;
   vec3 color = vColor * (0.95 + (vBrightness * 1.35) + (core * 0.75));
 
   gl_FragColor = vec4(color * shimmer, alpha);
@@ -1336,23 +2411,37 @@ void main() {
       vertexShader: `
 uniform float particleTime;
 uniform float pixelRatio;
+uniform float wispMode;
 attribute float aAlpha;
 attribute float aBrightness;
 attribute vec3 aColor;
 attribute float aSeed;
 attribute float aSize;
+attribute vec3 aVelocity;
 varying float vAlpha;
 varying float vBrightness;
 varying vec3 vColor;
+varying vec2 vVelocityDirection;
+varying float vWispStretch;
 
 void main() {
   vAlpha = aAlpha;
   vBrightness = aBrightness;
   vColor = aColor;
+  float velocityLength = length(aVelocity.xy);
+  vVelocityDirection = velocityLength > 0.001
+    ? normalize(aVelocity.xy)
+    : vec2(0.0, 1.0);
+  float wispMix = step(0.5, wispMode) * (1.0 - step(1.5, wispMode));
+  float rayMix = step(1.5, wispMode);
+  float wispStretch = clamp(1.6 + (velocityLength * 0.05), 1.6, 4.8);
+  float rayStretch = clamp(3.2 + (velocityLength * 0.06), 3.2, 6.4);
+  vWispStretch = mix(1.0, wispStretch, wispMix);
+  vWispStretch = mix(vWispStretch, rayStretch, rayMix);
 
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
-  gl_PointSize = aSize * pixelRatio * (1.0 + (sin((particleTime * 6.0) + (aSeed * 11.0)) * 0.06));
+  gl_PointSize = aSize * pixelRatio * vWispStretch * (1.0 + (sin((particleTime * 6.0) + (aSeed * 11.0)) * 0.06));
 }`,
     })
     const points = new Points(geometry, material)
@@ -1380,7 +2469,8 @@ void main() {
       geometry,
       lifetimes,
       material,
-      pitchClasses,
+      noteVelocities,
+      pitches,
       points,
       positionAttribute,
       positions,
@@ -1389,6 +2479,7 @@ void main() {
       sizeAttribute,
       sizes,
       uniforms,
+      velocityAttribute,
       velocities,
     }
   }
@@ -1413,10 +2504,13 @@ void main() {
     }
 
     for (let particleIndex = 0; particleIndex < particleSystem.activeCount; particleIndex += 1) {
-      const color = resolveCreateModeNoteColor(
-        particleSystem.pitchClasses[particleIndex],
-        state.createNoteColors,
-      )
+      const color = state.particleSettings.colorMode === 'custom'
+        ? hexToPixi(state.particleSettings.customColor)
+        : this.resolveCreateModeColor(
+          particleSystem.pitches[particleIndex],
+          state.createNoteColors,
+          particleSystem.noteVelocities[particleIndex],
+        )
       const [red, green, blue] = colorToNormalizedRgb(color)
       const colorOffset = particleIndex * 3
       particleSystem.colors[colorOffset] = red
@@ -1429,7 +2523,6 @@ void main() {
 
   private detectNoteBursts(currentTick: number, state: AppState): void {
     if (
-      state.learnV3.isActive ||
       !state.isPlaying ||
       state.projectData == null ||
       state.precomputedTempoMap == null ||
@@ -1465,6 +2558,32 @@ void main() {
     this.resetBurstDetectionState(currentTick)
   }
 
+  private detectOfflineNoteBursts(currentTick: number, state: AppState): void {
+    if (
+      state.projectData == null ||
+      state.precomputedTempoMap == null ||
+      !this.isSpatialIndexReady() ||
+      !Number.isFinite(currentTick)
+    ) {
+      this.resetOfflineBurstDetectionState(currentTick)
+      return
+    }
+
+    if (!Number.isFinite(this.lastOfflineBurstDetectionTick)) {
+      this.resetOfflineBurstDetectionState(currentTick)
+      return
+    }
+
+    const tickDelta = currentTick - this.lastOfflineBurstDetectionTick
+    if (tickDelta <= 0) {
+      this.resetOfflineBurstDetectionState(currentTick)
+      return
+    }
+
+    this.emitBurstsForTickRange(this.lastOfflineBurstDetectionTick, currentTick, state)
+    this.resetOfflineBurstDetectionState(currentTick)
+  }
+
   private emitBurstsForTickRange(
     minExclusiveTick: number,
     maxInclusiveTick: number,
@@ -1475,6 +2594,7 @@ void main() {
       particleSystem == null ||
       state.projectData == null ||
       state.precomputedTempoMap == null ||
+      !state.particleSettings.enabled ||
       maxInclusiveTick <= minExclusiveTick
     ) {
       return
@@ -1487,9 +2607,11 @@ void main() {
       Math.floor(maxInclusiveTick) + 1,
     )
     const emittedNoteIds = new Set<string>()
+    const densityMultiplier = state.particleSettings.density / 100
+    const minParticlesPerBurst = Math.max(1, Math.round(PARTICLE_MIN_COUNT * densityMultiplier))
     const maxBurstsThisPass = Math.min(
       PARTICLE_MAX_NOTES_PER_DETECTION,
-      Math.floor((PARTICLE_POOL_CAPACITY - particleSystem.activeCount) / PARTICLE_MIN_COUNT),
+      Math.floor((PARTICLE_POOL_CAPACITY - particleSystem.activeCount) / minParticlesPerBurst),
     )
     let emittedBurstCount = 0
     let particlesChanged = false
@@ -1508,7 +2630,7 @@ void main() {
 
       emittedNoteIds.add(note.id)
       this.triggerImpactReflection(note)
-      const didEmitBurst = this.emitBurstForNote(indexedNote)
+      const didEmitBurst = this.emitBurstForNote(indexedNote, state.particleSettings)
       particlesChanged = didEmitBurst || particlesChanged
       if (didEmitBurst) {
         emittedBurstCount += 1
@@ -1521,7 +2643,7 @@ void main() {
     }
   }
 
-  private emitBurstForNote(indexedNote: IndexedNote): boolean {
+  private emitBurstForNote(indexedNote: IndexedNote, settings: AppState['particleSettings']): boolean {
     const particleSystem = this.particleSystem
     if (particleSystem == null) {
       return false
@@ -1533,7 +2655,10 @@ void main() {
     }
 
     const intensity = clamp(indexedNote.note.velocity / 127, 0, 1)
-    const targetParticleCount = Math.round(lerp(PARTICLE_MIN_COUNT, PARTICLE_MAX_COUNT, intensity))
+    const densityMultiplier = settings.density / 100
+    const targetParticleCount = Math.round(
+      lerp(PARTICLE_MIN_COUNT, PARTICLE_MAX_COUNT, intensity) * densityMultiplier,
+    )
     const particleCount = Math.min(availableSlots, targetParticleCount)
     if (particleCount <= 0) {
       return false
@@ -1542,10 +2667,15 @@ void main() {
     const burstX = this.getKeyX(indexedNote.note.pitch)
     const burstTopDownY = this.getBoundaryTopDownY(burstX)
     const burstSceneY = this.toScenePointY(burstTopDownY)
-    const pitchClass = ((indexedNote.note.pitch % 12) + 12) % 12
-    const [red, green, blue] = colorToNormalizedRgb(
-      resolveCreateModeNoteColor(indexedNote.note.pitch, getAppState().createNoteColors),
-    )
+    const particleColor = settings.colorMode === 'custom'
+      ? hexToPixi(settings.customColor)
+      : this.resolveCreateModeColor(
+        indexedNote.note.pitch,
+        getAppState().createNoteColors,
+        indexedNote.note.velocity,
+        indexedNote.note.startTick,
+      )
+    const [red, green, blue] = colorToNormalizedRgb(particleColor)
     const burstSeed = createDeterministicSeed(indexedNote.note.id, this.particleBurstSerial)
     const burstWindBiasX = randomBetweenFromSeed(
       -PARTICLE_BURST_WIND_BIAS_X,
@@ -1558,11 +2688,11 @@ void main() {
     for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
       const slot = particleSystem.activeCount
       const positionOffset = slot * 3
-      const lifetimeBase = lerp(PARTICLE_MIN_LIFETIME_SECONDS, PARTICLE_MAX_LIFETIME_SECONDS, intensity)
-      const speedBase = lerp(PARTICLE_MIN_SPEED, PARTICLE_MAX_SPEED, intensity)
-      const sizeBase = lerp(PARTICLE_MIN_SIZE, PARTICLE_MAX_SIZE, intensity)
+      const lifetimeBase = lerp(PARTICLE_MIN_LIFETIME_SECONDS, PARTICLE_MAX_LIFETIME_SECONDS, intensity) * (settings.lifetime / 100)
+      const speedBase = lerp(PARTICLE_MIN_SPEED, PARTICLE_MAX_SPEED, intensity) * (settings.speed / 100)
+      const sizeBase = lerp(PARTICLE_MIN_SIZE, PARTICLE_MAX_SIZE, intensity) * (settings.size / 100)
       const alphaBase = lerp(PARTICLE_MIN_ALPHA, PARTICLE_MAX_ALPHA, intensity)
-      const brightnessBase = lerp(PARTICLE_MIN_BRIGHTNESS, PARTICLE_MAX_BRIGHTNESS, intensity)
+      const brightnessBase = lerp(PARTICLE_MIN_BRIGHTNESS, PARTICLE_MAX_BRIGHTNESS, intensity) * (settings.glow / 100)
       const particleSeed = createDeterministicSeed(indexedNote.note.id, burstSeed, particleIndex)
       const speed = applyVarianceFromSeed(speedBase, PARTICLE_SPEED_VARIANCE, particleSeed, 1)
       const upwardRatio = lerp(
@@ -1571,12 +2701,12 @@ void main() {
         randomFromSeed(particleSeed, 2),
       )
       let velocityX =
-        randomBetweenFromSeed(-PARTICLE_SIDEWAYS_RATIO, PARTICLE_SIDEWAYS_RATIO, particleSeed, 3) * speed
+        randomBetweenFromSeed(-PARTICLE_SIDEWAYS_RATIO, PARTICLE_SIDEWAYS_RATIO, particleSeed, 3) * speed * (settings.spread / 100)
       let velocityY = speed * upwardRatio
 
       velocityX += randomBetweenFromSeed(
-        -PARTICLE_SPAWN_LATERAL_JITTER,
-        PARTICLE_SPAWN_LATERAL_JITTER,
+        -PARTICLE_SPAWN_LATERAL_JITTER * (settings.spread / 100),
+        PARTICLE_SPAWN_LATERAL_JITTER * (settings.spread / 100),
         particleSeed,
         4,
       ) * (0.35 + (intensity * 0.5))
@@ -1584,7 +2714,8 @@ void main() {
       particleSystem.positions[positionOffset] = burstX
       particleSystem.positions[positionOffset + 1] = burstSceneY
       particleSystem.positions[positionOffset + 2] = PARTICLE_Z
-      particleSystem.pitchClasses[slot] = pitchClass
+      particleSystem.pitches[slot] = indexedNote.note.pitch
+      particleSystem.noteVelocities[slot] = indexedNote.note.velocity
       particleSystem.velocities[positionOffset] = velocityX
       particleSystem.velocities[positionOffset + 1] = velocityY
       particleSystem.velocities[positionOffset + 2] = 0
@@ -1632,6 +2763,10 @@ void main() {
 
     const intensity = clamp(note.velocity / 127, 0, 1)
     impactReflection.startTimeSeconds = this.noteMaterialTimeSeconds
+    impactReflection.velocity = note.velocity
+    impactReflection.uniforms.reflectionColor.value.setHex(
+      this.resolveCreateModeColor(note.pitch, getAppState().createNoteColors, note.velocity, note.startTick),
+    )
     impactReflection.durationSeconds = lerp(
       IMPACT_REFLECTION_DURATION_MIN_SECONDS,
       IMPACT_REFLECTION_DURATION_MAX_SECONDS,
@@ -1734,6 +2869,8 @@ void main() {
       copyParticleScalar(particleSystem.flowBiasX, lastIndex, index)
       copyParticleScalar(particleSystem.flowStrengths, lastIndex, index)
       copyParticleScalar(particleSystem.lifetimes, lastIndex, index)
+      copyParticleScalar(particleSystem.noteVelocities, lastIndex, index)
+      copyParticleScalar(particleSystem.pitches, lastIndex, index)
       copyParticleScalar(particleSystem.seeds, lastIndex, index)
       copyParticleScalar(particleSystem.sizes, lastIndex, index)
       copyParticleVector3(particleSystem.colors, lastIndex, index)
@@ -1749,6 +2886,7 @@ void main() {
     particleSystem.sizeAttribute.needsUpdate = true
     particleSystem.alphaAttribute.needsUpdate = true
     particleSystem.seedAttribute.needsUpdate = true
+    particleSystem.velocityAttribute.needsUpdate = true
     particleSystem.brightnessAttribute.needsUpdate = true
     particleSystem.colorAttribute.needsUpdate = true
   }
@@ -1760,11 +2898,40 @@ void main() {
     }
 
     particleSystem.uniforms.particleTime.value = this.noteMaterialTimeSeconds
-    particleSystem.uniforms.pixelRatio.value = getDevicePixelRatio()
+    particleSystem.uniforms.pixelRatio.value = this.composerPixelRatio
+    const particleStyle = getAppState().particleSettings.style
+    particleSystem.uniforms.wispMode.value = particleStyle === 'wisp' ? 1 : particleStyle === 'ray' ? 2 : 0
+  }
+
+  private advanceOfflineWaveAnimation(animationTimeSeconds: number): void {
+    if (!Number.isFinite(animationTimeSeconds)) {
+      return
+    }
+
+    if (!Number.isFinite(this.lastOfflineWaveAnimationTimeSeconds)) {
+      this.lastOfflineWaveAnimationTimeSeconds = animationTimeSeconds
+      this.updateWaveMeshes()
+      return
+    }
+
+    const deltaSeconds = animationTimeSeconds - this.lastOfflineWaveAnimationTimeSeconds
+    this.lastOfflineWaveAnimationTimeSeconds = animationTimeSeconds
+
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
+      this.updateWaveMeshes()
+      return
+    }
+
+    this.boundaryWaveTime += deltaSeconds * 60 * CREATE_MODE_BOUNDARY_WAVE_TIME_STEP
+    this.updateWaveMeshes()
   }
 
   private resetBurstDetectionState(currentTick: number): void {
     this.lastBurstDetectionTick = currentTick
+  }
+
+  private resetOfflineBurstDetectionState(currentTick: number): void {
+    this.lastOfflineBurstDetectionTick = currentTick
   }
 
   private sampleParticleFlowNoise(positionX: number, positionY: number, ageSeconds: number, seed: number): number {
@@ -1775,8 +2942,441 @@ void main() {
   }
 
   private getBoundaryTopDownY(x: number): number {
-    const { keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
-    return keyboardY + Math.sin((x / CREATE_MODE_BOUNDARY_WAVE_LENGTH) + this.boundaryWaveTime) * CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE
+    const { keyboardY } = this.getKeyboardMetrics()
+    return keyboardY + Math.sin((x / this.getScaledWaveLength()) + this.boundaryWaveTime) * this.getScaledWaveAmplitude()
+  }
+
+  private getScaledWaveAmplitude(): number {
+    return CREATE_MODE_BOUNDARY_WAVE_AMPLITUDE * this.getLayoutScale()
+  }
+
+  private getScaledWaveLength(): number {
+    return CREATE_MODE_BOUNDARY_WAVE_LENGTH * this.getLayoutScale()
+  }
+
+  private updateFallingNoteLabel(
+    labelSprites: LabelSpriteState[],
+    group: Group,
+    index: number,
+    pitch: number,
+    rect: { h: number; w: number; x: number; y: number },
+    noteZ: number,
+    state: AppState,
+  ): void {
+    const labelText = formatMidiNoteName(pitch, state.noteLabelFormat)
+    const existing = labelSprites[index]
+    if (!state.noteLabelsOnNotes || rect.h < NOTE_LABEL_MIN_RECT_HEIGHT || rect.w < NOTE_LABEL_MIN_RECT_WIDTH) {
+      if (existing != null) {
+        existing.sprite.visible = false
+      }
+      return
+    }
+
+    const label = existing != null && existing.text === labelText && existing.color === state.noteLabelColor
+      ? existing
+      : this.createLabelSprite(labelText, state.noteLabelColor)
+    if (label == null) {
+      return
+    }
+
+    if (existing == null) {
+      group.add(label.sprite)
+      labelSprites.push(label)
+    } else if (label !== existing) {
+      group.remove(existing.sprite)
+      existing.material.dispose()
+      group.add(label.sprite)
+      labelSprites[index] = label
+    }
+
+    const labelHeight = clamp(state.noteLabelSize, 8, rect.h * 0.36)
+    const labelWidth = Math.min(rect.w * 0.78, labelHeight * this.getLabelAspectRatio(label))
+    label.sprite.position.set(
+      rect.x + (rect.w / 2),
+      this.toSceneRectY(rect.y, rect.h),
+      noteZ + NOTE_LABEL_Z_OFFSET,
+    )
+    label.sprite.scale.set(labelWidth, labelHeight, 1)
+    label.sprite.renderOrder = NOTE_LABEL_RENDER_ORDER
+    label.sprite.visible = true
+  }
+
+  private createLabelSprite(text: string, color: string, keyboard = false): LabelSpriteState | null {
+    const textureState = this.getOrCreateLabelTexture(text, color, keyboard)
+    if (textureState == null) {
+      return null
+    }
+
+    const material = new SpriteMaterial({
+      depthTest: false,
+      depthWrite: false,
+      map: textureState.texture,
+      transparent: true,
+    })
+    if (keyboard) material.toneMapped = false
+    const sprite = new Sprite(material)
+    sprite.visible = false
+    return {
+      aspectRatio: textureState.aspectRatio,
+      color,
+      material,
+      sprite,
+      text,
+    }
+  }
+
+  private getOrCreateLabelTexture(text: string, color: string, keyboard = false): LabelTextureState | null {
+    const cacheKey = `${keyboard ? 'key' : 'note'}|${text}|${color}`
+    const cached = this.labelTextures.get(cacheKey)
+    if (cached != null) {
+      return cached
+    }
+
+    if (typeof document === 'undefined') {
+      return null
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = LABEL_TEXTURE_WIDTH
+    canvas.height = LABEL_TEXTURE_HEIGHT
+    const context = canvas.getContext('2d')
+    if (context == null) {
+      return null
+    }
+
+    const font = keyboard ? '800 64px Arial, sans-serif' : '700 54px Arial, sans-serif'
+    if (keyboard) {
+      context.font = font
+      canvas.width = Math.ceil(context.measureText(text).width) + 12
+      canvas.height = 84
+    }
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = color
+    context.font = font
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    if (keyboard) {
+      context.strokeStyle = color === BLACK_KEY_LABEL_COLOR ? '#101010' : '#ffffff'
+      context.lineWidth = 5
+      context.lineJoin = 'round'
+      context.strokeText(text, canvas.width / 2, canvas.height / 2)
+    }
+    context.fillText(text, canvas.width / 2, canvas.height / 2)
+
+    const texture = new CanvasTexture(canvas)
+    const textureState = {
+      aspectRatio: keyboard ? canvas.width / canvas.height : Math.max(0.72, Math.min(1.5, (text.length * 0.62) + 0.18)),
+      texture,
+    }
+    this.labelTextures.set(cacheKey, textureState)
+    return textureState
+  }
+
+  private getLabelAspectRatio(label: LabelSpriteState): number {
+    return label.aspectRatio
+  }
+
+  private createKeyboardSurfaceTextures(
+    width: number,
+    height: number,
+  ): KeyboardSurfaceTextures | null {
+    if (
+      typeof document === 'undefined' ||
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0
+    ) {
+      return null
+    }
+
+    const requestedTextureScale = Math.max(1, Math.min(2.5, this.effectivePixelRatio))
+    const textureScale = Math.min(
+      requestedTextureScale,
+      KEYBOARD_TEXTURE_MAX_WIDTH / width,
+      KEYBOARD_TEXTURE_MAX_HEIGHT / height,
+    )
+    const textureWidth = Math.max(1, Math.round(width * textureScale))
+    const textureHeight = Math.max(1, Math.round(height * textureScale))
+    const createLayer = (): { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null => {
+      const canvas = document.createElement('canvas')
+      canvas.width = textureWidth
+      canvas.height = textureHeight
+      const context = canvas.getContext('2d')
+      if (context == null) return null
+      context.scale(textureWidth / width, textureHeight / height)
+      context.imageSmoothingEnabled = false
+      return { canvas, context }
+    }
+
+    const baseLayer = createLayer()
+    const detailsLayer = createLayer()
+    const depthLayer = createLayer()
+    if (baseLayer == null || detailsLayer == null || depthLayer == null) {
+      return null
+    }
+
+    this.drawKeyboardBaseLayer(baseLayer.context, width, height)
+    this.drawKeyboardDetailsLayer(detailsLayer.context, width, height)
+    this.drawKeyboardDepthLayer(depthLayer.context, width, height)
+
+    const base = new CanvasTexture(baseLayer.canvas)
+    const details = new CanvasTexture(detailsLayer.canvas)
+    const depth = new CanvasTexture(depthLayer.canvas)
+    for (const texture of [base, details, depth]) {
+      texture.generateMipmaps = false
+      texture.minFilter = LinearFilter
+      texture.magFilter = LinearFilter
+      texture.needsUpdate = true
+    }
+    this.staticResources.push(base, details, depth)
+    return { base, depth, details }
+  }
+
+  private drawKeyboardBaseLayer(
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
+    context.clearRect(0, 0, width, height)
+    context.fillStyle = '#090a0c'
+    context.fillRect(0, 0, width, height)
+
+    const whiteKeyHeight = Math.max(1, height - WHITE_KEY_BOTTOM_INSET)
+    const railHeight = Math.max(3, Math.round(height * KEYBOARD_RAIL_HEIGHT_RATIO))
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (isBlackKey(pitch)) continue
+      const bounds = getWhiteKeyBounds(pitch, width)
+      const hasSeparator = getWhiteKeyIndex(pitch) < PIANO_WHITE_KEY_COUNT - 1
+      const keyWidth = hasSeparator
+        ? Math.max(1, bounds.width - WHITE_KEY_SEPARATOR_WIDTH)
+        : bounds.width
+      const faceGradient = context.createLinearGradient(0, 0, 0, whiteKeyHeight)
+      faceGradient.addColorStop(0, KEYBOARD_WHITE_TOP)
+      faceGradient.addColorStop(0.18, KEYBOARD_WHITE_MIDDLE)
+      faceGradient.addColorStop(0.82, '#f8f7f3')
+      faceGradient.addColorStop(1, KEYBOARD_WHITE_BOTTOM)
+      context.fillStyle = faceGradient
+      context.fillRect(bounds.x, 0, keyWidth, whiteKeyHeight)
+
+      const crownGradient = context.createLinearGradient(bounds.x, 0, bounds.x + keyWidth, 0)
+      crownGradient.addColorStop(0, 'rgba(0, 0, 0, 0.10)')
+      crownGradient.addColorStop(0.08, 'rgba(255, 255, 255, 0.04)')
+      crownGradient.addColorStop(0.72, 'rgba(255, 255, 255, 0.12)')
+      crownGradient.addColorStop(0.94, 'rgba(0, 0, 0, 0.03)')
+      crownGradient.addColorStop(1, 'rgba(0, 0, 0, 0.13)')
+      context.fillStyle = crownGradient
+      context.fillRect(bounds.x, railHeight, keyWidth, Math.max(1, whiteKeyHeight - railHeight))
+    }
+  }
+
+  private drawKeyboardDetailsLayer(
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
+    context.clearRect(0, 0, width, height)
+    const whiteKeyHeight = Math.max(1, height - WHITE_KEY_BOTTOM_INSET)
+    const whiteFrontHeight = Math.max(4, Math.round(height * WHITE_KEY_FRONT_FACE_RATIO))
+    const railHeight = Math.max(3, Math.round(height * KEYBOARD_RAIL_HEIGHT_RATIO))
+
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (isBlackKey(pitch)) continue
+      const bounds = getWhiteKeyBounds(pitch, width)
+      const hasSeparator = getWhiteKeyIndex(pitch) < PIANO_WHITE_KEY_COUNT - 1
+      const keyWidth = hasSeparator
+        ? Math.max(1, bounds.width - WHITE_KEY_SEPARATOR_WIDTH)
+        : bounds.width
+
+      context.fillStyle = KEYBOARD_WHITE_EDGE_LIGHT
+      context.fillRect(bounds.x + 1, railHeight, Math.max(1, keyWidth - 2), 1)
+      context.fillStyle = 'rgba(0, 0, 0, 0.09)'
+      context.fillRect(bounds.x, railHeight + 1, 1, Math.max(1, whiteKeyHeight - railHeight - whiteFrontHeight - 1))
+      context.fillStyle = 'rgba(255, 255, 255, 0.38)'
+      context.fillRect(
+        bounds.x + Math.max(1, keyWidth - 2),
+        railHeight + 1,
+        1,
+        Math.max(1, whiteKeyHeight - railHeight - whiteFrontHeight - 1),
+      )
+
+      const frontGradient = context.createLinearGradient(
+        0,
+        whiteKeyHeight - whiteFrontHeight,
+        0,
+        whiteKeyHeight,
+      )
+      frontGradient.addColorStop(0, KEYBOARD_WHITE_FRONT_TOP)
+      frontGradient.addColorStop(0.35, '#eceae4')
+      frontGradient.addColorStop(1, KEYBOARD_WHITE_FRONT_BOTTOM)
+      context.fillStyle = frontGradient
+      context.fillRect(
+        bounds.x,
+        whiteKeyHeight - whiteFrontHeight,
+        keyWidth,
+        whiteFrontHeight,
+      )
+      context.fillStyle = 'rgba(255, 255, 255, 0.72)'
+      context.fillRect(bounds.x, whiteKeyHeight - whiteFrontHeight, keyWidth, 1)
+      context.fillStyle = 'rgba(25, 26, 27, 0.24)'
+      context.fillRect(bounds.x, whiteKeyHeight - 2, keyWidth, 2)
+
+      if (hasSeparator) {
+        context.fillStyle = KEYBOARD_WHITE_SEPARATOR
+        context.fillRect(bounds.x + keyWidth, railHeight, WHITE_KEY_SEPARATOR_WIDTH, whiteKeyHeight - railHeight)
+        context.fillStyle = 'rgba(255, 255, 255, 0.42)'
+        context.fillRect(bounds.x + Math.max(0, keyWidth - 1), railHeight, 1, whiteKeyHeight - railHeight)
+      }
+    }
+
+    const railGradient = context.createLinearGradient(0, 0, 0, railHeight)
+    railGradient.addColorStop(0, '#020304')
+    railGradient.addColorStop(0.55, '#16191d')
+    railGradient.addColorStop(1, '#050607')
+    context.fillStyle = railGradient
+    context.fillRect(0, 0, width, railHeight)
+    context.fillStyle = 'rgba(255, 255, 255, 0.16)'
+    context.fillRect(0, railHeight, width, 1)
+
+    const blackKeyWidth = Math.max(1, getBlackKeyWidth(width))
+    const blackKeyHeight = Math.max(1, Math.round(height * CREATE_MODE_BLACK_KEY_HEIGHT_RATIO))
+    const blackFaceHeight = Math.max(1, blackKeyHeight - BLACK_KEY_BOTTOM_INSET)
+
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (!isBlackKey(pitch)) continue
+      const x = pitchToKeyX(pitch, width)
+      context.fillStyle = 'rgba(0, 0, 0, 0.58)'
+      this.traceRoundedKeyFace(context, x - 2, 4, blackKeyWidth + 4, blackFaceHeight + 5, 2)
+      context.fill()
+      context.fillStyle = 'rgba(0, 0, 0, 0.34)'
+      context.fillRect(x - 3, blackFaceHeight + 2, blackKeyWidth + 6, 3)
+    }
+
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (!isBlackKey(pitch)) continue
+      const x = pitchToKeyX(pitch, width)
+      const faceGradient = context.createLinearGradient(0, 0, 0, blackFaceHeight)
+      faceGradient.addColorStop(0, KEYBOARD_BLACK_TOP)
+      faceGradient.addColorStop(0.05, '#050607')
+      faceGradient.addColorStop(0.36, KEYBOARD_BLACK_MIDDLE)
+      faceGradient.addColorStop(0.82, KEYBOARD_BLACK_BOTTOM)
+      faceGradient.addColorStop(1, '#010102')
+      context.fillStyle = faceGradient
+      this.traceRoundedKeyFace(context, x, 0, blackKeyWidth, blackFaceHeight, 2)
+      context.fill()
+    }
+  }
+
+  private drawKeyboardDepthLayer(
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
+    context.clearRect(0, 0, width, height)
+    const blackKeyWidth = Math.max(1, getBlackKeyWidth(width))
+    const blackKeyHeight = Math.max(1, Math.round(height * CREATE_MODE_BLACK_KEY_HEIGHT_RATIO))
+    const blackFaceHeight = Math.max(1, blackKeyHeight - BLACK_KEY_BOTTOM_INSET)
+    const frontHeight = Math.max(4, Math.round(blackFaceHeight * BLACK_KEY_FRONT_FACE_RATIO))
+    const sideWidth = Math.max(1, Math.round(blackKeyWidth * 0.1))
+
+    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
+      if (!isBlackKey(pitch)) continue
+      const x = pitchToKeyX(pitch, width)
+
+      const frontY = blackFaceHeight - frontHeight
+      context.fillStyle = KEYBOARD_BLACK_SIDE_LIGHT
+      context.beginPath()
+      context.moveTo(x, 1)
+      context.lineTo(x + sideWidth, 3)
+      context.lineTo(x + sideWidth, frontY)
+      context.lineTo(x, frontY + 2)
+      context.closePath()
+      context.fill()
+
+      context.fillStyle = KEYBOARD_BLACK_SIDE_DARK
+      context.beginPath()
+      context.moveTo(x + blackKeyWidth, 1)
+      context.lineTo(x + blackKeyWidth - sideWidth, 3)
+      context.lineTo(x + blackKeyWidth - sideWidth, frontY)
+      context.lineTo(x + blackKeyWidth, frontY + 2)
+      context.closePath()
+      context.fill()
+
+      context.fillStyle = 'rgba(255, 255, 255, 0.15)'
+      context.fillRect(x + sideWidth, 1, Math.max(1, blackKeyWidth - (sideWidth * 2)), 1)
+
+      const frontGradient = context.createLinearGradient(0, frontY, 0, blackFaceHeight)
+      frontGradient.addColorStop(0, KEYBOARD_BLACK_FRONT_TOP)
+      frontGradient.addColorStop(0.12, KEYBOARD_BLACK_EDGE_LIGHT)
+      frontGradient.addColorStop(0.34, KEYBOARD_BLACK_FRONT_MIDDLE)
+      frontGradient.addColorStop(1, KEYBOARD_BLACK_FRONT_BOTTOM)
+      context.fillStyle = frontGradient
+      context.beginPath()
+      context.moveTo(x + sideWidth, frontY)
+      context.lineTo(x + blackKeyWidth - sideWidth, frontY)
+      context.lineTo(x + blackKeyWidth - 1, blackFaceHeight - 2)
+      context.quadraticCurveTo(x + blackKeyWidth - 1, blackFaceHeight, x + blackKeyWidth - 3, blackFaceHeight)
+      context.lineTo(x + 3, blackFaceHeight)
+      context.quadraticCurveTo(x + 1, blackFaceHeight, x + 1, blackFaceHeight - 2)
+      context.closePath()
+      context.fill()
+      context.fillStyle = 'rgba(124, 130, 139, 0.22)'
+      context.fillRect(x + sideWidth, frontY, Math.max(1, blackKeyWidth - (sideWidth * 2)), 1)
+      context.fillStyle = 'rgba(0, 0, 0, 0.72)'
+      context.fillRect(x + 2, blackFaceHeight - 1, Math.max(1, blackKeyWidth - 4), 1)
+    }
+  }
+
+  private traceRoundedKeyFace(
+    context: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number,
+  ): void {
+    const resolvedRadius = Math.max(0, Math.min(radius, width / 2, height / 2))
+    context.beginPath()
+    context.moveTo(x, y)
+    context.lineTo(x + width, y)
+    context.lineTo(x + width, y + height - resolvedRadius)
+    context.quadraticCurveTo(x + width, y + height, x + width - resolvedRadius, y + height)
+    context.lineTo(x + resolvedRadius, y + height)
+    context.quadraticCurveTo(x, y + height, x, y + height - resolvedRadius)
+    context.closePath()
+  }
+
+  private createStaticTextureRectMesh(
+    group: Group,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    texture: CanvasTexture,
+    opacity: number,
+    z: number,
+    tracksKeyboardOpacity = false,
+  ): Mesh<PlaneGeometry, MeshBasicMaterial> {
+    const material = new MeshBasicMaterial({
+      color: 0xffffff,
+      depthTest: false,
+      depthWrite: false,
+      map: texture,
+      opacity,
+      transparent: true,
+    })
+    material.toneMapped = false
+    const mesh = new Mesh(this.requireRectGeometry(), material)
+    mesh.position.set(x + (width / 2), this.toSceneRectY(y, height), z)
+    mesh.scale.set(width, height, 1)
+    mesh.renderOrder = Math.round(z * 10)
+    group.add(mesh)
+
+    this.staticResources.push(material)
+    if (tracksKeyboardOpacity) {
+      this.keyboardMaterialStates.push({ baseOpacity: opacity, material })
+    }
+    return mesh
   }
 
   private createStaticRectMesh(
@@ -1824,7 +3424,7 @@ void main() {
   ): void {
     const uniforms: ImpactReflectionUniforms = {
       reflectionColor: {
-        value: new Color(resolveCreateModeNoteColor(pitch, getAppState().createNoteColors)),
+        value: new Color(this.resolveCreateModeColor(pitch, getAppState().createNoteColors)),
       },
       reflectionStrength: {
         value: 0,
@@ -1872,9 +3472,67 @@ void main() {
       mesh,
       peakStrength: 0,
       pitch,
+      velocity: 80,
       startTimeSeconds: Number.NaN,
       uniforms,
     })
+  }
+
+  private createKeyboardSaberMesh(
+    group: Group,
+    pitch: number,
+    x: number,
+    width: number,
+    keyboardY: number,
+  ): void {
+    const beamHeight = Math.min(
+      keyboardY,
+      Math.max(KEYBOARD_SABER_MIN_HEIGHT * this.getLayoutScale(), this.viewportHeight * KEYBOARD_SABER_HEIGHT_RATIO),
+    )
+    const beamWidth = Math.max(2, width * 0.82)
+    const uniforms: KeyboardSaberUniforms = {
+      beamColor: { value: new Color(this.resolveCreateModeColor(pitch, getAppState().createNoteColors)) },
+      beamStrength: { value: 0 },
+    }
+    const material = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: `
+        uniform vec3 beamColor;
+        uniform float beamStrength;
+        varying vec2 vUv;
+
+        void main() {
+          float distanceFromCenter = abs(vUv.x - 0.5) * 2.0;
+          float core = 1.0 - smoothstep(0.0, 0.24, distanceFromCenter);
+          float aura = 1.0 - smoothstep(0.0, 1.0, distanceFromCenter);
+          float verticalFade = pow(clamp(1.0 - vUv.y, 0.0, 1.0), 1.65);
+          float alpha = beamStrength * verticalFade * ((aura * 0.34) + (core * 0.66));
+          gl_FragColor = vec4(mix(beamColor, vec3(1.0), core * 0.32), alpha);
+        }
+      `,
+      transparent: true,
+      uniforms,
+      vertexShader: `
+        varying vec2 vUv;
+
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+    })
+    const mesh = new Mesh(this.requireRectGeometry(), material)
+    mesh.position.set(x + (width / 2), this.toSceneRectY(keyboardY - beamHeight, beamHeight), KEYBOARD_SABER_Z)
+    mesh.scale.set(beamWidth, beamHeight, 1)
+    mesh.renderOrder = Math.round(KEYBOARD_SABER_Z * 10)
+    mesh.layers.enable(BLOOM_LAYER)
+    mesh.visible = false
+    group.add(mesh)
+
+    this.staticResources.push(material)
+    this.keyboardSaberStates.set(pitch, { material, mesh, pitch, uniforms })
   }
 
   private clearImpactReflections(): void {
@@ -1895,7 +3553,7 @@ void main() {
     const clampedX = clamp(x, 0, Math.max(0, this.viewportWidth - 1))
     const pitch = getKeyAtScreenX(clampedX, this.viewportWidth) ?? PIANO_MIN_PITCH
     const wavePalette = createBoundaryWavePalette(
-      resolveCreateModeNoteColor(pitch, state.createNoteColors),
+      this.resolveCreateModeColor(pitch, state.createNoteColors),
     )
 
     switch (definition.role) {
@@ -1916,7 +3574,7 @@ void main() {
       depthWrite: false,
       emissive: notePalette.haloEmissiveColor,
       emissiveIntensity: notePalette.haloEmissiveStrength,
-      opacity: 1,
+      opacity: getAppState().noteOpacity / 100,
       transparent: true,
     })
     const roundedNoteUniforms: RoundedNoteUniforms = {
@@ -1930,7 +3588,8 @@ void main() {
       noteSwirlRecessColor: { value: new Color(notePalette.swirlRecessColor) },
       noteMaterialTime: this.sharedNoteMaterialTimeUniform,
       noteTravelPhaseOffset: { value: 0 },
-      noteDistanceFromBoundary: { value: 0 },
+      noteStyleMode: { value: noteStyleMode(getAppState().noteStyle) },
+      noteGlowStrength: { value: getAppState().noteGlow / 100 },
       roundedRectRadius: { value: getPillNoteCornerRadius(1, 1) },
       roundedRectSize: { value: new Vector2(1, 1) },
     }
@@ -1952,7 +3611,8 @@ void main() {
       shader.uniforms.noteSwirlRecessColor = roundedNoteUniforms.noteSwirlRecessColor
       shader.uniforms.noteMaterialTime = roundedNoteUniforms.noteMaterialTime
       shader.uniforms.noteTravelPhaseOffset = roundedNoteUniforms.noteTravelPhaseOffset
-      shader.uniforms.noteDistanceFromBoundary = roundedNoteUniforms.noteDistanceFromBoundary
+      shader.uniforms.noteStyleMode = roundedNoteUniforms.noteStyleMode
+      shader.uniforms.noteGlowStrength = roundedNoteUniforms.noteGlowStrength
       shader.uniforms.roundedRectRadius = roundedNoteUniforms.roundedRectRadius
       shader.uniforms.roundedRectSize = roundedNoteUniforms.roundedRectSize
 
@@ -1982,7 +3642,8 @@ uniform float noteCoreEmissiveStrength;
 uniform float noteHaloEmissiveStrength;
 uniform float noteMaterialTime;
 uniform float noteTravelPhaseOffset;
-uniform float noteDistanceFromBoundary;
+uniform float noteStyleMode;
+uniform float noteGlowStrength;
 uniform float roundedRectRadius;
 uniform vec2 roundedRectSize;
 varying vec2 vRoundedRectUv;
@@ -2067,19 +3728,60 @@ float noteShimmerField = sin((vRoundedRectUv.x * 3.4) + (noteMaterialTime * 0.52
 float noteShimmer = 1.0 + (noteShimmerField * 0.05);
 float noteBreathing = 1.0 + (sin(noteMaterialTime * 0.4) * 0.04);
 float noteAnimatedHighlight = noteHighlightMask * noteShimmer;
-float noteDepthFade = smoothstep(${NOTE_DEPTH_FADE_START_DISTANCE.toFixed(1)}, ${NOTE_DEPTH_FADE_END_DISTANCE.toFixed(1)}, noteDistanceFromBoundary);
-noteDepthFade *= noteDepthFade;
-float noteDepthBrightnessScale = mix(1.0, ${NOTE_DEPTH_MIN_BRIGHTNESS.toFixed(2)}, noteDepthFade);
-float noteDepthDesaturation = noteDepthFade * ${NOTE_DEPTH_MAX_DESATURATION.toFixed(2)};
-
 vec3 noteFaceColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix);
 noteFaceColor = mix(noteFaceColor, noteHaloDiffuseColor, noteAnimatedHighlight * 0.08);
 noteFaceColor = mix(noteFaceColor, noteSwirlBrightColor, noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY.toFixed(3)});
 noteFaceColor = mix(noteFaceColor, noteSwirlRecessColor, noteSwirlRecessField * ${NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY.toFixed(3)});
 float noteFaceLuminance = dot(noteFaceColor, vec3(0.2126, 0.7152, 0.0722));
-noteFaceColor = mix(noteFaceColor, vec3(noteFaceLuminance), noteDepthDesaturation);
-noteFaceColor *= noteDepthBrightnessScale;
+noteFaceColor = mix(noteFaceColor, vec3(noteFaceLuminance), ${NOTE_BASE_DESATURATION.toFixed(2)});
+noteFaceColor *= ${NOTE_BASE_BRIGHTNESS_SCALE.toFixed(2)};
+float noteSaberCore = 1.0 - smoothstep(0.02, 0.24, abs(vRoundedRectUv.x - 0.5));
+float noteOutlineMask = smoothstep(0.32, 0.88, noteEdgeMix);
+float noteCrystalRidgeA = 1.0 - smoothstep(
+  0.015,
+  0.065,
+  abs((vRoundedRectUv.x * 0.82) + vRoundedRectUv.y - 0.88)
+);
+float noteCrystalRidgeB = 1.0 - smoothstep(
+  0.015,
+  0.065,
+  abs(((1.0 - vRoundedRectUv.x) * 0.82) + vRoundedRectUv.y - 0.88)
+);
+float noteCrystalCenterFacet = 1.0 - smoothstep(0.0, 0.36, abs(vRoundedRectUv.x - 0.5));
+float noteCrystalFacetLight = clamp(
+  (noteCrystalRidgeA * 0.72)
+    + (noteCrystalRidgeB * 0.58)
+    + (noteCrystalCenterFacet * (0.18 + (vRoundedRectUv.y * 0.22))),
+  0.0,
+  1.0
+);
+float noteGemBevel = smoothstep(0.08, 0.84, noteEdgeMix);
+float noteGemCenterRidge = 1.0 - smoothstep(0.015, 0.30, abs(vRoundedRectUv.x - 0.5));
+float noteGemLeftFacet = 1.0 - smoothstep(0.08, 0.48, vRoundedRectUv.x);
+float noteGemRightFacet = smoothstep(0.52, 0.92, vRoundedRectUv.x);
+float noteGemDirectionalLight = clamp(
+  (noteGemCenterRidge * 0.44)
+    + (noteGemLeftFacet * 0.24)
+    - (noteGemRightFacet * 0.18),
+  -0.18,
+  0.68
+);
+vec3 noteFlatColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix * 0.12);
+vec3 noteSaberColor = mix(noteCoreDiffuseColor, vec3(1.0), noteSaberCore * 0.78);
+vec3 noteOutlineColor = mix(noteCoreDiffuseColor * 0.24, noteHaloDiffuseColor, noteOutlineMask);
+vec3 noteCrystalColor = mix(noteCoreDiffuseColor * 0.46, noteHaloDiffuseColor, noteEdgeMix * 0.58);
+noteCrystalColor = mix(noteCrystalColor, noteSwirlBrightColor, noteCrystalFacetLight * 0.68);
+vec3 noteGemColor = mix(noteCoreDiffuseColor * 0.42, noteHaloDiffuseColor, noteGemBevel * 0.54);
+noteGemColor *= 1.0 + noteGemDirectionalLight;
+noteGemColor = mix(noteGemColor, noteSwirlBrightColor, noteGemCenterRidge * 0.20);
+noteFaceColor = noteStyleMode < 0.5 ? noteFlatColor : noteFaceColor;
+noteFaceColor = noteStyleMode > 1.5 && noteStyleMode < 2.5 ? noteSaberColor : noteFaceColor;
+noteFaceColor = noteStyleMode > 2.5 && noteStyleMode < 3.5 ? noteOutlineColor : noteFaceColor;
+noteFaceColor = noteStyleMode > 3.5 && noteStyleMode < 4.5 ? noteCrystalColor : noteFaceColor;
+noteFaceColor = noteStyleMode > 4.5 ? noteGemColor : noteFaceColor;
 diffuseColor.rgb = noteFaceColor;
+diffuseColor.a *= noteStyleMode > 2.5 && noteStyleMode < 3.5 ? mix(0.08, 1.0, noteOutlineMask) : 1.0;
+diffuseColor.a *= noteStyleMode > 3.5 && noteStyleMode < 4.5 ? 0.88 : 1.0;
 
 vec3 roundedNoteEmissiveRadiance = mix(
   noteCoreEmissiveColor * noteCoreEmissiveStrength,
@@ -2096,7 +3798,31 @@ roundedNoteEmissiveRadiance = max(
     * (noteSwirlRecessField * ${NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY.toFixed(3)} * noteHaloEmissiveStrength)
   )
 );
-roundedNoteEmissiveRadiance *= noteDepthBrightnessScale;
+roundedNoteEmissiveRadiance *= ${NOTE_BASE_BRIGHTNESS_SCALE.toFixed(2)};
+roundedNoteEmissiveRadiance = noteStyleMode < 0.5
+  ? noteCoreEmissiveColor * noteCoreEmissiveStrength * 0.28
+  : roundedNoteEmissiveRadiance;
+roundedNoteEmissiveRadiance = noteStyleMode > 1.5 && noteStyleMode < 2.5
+  ? roundedNoteEmissiveRadiance + (vec3(1.0) * noteSaberCore * 1.35)
+  : roundedNoteEmissiveRadiance;
+roundedNoteEmissiveRadiance = noteStyleMode > 2.5 && noteStyleMode < 3.5
+  ? noteHaloEmissiveColor * noteHaloEmissiveStrength * (0.12 + (noteOutlineMask * 1.25))
+  : roundedNoteEmissiveRadiance;
+roundedNoteEmissiveRadiance = noteStyleMode > 3.5 && noteStyleMode < 4.5
+  ? (
+    noteCoreEmissiveColor * noteCoreEmissiveStrength * 0.34
+    + noteHaloEmissiveColor * noteHaloEmissiveStrength * (noteEdgeMix * 0.62)
+    + noteSwirlBrightColor * noteCrystalFacetLight * 0.92
+  )
+  : roundedNoteEmissiveRadiance;
+roundedNoteEmissiveRadiance = noteStyleMode > 4.5
+  ? (
+    noteCoreEmissiveColor * noteCoreEmissiveStrength * 0.30
+    + noteHaloEmissiveColor * noteHaloEmissiveStrength * (noteGemBevel * 0.70)
+    + noteSwirlBrightColor * noteGemCenterRidge * 0.38
+  )
+  : roundedNoteEmissiveRadiance;
+roundedNoteEmissiveRadiance *= noteGlowStrength;
 roundedNoteEmissiveRadiance *= roundedRectMask;`,
         )
         .replace(
@@ -2104,7 +3830,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
           'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v8'
+    material.customProgramCacheKey = () => 'rounded-note-pill-v12'
     return material
   }
 
@@ -2114,8 +3840,25 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       return existing
     }
 
+    const mesh = this.createNoteMesh(group)
+    this.noteMeshes.push(mesh)
+    return mesh
+  }
+
+  private getOrCreateLiveNoteMesh(group: Group, index: number): Mesh<PlaneGeometry, GlowMaterial> {
+    const existing = this.liveNoteMeshes[index]
+    if (existing != null) {
+      return existing
+    }
+
+    const mesh = this.createNoteMesh(group)
+    this.liveNoteMeshes.push(mesh)
+    return mesh
+  }
+
+  private createNoteMesh(group: Group): Mesh<PlaneGeometry, GlowMaterial> {
     const material = this.createNoteMaterial(
-      resolveCreateModeNoteColor(PIANO_MIN_PITCH, getAppState().createNoteColors),
+      this.resolveCreateModeColor(PIANO_MIN_PITCH, getAppState().createNoteColors),
     )
     const mesh = new Mesh(this.requireRectGeometry(), material)
     mesh.visible = false
@@ -2132,7 +3875,6 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       roundedNoteUniforms.roundedRectRadius.value = getPillNoteCornerRadius(noteWidth, noteHeight)
     }
     group.add(mesh)
-    this.noteMeshes.push(mesh)
     return mesh
   }
 
@@ -2168,9 +3910,63 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     roundedNoteUniforms.noteSwirlRecessColor.value.setHex(notePalette.swirlRecessColor)
   }
 
-  private syncNoteMaterialAnimationTime(frameTimeMs?: number): void {
-    this.noteMaterialTimeSeconds = getAnimationTimeSeconds(frameTimeMs)
+  private applyNoteAppearance(state: AppState): void {
+    for (const noteMesh of [...this.noteMeshes, ...this.liveNoteMeshes]) {
+      const uniforms = noteMesh.material.userData.roundedNoteUniforms as RoundedNoteUniforms | undefined
+      if (uniforms == null) {
+        continue
+      }
+
+      uniforms.noteStyleMode.value = noteStyleMode(state.noteStyle)
+      uniforms.noteGlowStrength.value = state.noteGlow / 100
+      noteMesh.material.opacity = state.noteOpacity / 100
+      noteMesh.material.needsUpdate = true
+    }
+
+    this.notesDirty = true
+  }
+
+  private syncNoteMaterialAnimationTime(frameTimeMs?: number, animationTimeSeconds?: number): void {
+    this.noteMaterialTimeSeconds = Number.isFinite(animationTimeSeconds)
+      ? (animationTimeSeconds as number)
+      : getAnimationTimeSeconds(frameTimeMs)
     this.sharedNoteMaterialTimeUniform.value = this.noteMaterialTimeSeconds
+  }
+
+  private attachAnimationLoop(): void {
+    if (this.renderer == null || this.animationLoopAttached) {
+      return
+    }
+
+    this.renderer.setAnimationLoop(this.handleAnimationFrame)
+    this.animationLoopAttached = true
+  }
+
+  private detachAnimationLoop(): void {
+    if (this.renderer == null || !this.animationLoopAttached) {
+      return
+    }
+
+    this.renderer.setAnimationLoop(null)
+    this.animationLoopAttached = false
+  }
+
+  private resetSimulatedAnimationState(animationTimeSeconds: number): void {
+    for (const state of this.keyHighlightStates.values()) {
+      state.currentStrength = 0
+      state.fromStrength = 0
+      state.targetStrength = 0
+      state.transitionDurationSeconds = 0
+      state.transitionStartSeconds = animationTimeSeconds
+      state.material.opacity = 0
+      state.material.needsUpdate = true
+    }
+
+    for (const impactReflection of this.impactReflectionStates.values()) {
+      impactReflection.currentStrength = 0
+      impactReflection.startTimeSeconds = animationTimeSeconds
+      this.applyImpactReflectionState(impactReflection)
+    }
   }
 
   private applyKeyboardOpacity(): void {
@@ -2178,12 +3974,18 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       material.opacity = clamp(baseOpacity * this.keyboardOpacity, 0, 1)
       material.needsUpdate = true
     }
+
+    for (const label of this.keyboardLabelSprites) {
+      label.material.opacity = this.keyboardOpacity
+      label.material.needsUpdate = true
+    }
   }
 
   private applyActiveKeyHighlights(currentTimeSeconds = this.noteMaterialTimeSeconds): boolean {
     const activePitches = new Set([
       ...this.explicitActiveKeyPitches,
       ...this.playbackActiveKeyPitches,
+      ...this.liveSourceActiveKeyPitches,
     ])
     let hasAnimatingHighlights = false
 
@@ -2210,10 +4012,24 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
         state.fromStrength = state.targetStrength
       }
 
-      state.material.color.setHex(resolveCreateModeNoteColor(pitch, getAppState().createNoteColors))
+      state.material.color.setHex(this.resolveCreateModeColor(pitch, getAppState().createNoteColors))
       state.material.opacity = clamp(state.baseOpacity * state.currentStrength * this.keyboardOpacity, 0, 1)
       state.material.needsUpdate = true
+
+      const keyboardSaber = this.keyboardSaberStates.get(pitch)
+      if (keyboardSaber != null) {
+        keyboardSaber.uniforms.beamColor.value.setHex(
+          this.resolveCreateModeColor(pitch, getAppState().createNoteColors),
+        )
+        keyboardSaber.uniforms.beamStrength.value = getAppState().keyboardSaber
+          ? clamp(nextStrength * this.keyboardOpacity, 0, 1)
+          : 0
+        keyboardSaber.mesh.visible = keyboardSaber.uniforms.beamStrength.value > 0.001
+        keyboardSaber.material.needsUpdate = true
+      }
     }
+
+    this.updateReactiveLighting()
 
     return hasAnimatingHighlights
   }
@@ -2287,10 +4103,13 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     for (const resource of this.staticResources) {
       resource.dispose()
     }
+    disposeLabelSprites(this.keyboardLabelSprites)
 
     this.staticResources = []
+    this.keyboardLabelSprites = []
     this.keyboardMaterialStates = []
     this.keyHighlightStates.clear()
+    this.keyboardSaberStates.clear()
     this.impactReflectionStates.clear()
   }
 
@@ -2315,9 +4134,20 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       clearGroup(this.noteGroup)
     }
 
-    for (const noteMesh of this.noteMeshes) {
+    for (const noteMesh of [...this.noteMeshes, ...this.liveNoteMeshes]) {
       noteMesh.material.dispose()
     }
+    disposeLabelSprites(this.noteLabelSprites)
+    disposeLabelSprites(this.liveNoteLabelSprites)
+    this.noteLabelSprites = []
+    this.liveNoteLabelSprites = []
+  }
+
+  private disposeLabelTextures(): void {
+    for (const { texture } of this.labelTextures.values()) {
+      texture.dispose()
+    }
+    this.labelTextures.clear()
   }
 
   private initPostprocessing(): void {
@@ -2327,7 +4157,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
 
     this.bloomComposer = new EffectComposer(this.renderer)
     this.bloomComposer.renderToScreen = false
-    this.bloomComposer.setPixelRatio(getDevicePixelRatio())
+    this.bloomComposer.setPixelRatio(this.composerPixelRatio)
     this.bloomComposer.setSize(this.viewportWidth, this.viewportHeight)
 
     this.bloomRenderPass = new RenderPass(this.scene, this.camera)
@@ -2341,7 +4171,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     this.bloomComposer.addPass(this.bloomPass)
 
     this.finalComposer = new EffectComposer(this.renderer)
-    this.finalComposer.setPixelRatio(getDevicePixelRatio())
+    this.finalComposer.setPixelRatio(this.composerPixelRatio)
     this.finalComposer.setSize(this.viewportWidth, this.viewportHeight)
 
     this.finalRenderPass = new RenderPass(this.scene, this.camera)
@@ -2420,22 +4250,26 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
 
     this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
     this.bloomCompositePass.uniforms.bloomClipY.value = 1 - (this.getBloomClipTopDownY() / this.viewportHeight)
-    this.bloomCompositePass.uniforms.bloomClipFeather.value = BLOOM_CLIP_FEATHER_PIXELS / this.viewportHeight
-    this.bloomCompositePass.uniforms.bloomDebugLineHalfThickness.value = 0.5 / this.viewportHeight
+    this.bloomCompositePass.uniforms.bloomClipFeather.value = (
+      BLOOM_CLIP_FEATHER_PIXELS * this.getLayoutScale()
+    ) / this.viewportHeight
+    this.bloomCompositePass.uniforms.bloomDebugLineHalfThickness.value = (
+      0.5 * this.getLayoutScale()
+    ) / this.viewportHeight
   }
 
   private getBloomClipTopDownY(): number {
-    const { keyboardY } = getKeyboardLayoutMetrics(this.viewportHeight)
+    const { keyboardY } = this.getKeyboardMetrics()
     const widestWaveLineWidth = this.waveLayers.reduce(
-      (widest, layer) => Math.max(widest, layer.definition.lineWidth),
-      CREATE_MODE_BOUNDARY_CORE_THICKNESS,
+      (widest, layer) => Math.max(widest, layer.definition.lineWidth * this.getLayoutScale()),
+      CREATE_MODE_BOUNDARY_CORE_THICKNESS * this.getLayoutScale(),
     )
 
     // Keep the full wave thickness above the cutoff, plus a small safety buffer,
     // so the keyboard region is the first area that actually gets clipped.
     return Math.min(
       this.viewportHeight,
-      keyboardY + (widestWaveLineWidth / 2) + BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS,
+      keyboardY + (widestWaveLineWidth / 2) + (BLOOM_CLIP_DEBUG_LINE_BUFFER_PIXELS * this.getLayoutScale()),
     )
   }
 
@@ -2557,10 +4391,34 @@ function hideObjects(objects: Array<{ visible: boolean }>, startIndex = 0): void
   }
 }
 
-function createWaveSamplePoints(width: number): number[] {
-  const points: number[] = [0]
+function hideLabelSprites(labels: LabelSpriteState[], startIndex = 0): void {
+  for (let index = startIndex; index < labels.length; index += 1) {
+    labels[index].sprite.visible = false
+  }
+}
 
-  for (let x = CREATE_MODE_BOUNDARY_SEGMENT_WIDTH; x <= width; x += CREATE_MODE_BOUNDARY_SEGMENT_WIDTH) {
+function disposeLabelSprites(labels: LabelSpriteState[]): void {
+  for (const label of labels) {
+    label.material.dispose()
+  }
+}
+
+function formatMidiNoteName(pitch: number, format: AppState['noteLabelFormat']): string {
+  const pitchClassNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+  const normalizedPitch = Math.round(pitch)
+  const name = pitchClassNames[((normalizedPitch % 12) + 12) % 12]
+  if (format === 'name') {
+    return name
+  }
+
+  return `${name}${Math.floor(normalizedPitch / 12) - 1}`
+}
+
+function createWaveSamplePoints(width: number, layoutScale = 1): number[] {
+  const points: number[] = [0]
+  const segmentWidth = Math.max(1, CREATE_MODE_BOUNDARY_SEGMENT_WIDTH * layoutScale)
+
+  for (let x = segmentWidth; x <= width; x += segmentWidth) {
     points.push(x)
   }
 
@@ -2649,7 +4507,7 @@ function mixUint32(value: number): number {
   return (mixed ^ (mixed >>> 14)) >>> 0
 }
 
-function copyParticleScalar(values: Float32Array, sourceIndex: number, targetIndex: number): void {
+function copyParticleScalar(values: Float32Array | Int8Array | Uint8Array, sourceIndex: number, targetIndex: number): void {
   values[targetIndex] = values[sourceIndex]
 }
 
@@ -2679,7 +4537,12 @@ function createBoundaryWavePalette(color: number): BoundaryWavePalette {
   }
 }
 
-export function createNoteMaterialPalette(color: number): NoteMaterialPalette {
+// TODO: Apply the same linear-luminance energy calibration to key highlights,
+// particles, and boundary waves when those color-only render paths are revisited.
+export function createNoteMaterialPalette(
+  color: number,
+  calibration: Readonly<NoteBloomCalibration> = DEFAULT_NOTE_BLOOM_CALIBRATION,
+): NoteMaterialPalette {
   const baseHsl = colorToHsl(color)
   const isAchromatic = baseHsl.saturation < NOTE_ACHROMATIC_SATURATION_THRESHOLD
   const paletteHue = isAchromatic ? NOTE_ACHROMATIC_FALLBACK_HUE : baseHsl.hue
@@ -2778,18 +4641,18 @@ export function createNoteMaterialPalette(color: number): NoteMaterialPalette {
     coreEmissiveStrength: resolveEmissiveStrength(
       coreDiffuseColor,
       coreEmissiveColor,
-      NOTE_CORE_TARGET_TOTAL_LUMINANCE,
+      calibration.coreTargetTotalLuminance,
       NOTE_CORE_EMISSIVE_STRENGTH_MIN,
-      NOTE_CORE_EMISSIVE_STRENGTH_MAX,
+      calibration.coreEmissiveStrengthMax,
     ),
     haloDiffuseColor,
     haloEmissiveColor,
     haloEmissiveStrength: resolveEmissiveStrength(
       haloDiffuseColor,
       haloEmissiveColor,
-      NOTE_HALO_TARGET_TOTAL_LUMINANCE,
+      calibration.haloTargetTotalLuminance,
       NOTE_HALO_EMISSIVE_STRENGTH_MIN,
-      NOTE_HALO_EMISSIVE_STRENGTH_MAX,
+      calibration.haloEmissiveStrengthMax,
     ),
     swirlBrightColor,
     swirlRecessColor,
@@ -2934,8 +4797,8 @@ function resolveEmissiveStrength(
   minStrength: number,
   maxStrength: number,
 ): number {
-  const diffuseLuminance = getColorRelativeLuminance(diffuseColor)
-  const emissiveLuminance = Math.max(0.08, getColorRelativeLuminance(emissiveColor))
+  const diffuseLuminance = getColorLinearRelativeLuminance(diffuseColor)
+  const emissiveLuminance = Math.max(0.008, getColorLinearRelativeLuminance(emissiveColor))
 
   return clamp(
     (targetTotalLuminance - diffuseLuminance) / emissiveLuminance,
@@ -2952,25 +4815,19 @@ export function getColorRelativeLuminance(color: number): number {
   return ((red * 0.299) + (green * 0.587) + (blue * 0.114)) / 0xff
 }
 
-export function calculateNoteDepthFalloff(distanceFromBoundary: number): NoteDepthFalloff {
-  const clampedDistance = Math.max(0, Number.isFinite(distanceFromBoundary) ? distanceFromBoundary : 0)
-  const normalizedFade = clamp(
-    (clampedDistance - NOTE_DEPTH_FADE_START_DISTANCE)
-      / (NOTE_DEPTH_FADE_END_DISTANCE - NOTE_DEPTH_FADE_START_DISTANCE),
-    0,
-    1,
-  )
-  const smoothFade = normalizedFade * normalizedFade * (3 - (2 * normalizedFade))
-  const fade = smoothFade * smoothFade
-  const brightnessScale = 1 + ((NOTE_DEPTH_MIN_BRIGHTNESS - 1) * fade)
-  const desaturation = NOTE_DEPTH_MAX_DESATURATION * fade
+export function getColorLinearRelativeLuminance(color: number): number {
+  const red = srgbChannelToLinear(((color >> 16) & 0xff) / 0xff)
+  const green = srgbChannelToLinear(((color >> 8) & 0xff) / 0xff)
+  const blue = srgbChannelToLinear((color & 0xff) / 0xff)
 
-  return {
-    brightnessScale,
-    desaturation,
-    emissiveScale: brightnessScale,
-    fade,
-  }
+  return (red * 0.2126) + (green * 0.7152) + (blue * 0.0722)
+}
+
+function srgbChannelToLinear(channel: number): number {
+  const clampedChannel = clamp(channel, 0, 1)
+  return clampedChannel <= 0.04045
+    ? clampedChannel / 12.92
+    : ((clampedChannel + 0.055) / 1.055) ** 2.4
 }
 
 function clampChannel(value: number): number {
@@ -2997,6 +4854,14 @@ function getAnimationTimeSeconds(frameTimeMs?: number): number {
   return Date.now() / 1000
 }
 
+function getMonotonicNowMs(): number {
+  if (typeof performance !== 'undefined' && Number.isFinite(performance.now())) {
+    return performance.now()
+  }
+
+  return Date.now()
+}
+
 function resolveNoteTravelPhaseOffset(note: Note): number {
   const normalizedNoteId = typeof note.id === 'string' && note.id.trim().length > 0
     ? note.id
@@ -3005,12 +4870,64 @@ function resolveNoteTravelPhaseOffset(note: Note): number {
   return randomFromSeed(phaseSeed, 0)
 }
 
-function getDevicePixelRatio(): number {
+function resolveDevicePixelRatio(pixelRatioOverride?: number): number {
+  if (pixelRatioOverride != null && Number.isFinite(pixelRatioOverride) && pixelRatioOverride > 0) {
+    return Math.max(1, pixelRatioOverride)
+  }
+
   if (typeof window === 'undefined' || !Number.isFinite(window.devicePixelRatio)) {
     return 1
   }
 
   return Math.max(1, window.devicePixelRatio)
+}
+
+function resolvePostprocessScale(postprocessScaleOverride?: number): number {
+  if (
+    postprocessScaleOverride != null &&
+    Number.isFinite(postprocessScaleOverride) &&
+    postprocessScaleOverride > 0
+  ) {
+    return Math.max(1, postprocessScaleOverride)
+  }
+
+  return 1
+}
+
+function resolveComposerPixelRatio(pixelRatio: number, postprocessScale: number): number {
+  return Math.max(1, pixelRatio * postprocessScale)
+}
+
+function noteStyleMode(style: AppState['noteStyle']): number {
+  if (style === 'solid') {
+    return 0
+  }
+  if (style === 'saber') {
+    return 2
+  }
+  if (style === 'outline') {
+    return 3
+  }
+  if (style === 'crystal') {
+    return 4
+  }
+  if (style === 'gem') {
+    return 5
+  }
+  return 1
+}
+
+function backgroundStyleMode(style: AppState['backgroundStyle']): number {
+  if (style === 'studio') {
+    return 1
+  }
+  if (style === 'aurora') {
+    return 2
+  }
+  if (style === 'stage') {
+    return 3
+  }
+  return 0
 }
 
 export const threeRenderer = new ThreeRenderer()

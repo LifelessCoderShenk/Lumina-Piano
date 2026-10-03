@@ -48,6 +48,13 @@
   gap: 8px;
 }
 
+.settingsSummary {
+  margin: 0;
+  color: #c0c8e0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .switchColumn {
   display: flex;
   flex-direction: column;

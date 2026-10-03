@@ -6,23 +6,33 @@ import { secondsToTick, tickToSeconds, type PrecomputedTempoMap } from '../../te
 
 interface UsePreviewPlaybackOptions {
   active: boolean
-  onBeforePlay?(): void
+  /** Runs from the user gesture immediately before preview playback begins. */
+  onBeforePlay?(): void | Promise<void>
+  /** Runs after the MIDI clock has been started for a preview session. */
+  onPlaybackStarted?(): void | Promise<void>
+  /** Keep video-time updates from repeatedly seeking the playback engine. */
+  continuousTimelineSync?: boolean
   onResetPlayback(): void
   playErrorMessage: string
   precomputedTempoMap: null | PrecomputedTempoMap
   preRollSeconds: number
   previewVideoRef: RefObject<HTMLVideoElement | null>
+  /** Optional review-timeline synchronization replacing the legacy lockstep path. */
+  syncTimelinePlayback?(videoTimeSeconds: number, shouldPlay: boolean, force?: boolean): boolean
   syncUnavailableMessage?: string
 }
 
 export function usePreviewPlayback({
   active,
   onBeforePlay,
+  onPlaybackStarted,
+  continuousTimelineSync = true,
   onResetPlayback,
   playErrorMessage,
   precomputedTempoMap,
   preRollSeconds,
   previewVideoRef,
+  syncTimelinePlayback,
   syncUnavailableMessage,
 }: UsePreviewPlaybackOptions) {
   const previewUrlRef = useRef<string | null>(null)
@@ -45,6 +55,15 @@ export function usePreviewPlayback({
 
     const handleTimeUpdate = () => {
       setPreviewCurrentTime(previewVideo.currentTime)
+
+      if (!continuousTimelineSync) {
+        return
+      }
+
+      if (syncTimelinePlayback != null) {
+        syncTimelinePlayback(previewVideo.currentTime, !previewVideo.paused)
+        return
+      }
 
       if (precomputedTempoMap == null) {
         return
@@ -105,9 +124,12 @@ export function usePreviewPlayback({
       previewVideo.removeEventListener('play', handlePlay)
       previewVideo.removeEventListener('loadedmetadata', handleLoadedMetadata)
     }
-  }, [active, onResetPlayback, precomputedTempoMap, preRollSeconds, previewUrl, previewVideoRef])
+  }, [active, continuousTimelineSync, onResetPlayback, precomputedTempoMap, preRollSeconds, previewUrl, previewVideoRef, syncTimelinePlayback])
 
   const syncPlaybackToPreviewTime = useCallback((videoTime: number, shouldPlay: boolean): boolean => {
+    if (syncTimelinePlayback != null) {
+      return syncTimelinePlayback(videoTime, shouldPlay, true)
+    }
     const state = useAppStore.getState()
     if (state.projectData == null || state.precomputedTempoMap == null) {
       return false
@@ -135,7 +157,7 @@ export function usePreviewPlayback({
       playbackEngine.pause()
     }
     return true
-  }, [preRollSeconds])
+  }, [preRollSeconds, syncTimelinePlayback])
 
   const togglePreviewPlayback = useCallback(async () => {
     const previewVideo = previewVideoRef.current
@@ -150,9 +172,8 @@ export function usePreviewPlayback({
       return
     }
 
-    onBeforePlay?.()
-
     try {
+      await onBeforePlay?.()
       await previewVideo.play()
       if (!syncPlaybackToPreviewTime(previewVideo.currentTime, true)) {
         if (syncUnavailableMessage != null) {
@@ -162,6 +183,7 @@ export function usePreviewPlayback({
         return
       }
 
+      await onPlaybackStarted?.()
       setIsPreviewPlaying(true)
     } catch (error) {
       onResetPlayback()
@@ -170,6 +192,7 @@ export function usePreviewPlayback({
   }, [
     isPreviewPlaying,
     onBeforePlay,
+    onPlaybackStarted,
     onResetPlayback,
     playErrorMessage,
     previewVideoRef,

@@ -1,13 +1,25 @@
+/*
+INPUT: Domain type definitions and calibrated visualizer defaults.
+OUTPUT: Fresh default state factories used to initialize and reset the application store.
+PURPOSE: Centralizes safe defaults for every mode, including the transient Transcriptor session.
+*/
+
 import type { Track } from '../midi/types'
+import type { TranscriptionSlice } from './types'
+
+import {
+  DEFAULT_CREATE_PITCH_CLASS_COLORS,
+  DEFAULT_VISUALIZER_BACKGROUND_COLOR,
+} from './createNoteColorPalettes'
 
 import type {
   CreateNoteColors,
+  ParticleSettings,
   AlignStep,
   AlignmentPoint,
   AppState,
   CameraOverlaySettings,
-  LearnV3State,
-  LearnVisuals,
+  HandVisualizationSettings,
   PlaybackSlice,
   RecordModeConfig,
   SelectionSlice,
@@ -34,57 +46,12 @@ export const DEFAULT_TRACK_COLORS = [
   '#f7674f',
 ] as const
 
-export const DEFAULT_CREATE_MODE_SINGLE_COLOR = '#2e65a2'
+// Matches the calibrated Prism palette's blue, avoiding excessive emissive
+// compensation from the old, comparatively dark default blue.
+export const DEFAULT_CREATE_MODE_SINGLE_COLOR = '#4f8ef7'
 
 export const DEFAULT_PITCH_CLASS_COLORS: Record<number, string> = {
-  0: '#f74f4f',
-  1: '#f7674f',
-  2: '#f7a44f',
-  3: '#f7d44f',
-  4: '#a4f74f',
-  5: '#4ff77a',
-  6: '#4ff7a0',
-  7: '#4ff7f0',
-  8: '#4fa4f7',
-  9: '#4f8ef7',
-  10: '#7a4ff7',
-  11: '#f74ff0',
-}
-
-export const learnV3Initial: LearnV3State = {
-  currentChordIndex: 0,
-  fingerNumbers: {},
-  isActive: false,
-  midi: {
-    available: false,
-    connectedDeviceId: null,
-    connectionStatus: 'disconnected',
-    devices: [],
-  },
-  selectedSongId: null,
-  sessionConfig: {
-    hand: 'both',
-    mode: null,
-    tempoMultiplier: 1.0,
-  },
-  sessionState: 'idle',
-  stats: {
-    bestStreak: 0,
-    correct: 0,
-    missed: 0,
-    streak: 0,
-    wrong: 0,
-  },
-}
-
-export const learnVisualsInitial: LearnVisuals = {
-  fingerNumbersEnabled: true,
-  glowEnabled: false,
-  leftHandColor: '#4ade80',
-  noteColor: 'perHand',
-  noteLabelsEnabled: true,
-  noteOpacity: 1.0,
-  rightHandColor: '#60a5fa',
+  ...DEFAULT_CREATE_PITCH_CLASS_COLORS,
 }
 
 export const visualizerSettingsInitial: VisualizerSettings = {
@@ -98,9 +65,17 @@ export const cameraOverlayInitial: CameraOverlaySettings = {
   cropLeft: 0,
   cropRight: 0,
   cropTop: 0,
+  flipHorizontal: false,
+  flipVertical: false,
   offsetX: 0,
   offsetY: 0,
+  rotation: 0,
   scale: 1,
+}
+
+export const handVisualizationInitial: HandVisualizationSettings = {
+  enabled: false,
+  opacity: 35,
 }
 
 export const recordModeConfigInitial: RecordModeConfig = {
@@ -109,6 +84,20 @@ export const recordModeConfigInitial: RecordModeConfig = {
   midiDeviceId: null,
   useMic: false,
   useMidiAudio: true,
+}
+
+export function createTranscriptionDefaults(): TranscriptionSlice {
+  return {
+    transcriptionNotes: [],
+    transcriptionPhase: 'idle',
+    transcriptionSettings: {
+      bpm: 120,
+      chordNamesEnabled: true,
+      keyLabelsEnabled: false,
+      meter: '4/4',
+      midiDeviceId: null,
+    },
+  }
 }
 
 export const alignmentInitial = {
@@ -122,7 +111,8 @@ export const UNSUPPORTED_RECORDING_PIECE_MESSAGE =
 
 export function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   return {
-    backgroundColor: '#303030',
+    backgroundColor: DEFAULT_VISUALIZER_BACKGROUND_COLOR,
+    backgroundStyle: 'flat',
     colorMode: 'split',
     gradientBottomColorLeft: '#77a3ca',
     gradientBottomColorLeftBlack: '#4b75af',
@@ -134,10 +124,18 @@ export function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
     noteLabelFormat: 'name',
     noteLabelColor: '#000000',
     noteLabelSize: 16,
-    noteLabelsOnKeys: true,
+    noteLabelsOnKeys: false,
     noteLabelsOnNotes: true,
     noteGradientDirection: 'horizontal',
     noteStyle: 'gradient',
+    fallSpeed: 100,
+    noteWidth: 100,
+    noteOpacity: 100,
+    noteGlow: 100,
+    lightingIntensity: 100,
+    keyboardSaber: false,
+    scoreOverlaySize: 'standard',
+    scoreOverlayOpacity: 100,
     pitchClassColors: { ...DEFAULT_PITCH_CLASS_COLORS },
     rightHandColor: '#9ee65a',
     splitPitch: 60,
@@ -151,6 +149,23 @@ export function createCreateNoteColorDefaults(): CreateNoteColors {
     mode: 'single',
     pitchClassColors: { ...DEFAULT_PITCH_CLASS_COLORS },
     singleColor: DEFAULT_CREATE_MODE_SINGLE_COLOR,
+    velocityLowColor: '#4b2f83',
+    velocityHighColor: '#62e8ff',
+  }
+}
+
+export function createParticleSettingsDefaults(): ParticleSettings {
+  return {
+    colorMode: 'note',
+    customColor: '#7ec8ff',
+    density: 100,
+    enabled: true,
+    style: 'spark',
+    glow: 100,
+    lifetime: 100,
+    size: 100,
+    speed: 100,
+    spread: 100,
   }
 }
 
@@ -216,6 +231,8 @@ export function createInitialAppState(): AppState {
     activePanel: null,
     currentTick: 0,
     createNoteColors: createCreateNoteColorDefaults(),
+    handVisualization: { ...handVisualizationInitial },
+    particleSettings: createParticleSettingsDefaults(),
     errorMessage: null,
     exportEstimatedSecondsRemaining: 0,
     exportFramesRendered: 0,
@@ -229,8 +246,6 @@ export function createInitialAppState(): AppState {
     cameraOverlay: { ...cameraOverlayInitial },
     highCPoint: alignmentInitial.highCPoint,
     loadPieceError: null,
-    learnVisuals: { ...learnVisualsInitial },
-    learnV3: structuredClone(learnV3Initial),
     loopEnabled: false,
     loopEndTick: 0,
     loopStartTick: 0,
@@ -239,6 +254,8 @@ export function createInitialAppState(): AppState {
     panY: 0,
     pieces: [],
     recordModeConfig: { ...recordModeConfigInitial },
+    recordModeView: 'video',
+    ...createTranscriptionDefaults(),
     precomputedTempoMap: null,
     projectData: null,
     renderScale: 1,

@@ -106,6 +106,26 @@
   font-size: 12px;
   line-height: 1.4;
 }
+.projectBadge {
+  composes: recordingBadge;
+  color: #9dc7f2;
+  border-color: rgba(93, 158, 225, 0.55);
+  font-style: normal;
+}
+.scoreBadge {
+  composes: recordingBadge;
+  color: #d9b7ff;
+  border-color: rgba(174, 112, 230, 0.55);
+  font-style: normal;
+}
+
+.sampleListStatus {
+  margin: 0;
+  padding: 16px 10px;
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: 14px;
+}
 
 .selectedCard {
   background: var(--color-icon);

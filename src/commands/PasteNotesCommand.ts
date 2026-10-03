@@ -47,6 +47,7 @@ export class PasteNotesCommand implements Command {
         startTick: normalizedTargetTick + (note.startTick - earliestStartTick),
         velocity: note.velocity,
         visualEndTick: normalizedTargetTick + (note.visualEndTick - earliestStartTick),
+        ...(note.fingering == null ? {} : { fingering: { ...note.fingering } }),
       }
 
       const notesForTrack = this.insertedNotesByTrackId.get(note.trackId) ?? []

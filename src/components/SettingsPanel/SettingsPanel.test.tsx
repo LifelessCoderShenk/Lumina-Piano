@@ -115,15 +115,16 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('FRAMERATE')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Fit' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByRole('button', { name: '16:9' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '9:16' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '1:1' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '4:3' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '1080p' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByRole('button', { name: '720p' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '1440p' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '4K' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '60' }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByRole('button', { name: '24' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '30' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '1440p' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '24' })).toBeNull()
     expect(useAppStore.getState().visualizerSettings).toEqual(visualizerSettingsInitial)
   })
 
@@ -149,14 +150,106 @@ describe('SettingsPanel', () => {
     })
   })
 
+  it('selects a vertical social frame without normalizing it back to fit', () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '9:16' }))
+
+    expect(useAppStore.getState().visualizerSettings.aspectRatio).toBe('9:16')
+  })
+
   it('selecting resolution and framerate updates the store', () => {
     render(<SettingsPanel onClose={() => undefined} />)
 
     fireEvent.click(screen.getByRole('button', { name: '4K' }))
-    fireEvent.click(screen.getByRole('button', { name: '24' }))
+    fireEvent.click(screen.getByRole('button', { name: '30' }))
 
     expect(useAppStore.getState().visualizerSettings.resolution).toBe('4K')
-    expect(useAppStore.getState().visualizerSettings.framerate).toBe(24)
+    expect(useAppStore.getState().visualizerSettings.framerate).toBe(30)
+  })
+
+  it('updates the visualizer background and independently toggles note names on notes and keys', () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    fireEvent.change(screen.getByLabelText('Visualizer background'), { target: { value: '#303030' } })
+    fireEvent.click(screen.getByLabelText('Show note names on falling notes'))
+
+    expect(useAppStore.getState().backgroundColor).toBe('#303030')
+    expect(useAppStore.getState().noteLabelsOnNotes).toBe(false)
+    expect(useAppStore.getState().noteLabelsOnKeys).toBe(false)
+
+    fireEvent.click(screen.getByLabelText('Show note names on keyboard keys'))
+    expect(useAppStore.getState().noteLabelsOnKeys).toBe(true)
+  })
+
+  it('switches falling-note material and adjusts note glow', () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    expect(screen.getByRole('button', { name: 'Sculpted' }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Saber' }))
+    fireEvent.change(screen.getByLabelText('Fall speed'), { target: { value: '140' } })
+    fireEvent.change(screen.getByLabelText('Note width'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Note opacity'), { target: { value: '72' } })
+    fireEvent.change(screen.getByLabelText('Note glow'), { target: { value: '160' } })
+    fireEvent.change(screen.getByLabelText('Reactive lighting'), { target: { value: '70' } })
+
+    expect(useAppStore.getState().noteStyle).toBe('saber')
+    expect(useAppStore.getState().fallSpeed).toBe(140)
+    expect(useAppStore.getState().noteWidth).toBe(80)
+    expect(useAppStore.getState().noteOpacity).toBe(72)
+    expect(useAppStore.getState().noteGlow).toBe(160)
+    expect(useAppStore.getState().lightingIntensity).toBe(70)
+    expect(screen.getByText('160%')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Outline' }))
+    expect(useAppStore.getState().noteStyle).toBe('outline')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crystal' }))
+    expect(useAppStore.getState().noteStyle).toBe('crystal')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gem' }))
+    expect(useAppStore.getState().noteStyle).toBe('gem')
+  })
+
+  it('enables keyboard beams without changing the falling-note style', () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    expect((screen.getByLabelText('Show keyboard beams') as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(screen.getByLabelText('Show keyboard beams'))
+
+    expect(useAppStore.getState().keyboardSaber).toBe(true)
+    expect(useAppStore.getState().noteStyle).toBe('gradient')
+  })
+
+  it('keeps ghost hands off by default and reveals one opacity control when enabled', () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    expect((screen.getByLabelText('Show ghost hands') as HTMLInputElement).checked).toBe(false)
+    expect(screen.queryByLabelText('Ghost hands opacity')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('Show ghost hands'))
+
+    expect(useAppStore.getState().handVisualization.enabled).toBe(true)
+    expect((screen.getByLabelText('Ghost hands opacity') as HTMLInputElement).value).toBe('35')
+
+    fireEvent.change(screen.getByLabelText('Ghost hands opacity'), { target: { value: '56' } })
+
+    expect(useAppStore.getState().handVisualization.opacity).toBe(56)
+    expect(screen.getByText('56%')).toBeTruthy()
+  })
+
+  it('switches the live background scene', () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    expect(screen.getByRole('button', { name: 'Plain' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Studio' }))
+
+    expect(useAppStore.getState().backgroundStyle).toBe('studio')
+    expect(screen.getByRole('button', { name: 'Studio' }).getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stage' }))
+    expect(useAppStore.getState().backgroundStyle).toBe('stage')
   })
 
   it('opens and closes via the top bar settings button', () => {

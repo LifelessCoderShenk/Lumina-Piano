@@ -58,6 +58,7 @@ export class AudioScheduler {
   private lastScheduledTick = 0
   private readonly activeNotes = new Map<string, Tone.PolySynth | Tone.Sampler>()
   private sampler: Tone.Sampler | null = null
+  private liveAudioInitPromise: Promise<void> | null = null
   private isInitialized = false
   private isMuted = false
   private volumeBeforeMute = 0
@@ -143,6 +144,7 @@ export class AudioScheduler {
 
     this.sampler?.dispose()
     this.sampler = null
+    this.liveAudioInitPromise = null
     this.activeNotes.clear()
     this.isInitialized = false
     this.isMuted = false
@@ -196,6 +198,37 @@ export class AudioScheduler {
     }
   }
 
+  /** Plays a user-triggered piano key independently of timeline playback. */
+  async playLiveNote(pitch: number, velocity = 100, durationMs = 700): Promise<void> {
+    if (!Number.isFinite(pitch)) {
+      return
+    }
+
+    try {
+      if (!this.isInitialized) {
+        this.liveAudioInitPromise ??= this.init().finally(() => {
+          this.liveAudioInitPromise = null
+        })
+        await this.liveAudioInitPromise
+      } else if (Tone.context.state === 'suspended') {
+        await Tone.start()
+      }
+
+      if (this.sampler == null || this.isMuted) {
+        return
+      }
+
+      this.sampler.triggerAttackRelease(
+        Tone.Frequency(Math.round(pitch), 'midi').toNote(),
+        Math.max(0.01, durationMs / 1000),
+        undefined,
+        clamp(velocity / 127, 0, 1),
+      )
+    } catch (error) {
+      console.warn('Unable to play live MIDI note.', error)
+    }
+  }
+
   async warmUpAudio(): Promise<void> {
     await Tone.start()
     await Tone.loaded()
@@ -211,15 +244,10 @@ export class AudioScheduler {
       return
     }
 
-    const previousVolume = this.sampler.volume.value
-    this.sampler.volume.value = Number.NEGATIVE_INFINITY
-    this.sampler.triggerAttackRelease('C4', 0.01)
-
-    globalThis.setTimeout(() => {
-      if (this.sampler != null) {
-        this.sampler.volume.value = previousVolume
-      }
-    }, 50)
+    // Prime Tone and the sampler graph without creating a release tail that
+    // can become audible when playback restores the user's volume. Muting the
+    // whole sampler briefly was racy because the C4 sample outlived that mute.
+    this.sampler.triggerAttackRelease('C4', 0.01, undefined, 0)
   }
 
   reset(): void {
@@ -379,8 +407,7 @@ export class AudioScheduler {
       for (const note of track.notes) {
         if (
           note.startTick >= normalizedFromTick &&
-          note.startTick < normalizedToTick &&
-          this.shouldScheduleNoteForLearnHand(note, state)
+          note.startTick < normalizedToTick
         ) {
           result.push({ note, track })
         }
@@ -397,14 +424,6 @@ export class AudioScheduler {
     }
 
     return state.trackMuted[trackId] !== true
-  }
-
-  private shouldScheduleNoteForLearnHand(note: Note, state: AppState): boolean {
-    if (!state.learnV3.isActive || state.learnV3.sessionConfig.mode !== 'listen') {
-      return true
-    }
-
-    return isNoteIncludedForHand(note.pitch, state.learnV3.sessionConfig.hand)
   }
 
   private cancelScheduledEvents(): void {
@@ -494,15 +513,3 @@ function clamp(value: number, min: number, max: number): number {
 export const audioScheduler = new AudioScheduler()
 
 export { AudioSchedulerError }
-
-function isNoteIncludedForHand(pitch: number, hand: AppState['learnV3']['sessionConfig']['hand']): boolean {
-  if (hand === 'left') {
-    return pitch < 60
-  }
-
-  if (hand === 'right') {
-    return pitch >= 60
-  }
-
-  return true
-}

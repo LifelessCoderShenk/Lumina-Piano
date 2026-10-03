@@ -1,4 +1,4 @@
-import type { Note, ProjectData, Track } from '../midi/types'
+import type { Note, NoteFingering, ProjectData, Track } from '../midi/types'
 import { getAppState, useAppStore } from '../store/store'
 import { CommandError } from './errors'
 
@@ -16,6 +16,7 @@ export interface PastedNote {
   endTick: number
   visualEndTick: number
   velocity: number
+  fingering?: NoteFingering
 }
 
 export interface NoteTarget {
@@ -170,6 +171,7 @@ export function cloneNote(note: Note): Note {
     startTick: note.startTick,
     velocity: note.velocity,
     visualEndTick: note.visualEndTick,
+    ...(note.fingering == null ? {} : { fingering: { ...note.fingering } }),
   }
 }
 

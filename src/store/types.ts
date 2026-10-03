@@ -1,13 +1,17 @@
+/*
+INPUT: Shared domain types from MIDI, tempo, and transcription modules.
+OUTPUT: The complete typed Zustand app state and public store action contract.
+PURPOSE: Keeps UI modes and their persisted-in-memory settings coherent across Lumina Piano.
+*/
+
 import type { ProjectData, Track } from '../midi/types'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
+import type { CapturedNote, TranscriptionPhase, TranscriptionSettings } from '../transcription/types'
 
-export type LearnMode = 'listen' | 'noteByNote' | 'playAlong'
-export type LearnHand = 'left' | 'right' | 'both'
-export type MidiConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'failed'
-export type AppMode = 'select' | 'create' | 'createCamera' | 'createRecord' | 'learn' | 'learnSong' | 'learnSession' | 'learnEnd'
-export type LearnNoteColorMode = 'white' | 'perHand' | 'custom'
-export type CreateNoteColorMode = 'single' | 'pitchClass'
-export type PieceType = 'midi' | 'recording'
+export type AppMode = 'select' | 'create' | 'createCamera' | 'createRecord'
+export type RecordModeView = 'video' | 'transcription'
+export type CreateNoteColorMode = 'single' | 'pitchClass' | 'gradient' | 'velocity' | 'dynamic' | 'random' | 'tutorial'
+export type PieceType = 'midi' | 'musicxml' | 'project' | 'recording'
 export type CreateTab = 'pieces' | 'particles' | 'color' | 'camera'
 export type AlignStep = 'idle' | 'waiting-low-a' | 'waiting-high-c' | 'complete'
 
@@ -17,15 +21,20 @@ export interface AlignmentPoint {
 }
 
 export interface VisualizerSettings {
-  aspectRatio: 'fit' | '16:9' | '1:1' | '4:3'
-  resolution: '720p' | '1080p' | '1440p' | '4K'
-  framerate: 24 | 30 | 60
+  aspectRatio: 'fit' | '16:9' | '9:16' | '1:1' | '4:3'
+  resolution: '720p' | '1080p' | '4K'
+  framerate: 30 | 60
 }
 
 export interface CameraOverlaySettings {
+  /** Visualizer placement in preview CSS pixels. */
   offsetX: number
   offsetY: number
   scale: number
+  flipHorizontal: boolean
+  flipVertical: boolean
+  rotation: 0 | 90 | 180 | 270
+  /** Crop values are intrinsic camera-source pixels, named after visible edges. */
   cropTop: number
   cropRight: number
   cropBottom: number
@@ -49,55 +58,30 @@ export interface Piece {
   createdAt: number
 }
 
-export interface LearnSessionConfig {
-  mode: LearnMode | null
-  hand: LearnHand
-  tempoMultiplier: number
-}
-
-export interface LearnStats {
-  correct: number
-  wrong: number
-  missed: number
-  streak: number
-  bestStreak: number
-}
-
-export interface MidiDeviceInfo {
-  id: string
-  name: string
-}
-
-export interface LearnV3State {
-  selectedSongId: string | null
-  sessionConfig: LearnSessionConfig
-  isActive: boolean
-  sessionState: 'idle' | 'playing' | 'ended'
-  currentChordIndex: number
-  stats: LearnStats
-  fingerNumbers: Record<string, number>
-  midi: {
-    available: boolean
-    devices: MidiDeviceInfo[]
-    connectedDeviceId: string | null
-    connectionStatus: MidiConnectionStatus
-  }
-}
-
-export interface LearnVisuals {
-  noteColor: LearnNoteColorMode
-  leftHandColor: string
-  rightHandColor: string
-  noteOpacity: number
-  glowEnabled: boolean
-  noteLabelsEnabled: boolean
-  fingerNumbersEnabled: boolean
-}
-
 export interface CreateNoteColors {
   mode: CreateNoteColorMode
   singleColor: string
   pitchClassColors: Record<number, string>
+  velocityLowColor?: string
+  velocityHighColor?: string
+}
+
+export interface ParticleSettings {
+  enabled: boolean
+  style: 'spark' | 'wisp' | 'ray'
+  colorMode: 'note' | 'custom'
+  customColor: string
+  density: number
+  size: number
+  speed: number
+  spread: number
+  lifetime: number
+  glow: number
+}
+
+export interface HandVisualizationSettings {
+  enabled: boolean
+  opacity: number
 }
 
 export interface ProjectSlice {
@@ -148,6 +132,14 @@ export interface CreateNoteColorsSlice {
   createNoteColors: CreateNoteColors
 }
 
+export interface ParticleSettingsSlice {
+  particleSettings: ParticleSettings
+}
+
+export interface HandVisualizationSlice {
+  handVisualization: HandVisualizationSettings
+}
+
 export interface CameraOverlaySlice {
   cameraOverlay: CameraOverlaySettings
 }
@@ -160,6 +152,13 @@ export interface AlignmentSlice {
 
 export interface RecordModeSlice {
   recordModeConfig: RecordModeConfig
+  recordModeView: RecordModeView
+}
+
+export interface TranscriptionSlice {
+  transcriptionSettings: TranscriptionSettings
+  transcriptionPhase: TranscriptionPhase
+  transcriptionNotes: readonly CapturedNote[]
 }
 
 export interface UISlice {
@@ -175,6 +174,7 @@ export interface UISlice {
 }
 
 export interface VisualizerSettingsSlice {
+  backgroundStyle: 'flat' | 'studio' | 'aurora' | 'stage'
   colorMode: 'track' | 'pitch' | 'split' | 'velocity'
   pitchClassColors: Record<number, string>
   splitPitch: number
@@ -182,7 +182,15 @@ export interface VisualizerSettingsSlice {
   rightHandColor: string
   velocityLowColor: string
   velocityHighColor: string
-  noteStyle: 'solid' | 'gradient' | 'saber'
+  noteStyle: 'solid' | 'gradient' | 'saber' | 'outline' | 'crystal' | 'gem'
+  fallSpeed: number
+  noteWidth: number
+  noteOpacity: number
+  noteGlow: number
+  lightingIntensity: number
+  keyboardSaber: boolean
+  scoreOverlaySize: 'compact' | 'standard' | 'large'
+  scoreOverlayOpacity: number
   noteGradientDirection: 'vertical' | 'horizontal'
   gradientTopColor: string
   gradientBottomColorRight: string
@@ -207,12 +215,13 @@ export type AppState =
   & PiecesSlice
   & CreateVisualizerSettingsSlice
   & CreateNoteColorsSlice
+  & ParticleSettingsSlice
+  & HandVisualizationSlice
   & CameraOverlaySlice
   & AlignmentSlice
   & RecordModeSlice
+  & TranscriptionSlice
   & UISlice
-  & { learnV3: LearnV3State }
-  & { learnVisuals: LearnVisuals }
   & VisualizerSettingsSlice
 
 export interface AppActions {
@@ -242,12 +251,23 @@ export interface AppActions {
   setCreateNoteColorMode(mode: CreateNoteColorMode): void
   setCreateSingleNoteColor(color: string): void
   setCreatePitchClassColor(pitchClass: number, color: string): void
+  setCreatePitchClassColors(colors: Record<number, string>): void
+  setCreateVelocityColors(lowColor: string, highColor: string): void
+  setParticleSettings(patch: Partial<ParticleSettings>): void
+  setParticlePreset(name: import('./particlePresets').ParticlePresetName): void
+  resetParticleSettings(): void
+  setHandVisualization(patch: Partial<HandVisualizationSettings>): void
   setCameraOverlay(patch: Partial<CameraOverlaySettings>): void
   setAlignStep(step: AlignStep): void
   setLowAPoint(point: AlignmentPoint | null): void
   setHighCPoint(point: AlignmentPoint | null): void
   enterRecordMode(): void
   setRecordModeConfig(patch: Partial<RecordModeConfig>): void
+  setRecordModeView(view: RecordModeView): void
+  setTranscriptionSettings(patch: Partial<TranscriptionSettings>): void
+  setTranscriptionPhase(phase: TranscriptionPhase): void
+  setTranscriptionNotes(notes: readonly CapturedNote[]): void
+  clearTranscription(): void
   setActivePanel(panel: UISlice['activePanel']): void
   setActiveSecondBarTab(tab: CreateTab): void
   setAppMode(mode: AppMode): void
@@ -266,6 +286,14 @@ export interface AppActions {
   setRightHandColor(color: string): void
   setVelocityColors(low: string, high: string): void
   setNoteStyle(style: VisualizerSettingsSlice['noteStyle']): void
+  setFallSpeed(value: number): void
+  setNoteWidth(value: number): void
+  setNoteOpacity(value: number): void
+  setNoteGlow(value: number): void
+  setLightingIntensity(value: number): void
+  setKeyboardSaber(value: boolean): void
+  setScoreOverlaySize(size: VisualizerSettingsSlice['scoreOverlaySize']): void
+  setScoreOverlayOpacity(value: number): void
   setNoteGradientDirection(direction: VisualizerSettingsSlice['noteGradientDirection']): void
   setGradientTopColor(color: string): void
   setGradientBottomColorRight(color: string): void
@@ -273,6 +301,7 @@ export interface AppActions {
   setGradientBottomColorRightBlack(color: string): void
   setGradientBottomColorLeftBlack(color: string): void
   setBackgroundColor(color: string): void
+  setBackgroundStyle(style: VisualizerSettingsSlice['backgroundStyle']): void
   setLaneOpacity(value: number): void
   setNoteLabelsOnNotes(value: boolean): void
   setNoteLabelsOnKeys(value: boolean): void
@@ -280,25 +309,6 @@ export interface AppActions {
   setNoteLabelColor(color: string): void
   setNoteLabelSize(size: number): void
   setErrorMessage(message: string | null): void
-  setSelectedSong(id: string | null): void
-  setSessionConfig(config: Partial<LearnSessionConfig>): void
-  resetSessionConfig(): void
-  startSession(): void
-  endSession(): void
-  exitSession(): void
-  advanceChord(): void
-  setCurrentChordIndex(index: number): void
-  setLearnActive(active: boolean): void
-  recordCorrect(): void
-  recordWrong(): void
-  recordMissed(): void
-  setFingerNumbers(map: Record<string, number>): void
-  setMidiAvailable(available: boolean): void
-  setMidiDevices(devices: MidiDeviceInfo[]): void
-  setConnectedDevice(id: string | null): void
-  setConnectionStatus(status: MidiConnectionStatus): void
-  setLearnVisuals(patch: Partial<LearnVisuals>): void
-  setLearnVisualsPreset(preset: LearnVisuals): void
   batchUpdate(fn: (state: AppState) => void): void
   resetStore(): void
 }

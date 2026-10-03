@@ -1,4 +1,6 @@
 import React from 'react'
+import { Camera, Files, Palette, Sparkles } from 'lucide-react'
+import { AppIcon } from '../AppIcon/AppIcon'
 import { useAppStore, type CreateTab } from '../../store/store'
 import styles from './SecondBar.module.css'
 
@@ -15,15 +17,11 @@ const tabIconStyle = {
   color: 'var(--color-icon)',
 } as const
 
-const colorSwatchStyle = {
-  backgroundImage: 'linear-gradient(90deg, #ff3b30 0%, #ffcc00 25%, #34c759 50%, #0a84ff 75%, #af52de 100%)',
-} as const
-
 export function SecondBar() {
   const appMode = useAppStore((state) => state.appMode)
   const activeTab = useAppStore((state) => state.activeSecondBarTab)
   const setActiveSecondBarTab = useAppStore((state) => state.setActiveSecondBarTab)
-  const showCameraTab = appMode === 'createCamera'
+  const showCameraTab = appMode === 'createCamera' || appMode === 'createRecord'
 
   return (
     <section className={styles.secondBar} data-testid="second-bar" style={secondBarStyle}>
@@ -35,7 +33,7 @@ export function SecondBar() {
           onClick={() => setActiveSecondBarTab('pieces')}
           style={tabButtonStyle}
         >
-          <span className={styles.tabIcon} data-testid="pieces-tab-icon" aria-hidden="true" style={tabIconStyle}>[]</span>
+          <AppIcon className={styles.tabIcon} data-testid="pieces-tab-icon" icon={Files} size={18} style={tabIconStyle} />
           <span
             className={`${styles.label} ${activeTab === 'pieces' ? styles.activeLabel : ''}`}
             style={{ color: activeTab === 'pieces' ? 'var(--color-text-header)' : 'var(--color-text-body)' }}
@@ -50,7 +48,7 @@ export function SecondBar() {
           onClick={() => setActiveSecondBarTab('particles')}
           style={tabButtonStyle}
         >
-          <span className={styles.tabIcon} data-testid="particles-tab-icon" aria-hidden="true" style={tabIconStyle}>o</span>
+          <AppIcon className={styles.tabIcon} data-testid="particles-tab-icon" icon={Sparkles} size={18} style={tabIconStyle} />
           <span
             className={`${styles.label} ${activeTab === 'particles' ? styles.activeLabel : ''}`}
             style={{ color: activeTab === 'particles' ? 'var(--color-text-header)' : 'var(--color-text-body)' }}
@@ -65,12 +63,7 @@ export function SecondBar() {
           onClick={() => setActiveSecondBarTab('color')}
           style={tabButtonStyle}
         >
-          <span
-            className={styles.colorSwatch}
-            data-testid="color-tab-swatch"
-            aria-hidden="true"
-            style={colorSwatchStyle}
-          />
+          <AppIcon className={styles.tabIcon} icon={Palette} size={18} style={tabIconStyle} />
           <span
             className={`${styles.label} ${activeTab === 'color' ? styles.activeLabel : ''}`}
             style={{ color: activeTab === 'color' ? 'var(--color-text-header)' : 'var(--color-text-body)' }}
@@ -86,7 +79,7 @@ export function SecondBar() {
             onClick={() => setActiveSecondBarTab('camera')}
             style={tabButtonStyle}
           >
-            <span className={styles.tabIcon} data-testid="camera-tab-icon" aria-hidden="true" style={tabIconStyle}>[]</span>
+            <AppIcon className={styles.tabIcon} data-testid="camera-tab-icon" icon={Camera} size={18} style={tabIconStyle} />
             <span
               className={`${styles.label} ${activeTab === 'camera' ? styles.activeLabel : ''}`}
               style={{ color: activeTab === 'camera' ? 'var(--color-text-header)' : 'var(--color-text-body)' }}

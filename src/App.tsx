@@ -1,21 +1,21 @@
+/*
+INPUT: Global app mode, mode-specific state, and visualizer UI components.
+OUTPUT: The root application layout and the selected full-pane mode surface.
+PURPOSE: Routes Transcriptor into the same right-pane canvas footprint as the visualizer while retaining the existing editor shell.
+*/
+
 import React, { useEffect, useRef, useState } from 'react'
 import { TitleBar } from './components/TitleBar/TitleBar'
 import { MenuBar } from './components/MenuBar/MenuBar'
 import { TrackList } from './components/TrackList/TrackList'
 import { CanvasArea } from './components/CanvasArea/CanvasArea'
-import { CAMERA_MODE_TIMELINE_HEIGHT_PX, CameraMode } from './components/CameraMode/CameraMode'
+import { CAMERA_MODE_TIMELINE_HEIGHT_PX, CameraMode, type CameraModePhase } from './components/CameraMode/CameraMode'
 import { EditPanel } from './components/EditPanel/EditPanel'
 import { RecordMode } from './components/RecordMode/RecordMode'
 import { StatusBar } from './components/StatusBar/StatusBar'
 import { ExportModal } from './components/ExportModal/ExportModal'
-import { EndScreen } from './components/EndScreen/EndScreen'
-import { LearnHome } from './components/LearnHome/LearnHome'
-import { LearnOptionsPanel } from './components/LearnOptionsPanel/LearnOptionsPanel'
-import { ListenSession } from './components/LearnSession/ListenSession'
-import { NoteByNoteSession } from './components/LearnSession/NoteByNoteSession'
-import { PlayAlongSession } from './components/LearnSession/PlayAlongSession'
+import { getExpandableVisualizerStyle } from './components/shared/expandableVisualizerLayout'
 import { getActiveVisualizerRenderer } from './renderer/activeVisualizerRenderer'
-import { SongPage } from './components/SongPage/SongPage'
 import { useCommandShortcuts } from './commands/useCommandShortcuts'
 import { useAppStore } from './store/store'
 import styles from './App.module.css'
@@ -28,12 +28,17 @@ const appRootStyle = {
 
 export function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [isCreateSettingsOpen, setIsCreateSettingsOpen] = useState(false)
   const [isCameraTimelineVisible, setIsCameraTimelineVisible] = useState(false)
+  const [cameraPhase, setCameraPhase] = useState<CameraModePhase>('setup')
+  const [isRecordModeBusy, setIsRecordModeBusy] = useState(false)
+  const [isTranscriptionSidebarCollapsed, setIsTranscriptionSidebarCollapsed] = useState(false)
+  const [cameraSourceDimensions, setCameraSourceDimensions] = useState<{ height: number; width: number } | null>(null)
   const createCanvasShellRef = useRef<HTMLDivElement | null>(null)
   const appMode = useAppStore((state) => state.appMode)
   const alignStep = useAppStore((state) => state.alignStep)
   const cameraOverlay = useAppStore((state) => state.cameraOverlay)
-  const learnSessionMode = useAppStore((state) => state.learnV3.sessionConfig.mode)
+  const recordModeView = useAppStore((state) => state.recordModeView)
   const isCameraMode = appMode === 'createCamera'
   const isRecordMode = appMode === 'createRecord'
   const cameraVisualizerHeight = isCameraTimelineVisible
@@ -42,6 +47,7 @@ export function App() {
   const cameraModeHeight = isCameraTimelineVisible
     ? `calc(40% + ${CAMERA_MODE_TIMELINE_HEIGHT_PX}px)`
     : '40%'
+  const cameraVisualizerStyle = getExpandableVisualizerStyle(cameraVisualizerHeight, cameraOverlay)
 
   // Use stub in dev (non-Electron), real API in production
   useEffect(() => {
@@ -54,11 +60,24 @@ export function App() {
   useEffect(() => {
     if (appMode !== 'createCamera') {
       setIsCameraTimelineVisible(false)
+      setCameraPhase('setup')
     }
   }, [appMode])
 
   // Wire command shortcuts globally
   useCommandShortcuts()
+
+  const openExportModal = () => {
+    if (
+      appMode === 'select' ||
+      appMode === 'create' ||
+      appMode === 'createCamera' ||
+      appMode === 'createRecord'
+    ) {
+      setIsCreateSettingsOpen(true)
+    }
+    setExportModalOpen(true)
+  }
 
   const handleFullPanelClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const rightPanelRect =
@@ -111,7 +130,14 @@ export function App() {
     return (
       <div className={styles.app} style={appRootStyle}>
         <div className={styles.createShell}>
-          <EditPanel />
+          <EditPanel
+            cameraSourceDimensions={cameraSourceDimensions}
+            isSettingsOpen={isCreateSettingsOpen}
+            onSettingsOpenChange={setIsCreateSettingsOpen}
+            isCameraTransformLocked={isCameraMode && (cameraPhase === 'countdown' || cameraPhase === 'recording')}
+            isCreateNavigationLocked={isRecordModeBusy || (isCameraMode && (cameraPhase === 'countdown' || cameraPhase === 'recording'))}
+            isCollapsed={isRecordMode && recordModeView === 'transcription' && isTranscriptionSidebarCollapsed}
+          />
           <div
             ref={createCanvasShellRef}
             className={styles.createCanvasShell}
@@ -119,7 +145,12 @@ export function App() {
             style={{ width: '75%', flexBasis: '75%' }}
           >
             {isRecordMode ? (
-              <RecordMode />
+              <RecordMode
+                isTranscriptionSidebarCollapsed={isTranscriptionSidebarCollapsed}
+                onSourceVideoDimensionsChange={setCameraSourceDimensions}
+                onBusyChange={setIsRecordModeBusy}
+                onTranscriptionSidebarCollapsedChange={setIsTranscriptionSidebarCollapsed}
+              />
             ) : (
               <div
                 className={isCameraMode ? styles.cameraLayout : styles.createVisualizerLayout}
@@ -129,13 +160,15 @@ export function App() {
                   className={isCameraMode ? styles.cameraVisualizer : styles.createVisualizerSlot}
                   data-testid={isCameraMode ? 'camera-visualizer-slot' : 'create-visualizer-slot'}
                   style={isCameraMode
-                    ? {
-                      height: cameraVisualizerHeight,
-                      transform: `translate3d(0px, ${cameraOverlay.offsetY}px, 0)`,
-                    }
+                    ? cameraVisualizerStyle
                     : undefined}
                 >
-                  <CanvasArea engine="three" />
+                  <CanvasArea
+                    engine="three"
+                    guideOnly={isCameraMode && cameraPhase === 'setup'}
+                    noteFieldTravelSeconds={isCameraMode ? 3 : undefined}
+                    onOpenExport={openExportModal}
+                  />
                 </div>
                 <div
                   className={styles.cameraModeSlot}
@@ -144,6 +177,11 @@ export function App() {
                   {isCameraMode ? (
                     <CameraMode
                       isTimelineVisible={isCameraTimelineVisible}
+                      onSourceVideoDimensionsChange={setCameraSourceDimensions}
+                      onOpenExportSheet={() => {
+                        setIsCreateSettingsOpen(true)
+                      }}
+                      onPhaseChange={setCameraPhase}
                       onTimelineVisibilityChange={setIsCameraTimelineVisible}
                     />
                   ) : null}
@@ -161,13 +199,13 @@ export function App() {
                 onClick={handleFullPanelClick}
               />
             ) : null}
+            <ExportModal
+              isOpen={exportModalOpen}
+              onClose={() => setExportModalOpen(false)}
+              variant="sheet"
+            />
           </div>
         </div>
-
-        <ExportModal
-          isOpen={exportModalOpen}
-          onClose={() => setExportModalOpen(false)}
-        />
       </div>
     )
   }
@@ -175,47 +213,15 @@ export function App() {
   return (
     <div className={styles.app} style={appRootStyle}>
       <TitleBar />
-      <MenuBar onExportClick={() => setExportModalOpen(true)} />
+      <MenuBar onExportClick={openExportModal} />
 
       <div className={styles.workspace}>
         <TrackList />
         <div className={styles.centerColumn}>
           <div className={styles.canvasWrapper}>
-            {appMode === 'learn' ? (
-              <LearnHome />
-            ) : appMode === 'learnSong' ? (
-              <SongPage />
-            ) : appMode === 'learnSession' ? (
-              learnSessionMode === 'listen' ? (
-                <div className={styles.listenSessionLayout}>
-                  <ListenSession />
-                  <CanvasArea engine="pixi" />
-                </div>
-              ) : learnSessionMode === 'noteByNote' ? (
-                <div className={styles.listenSessionLayout}>
-                  <NoteByNoteSession />
-                  <CanvasArea engine="pixi" />
-                </div>
-              ) : learnSessionMode === 'playAlong' ? (
-                <>
-                  <CanvasArea engine="pixi" />
-                  <PlayAlongSession />
-                </>
-              ) : (
-                <div className={styles.learnMode}>
-                  <div className={styles.learnMessage}>Learn Session Coming Soon</div>
-                </div>
-              )
-            ) : appMode === 'learnEnd' ? (
-              <EndScreen />
-            ) : (
-              <CanvasArea engine="pixi" />
-            )}
+            <CanvasArea engine="pixi" />
           </div>
         </div>
-        {appMode === 'learnSession' ? (
-          <LearnOptionsPanel />
-        ) : null}
       </div>
 
       <StatusBar />
