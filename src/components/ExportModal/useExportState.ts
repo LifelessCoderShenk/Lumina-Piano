@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { exportEngine } from '../../export/ExportEngine'
+import { resolveExportDimensions } from '../../export/exportDimensions'
 import type { ExportProgress, ExportSettings } from '../../export/types'
 import { getAppState, useExportState as useStoreExportState } from '../../store/store'
+import type { VisualizerSettings } from '../../store/types'
 
 export type ExportPhase = 'idle' | 'exporting' | 'complete' | 'error'
 
 export interface ExportModalState {
   phase: ExportPhase
-  resolution: '720p' | '1080p' | '4K'
-  fps: 30 | 60
   outputPath: string
   includeAudio: boolean
+  formatSummary: ExportFormatSummary | null
   framesRendered: number
   totalFrames: number
   progress: number
@@ -19,6 +20,13 @@ export interface ExportModalState {
   phaseLabel: string
   errorMessage: string | null
   completedFilePath: string | null
+}
+
+export interface ExportFormatSummary {
+  aspectRatio: VisualizerSettings['aspectRatio']
+  fps: VisualizerSettings['framerate']
+  height: number
+  width: number
 }
 
 type LocalExportState = Omit<
@@ -31,12 +39,11 @@ const DEFAULT_OUTPUT_PATH = 'export.mp4'
 const INITIAL_LOCAL_STATE: LocalExportState = {
   completedFilePath: null,
   errorMessage: null,
-  fps: 60,
+  formatSummary: null,
   includeAudio: true,
   outputPath: '',
   phase: 'idle',
   phaseLabel: '',
-  resolution: '1080p',
 }
 
 export function useExportState() {
@@ -120,20 +127,6 @@ export function useExportState() {
     totalFrames: storeExportState.exportTotalFrames,
   }), [localState, storeExportState])
 
-  const setResolution = useCallback((resolution: '720p' | '1080p' | '4K') => {
-    setLocalState((previousState) => ({
-      ...previousState,
-      resolution,
-    }))
-  }, [])
-
-  const setFps = useCallback((fps: 30 | 60) => {
-    setLocalState((previousState) => ({
-      ...previousState,
-      fps,
-    }))
-  }, [])
-
   const setOutputPath = useCallback((outputPath: string) => {
     setLocalState((previousState) => ({
       ...previousState,
@@ -207,20 +200,29 @@ export function useExportState() {
     cancelRequestedRef.current = false
     activeExportPathRef.current = outputPath
     getAppState().setExportProgress(0, 0, 0, 0)
+    const visualizerSettings = getAppState().visualizerSettings
+    const dimensions = resolveExportDimensions(
+      visualizerSettings.resolution,
+      visualizerSettings.aspectRatio,
+    )
 
     setLocalState((previousState) => ({
       ...previousState,
       completedFilePath: null,
       errorMessage: null,
+      formatSummary: {
+        aspectRatio: visualizerSettings.aspectRatio,
+        fps: visualizerSettings.framerate,
+        height: dimensions.height,
+        width: dimensions.width,
+      },
       phase: 'exporting',
       phaseLabel: 'Rendering frames...',
     }))
 
     const settings: ExportSettings = {
-      fps: currentState.fps,
       includeAudio: currentState.includeAudio,
       outputPath,
-      resolution: currentState.resolution,
     }
 
     try {
@@ -252,6 +254,7 @@ export function useExportState() {
       ...previousState,
       completedFilePath: null,
       errorMessage: null,
+      formatSummary: null,
       phase: 'idle',
       phaseLabel: '',
     }))
@@ -267,6 +270,7 @@ export function useExportState() {
       ...previousState,
       completedFilePath: null,
       errorMessage: null,
+      formatSummary: null,
       phase: 'idle',
       phaseLabel: '',
     }))
@@ -289,10 +293,8 @@ export function useExportState() {
     ensureDefaultOutputPath,
     openFile,
     resetTransientState,
-    setFps,
     setIncludeAudio,
     setOutputPath,
-    setResolution,
     startExport,
     state,
   }

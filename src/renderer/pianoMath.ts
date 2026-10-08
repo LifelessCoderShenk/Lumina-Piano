@@ -1,7 +1,11 @@
+import { getKeyboardLayoutMetrics, type RenderLayoutContext } from './layoutConstants'
+
 export const PIANO_MIN_PITCH = 21
 export const PIANO_MAX_PITCH = 108
 export const PIANO_WHITE_KEY_COUNT = 52
 export const BLACK_KEY_WIDTH_RATIO = 0.58
+const BLACK_KEY_HEIGHT_RATIO = 0.6
+const BLACK_KEY_BOTTOM_INSET = 2
 
 const BLACK_KEY_PITCH_CLASSES = new Set([1, 3, 6, 8, 10])
 const KEYBOARD_PITCHES = createKeyboardPitchRange()
@@ -39,23 +43,45 @@ export function getKeyAtScreenX(screenX: number, canvasWidth = 1920): number | n
     return null
   }
 
-  const blackKeyWidth = getBlackKeyWidth(canvasWidth)
-  for (const pitch of BLACK_PITCHES) {
-    const keyX = pitchToKeyX(pitch, canvasWidth)
-    if (screenX >= keyX && screenX < keyX + blackKeyWidth) {
-      return pitch
-    }
+  return getBlackKeyAtX(screenX, canvasWidth) ?? getWhiteKeyAtX(screenX, canvasWidth)
+}
+
+/**
+ * Returns the piano key at a canvas-space point. Black keys only take priority
+ * within their visible upper portion; below that, their white key is exposed.
+ */
+export function getKeyAtCanvasPoint(
+  x: number,
+  y: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  layoutContext?: RenderLayoutContext,
+): number | null {
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(canvasWidth) ||
+    !Number.isFinite(canvasHeight) ||
+    canvasWidth <= 0 ||
+    canvasHeight <= 0 ||
+    x < 0 ||
+    x >= canvasWidth
+  ) {
+    return null
   }
 
-  const whiteKeyWidth = getWhiteKeyWidth(canvasWidth)
-  for (const pitch of WHITE_PITCHES) {
-    const { width, x } = getWhiteKeyBounds(pitch, canvasWidth)
-    if (screenX >= x && screenX < x + width) {
-      return pitch
-    }
+  // Keep the hit area in lockstep with the keyboard's renderer geometry.
+  const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(canvasHeight, layoutContext)
+  if (y < keyboardY || y >= canvasHeight) {
+    return null
   }
 
-  return null
+  const blackKeyBottom = keyboardY + Math.max(1, Math.round(keyboardHeight * BLACK_KEY_HEIGHT_RATIO) - BLACK_KEY_BOTTOM_INSET)
+  if (y < blackKeyBottom) {
+    return getBlackKeyAtX(x, canvasWidth) ?? getWhiteKeyAtX(x, canvasWidth)
+  }
+
+  return getWhiteKeyAtX(x, canvasWidth)
 }
 
 export function getWhiteKeyWidth(canvasWidth: number): number {
@@ -130,4 +156,27 @@ function normalizeCanvasWidth(canvasWidth: number): number {
   }
 
   return Math.max(1, Math.round(canvasWidth))
+}
+
+function getBlackKeyAtX(x: number, canvasWidth: number): number | null {
+  const blackKeyWidth = getBlackKeyWidth(canvasWidth)
+  for (const pitch of BLACK_PITCHES) {
+    const keyX = pitchToKeyX(pitch, canvasWidth)
+    if (x >= keyX && x < keyX + blackKeyWidth) {
+      return pitch
+    }
+  }
+
+  return null
+}
+
+function getWhiteKeyAtX(x: number, canvasWidth: number): number | null {
+  for (const pitch of WHITE_PITCHES) {
+    const { width, x: keyX } = getWhiteKeyBounds(pitch, canvasWidth)
+    if (x >= keyX && x < keyX + width) {
+      return pitch
+    }
+  }
+
+  return null
 }

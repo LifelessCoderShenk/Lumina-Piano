@@ -4,15 +4,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetStore, useAppStore } from '../../store/store'
 
-const TIMELINE_HEIGHT_PX = 120
+const TIMELINE_HEIGHT_PX = 230
 let createdVideoElements: HTMLVideoElement[] = []
 let animationFrameCallbacks: FrameRequestCallback[] = []
 
 const mockWarmUp = vi.hoisted(() => vi.fn(async () => undefined))
 const mockSetMuted = vi.hoisted(() => vi.fn())
+const mockAudioSchedulerStart = vi.hoisted(() => vi.fn())
+const mockAudioSchedulerSeek = vi.hoisted(() => vi.fn())
 const mockRendererGetKeyX = vi.hoisted(() => vi.fn((pitch: number) => (pitch === 21 ? 100 : 900)))
 const mockRendererGetKeyboardY = vi.hoisted(() => vi.fn(() => 120))
 const mockRendererSetKeyboardOpacity = vi.hoisted(() => vi.fn())
+const mockActiveVisualizerRenderer = vi.hoisted(() => ({
+  current: null as null | {
+    getKeyX: (pitch: number) => number
+    getKeyboardY: () => number
+    setKeyboardOpacity: (opacity: number) => void
+  },
+}))
 const mockPlaybackPlay = vi.hoisted(() => vi.fn())
 const mockPlayWithPreRoll = vi.hoisted(() => vi.fn())
 const mockPlaybackPause = vi.hoisted(() => vi.fn())
@@ -57,22 +66,28 @@ const mockMediaRecorderStop = vi.hoisted(() => vi.fn())
 const mockCreateObjectURL = vi.hoisted(() => vi.fn(() => 'blob:camera-mode'))
 const mockRevokeObjectURL = vi.hoisted(() => vi.fn())
 const mockAnchorClick = vi.hoisted(() => vi.fn())
+const mockWriteFile = vi.hoisted(() => vi.fn(async () => undefined))
 const mockDecodeAudioData = vi.hoisted(() => vi.fn())
 const mockAudioContextClose = vi.hoisted(() => vi.fn(async () => undefined))
+const mockActiveVisualizerCanvas = vi.hoisted(() => ({
+  current: null as HTMLCanvasElement | null,
+}))
 
 vi.mock('../../audio/AudioScheduler', () => ({
   audioScheduler: {
     setMuted: mockSetMuted,
+    seek: mockAudioSchedulerSeek,
+    start: mockAudioSchedulerStart,
     warmUp: mockWarmUp,
   },
 }))
 
-vi.mock('../../renderer/Renderer', () => ({
-  renderer: {
-    getKeyX: mockRendererGetKeyX,
-    getKeyboardY: mockRendererGetKeyboardY,
-    setKeyboardOpacity: mockRendererSetKeyboardOpacity,
-  },
+vi.mock('../../renderer/activeVisualizerRenderer', () => ({
+  getActiveVisualizerRenderer: () => mockActiveVisualizerRenderer.current,
+}))
+
+vi.mock('../../renderer/activeCanvas', () => ({
+  getActiveVisualizerCanvas: () => mockActiveVisualizerCanvas.current,
 }))
 
 vi.mock('../../playback/PlaybackEngine', () => ({
@@ -97,9 +112,16 @@ describe('CameraMode', () => {
     mockWarmUp.mockReset()
     mockWarmUp.mockImplementation(async () => undefined)
     mockSetMuted.mockReset()
+    mockAudioSchedulerStart.mockReset()
+    mockAudioSchedulerSeek.mockReset()
     mockRendererGetKeyX.mockClear()
     mockRendererGetKeyboardY.mockClear()
     mockRendererSetKeyboardOpacity.mockReset()
+    mockActiveVisualizerRenderer.current = {
+      getKeyX: mockRendererGetKeyX,
+      getKeyboardY: mockRendererGetKeyboardY,
+      setKeyboardOpacity: mockRendererSetKeyboardOpacity,
+    }
     mockPlaybackPlay.mockReset()
     mockPlayWithPreRoll.mockReset()
     mockPlaybackPause.mockReset()
@@ -131,12 +153,15 @@ describe('CameraMode', () => {
     mockCreateObjectURL.mockReturnValue('blob:camera-mode')
     mockRevokeObjectURL.mockReset()
     mockAnchorClick.mockReset()
+    mockWriteFile.mockReset()
+    mockWriteFile.mockImplementation(async () => undefined)
     mockDecodeAudioData.mockReset()
     mockDecodeAudioData.mockResolvedValue({
       getChannelData: () => new Float32Array([0, 0.25, 0.5, 0.75, 1]),
     })
     mockAudioContextClose.mockReset()
     mockAudioContextClose.mockImplementation(async () => undefined)
+    mockActiveVisualizerCanvas.current = null
     createdVideoElements = []
     animationFrameCallbacks = []
 
@@ -289,23 +314,32 @@ describe('CameraMode', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the visualizer in the top 60% and the webcam in the bottom 40%', async () => {
+  it('starts in setup with the same cropped frame used for recording and no automatic playback', async () => {
     render(<CameraModeHarness />)
 
     await waitFor(() => {
       expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
     })
-    expect(mockGetUserMedia).toHaveBeenCalledWith({ audio: true, video: true })
+    expect(mockGetUserMedia).toHaveBeenCalledWith({
+      audio: true,
+      video: {
+        frameRate: { ideal: 60 },
+        height: { ideal: 1080 },
+        width: { ideal: 1920 },
+      },
+    })
 
     expect(screen.getByTestId('camera-visualizer-slot').style.height).toBe('60%')
     expect(screen.getByTestId('camera-mode-panel-slot').style.height).toBe('40%')
     expect(screen.getByTestId('camera-mode-video')).toBeTruthy()
+    expect(screen.getByTestId('camera-mode-setup-crop-viewport')).toBeTruthy()
     expect(screen.queryByTestId('camera-mode-preview-video')).toBeNull()
+    expect(mockPlaybackPause).toHaveBeenCalledWith()
     expect(mockPlaybackSeek).toHaveBeenCalledWith(0)
-    expect(mockPlayWithPreRoll).toHaveBeenCalledWith(3)
+    expect(mockPlayWithPreRoll).not.toHaveBeenCalled()
   })
 
-  it('applies crop styles to the live webcam crop frame from camera overlay settings', async () => {
+  it('uses the recording crop transform during setup', async () => {
     useAppStore.getState().setCameraOverlay({
       cropBottom: 16,
       cropLeft: 18,
@@ -320,16 +354,41 @@ describe('CameraMode', () => {
     })
 
     expect(screen.getByTestId('camera-mode-video')).toBeTruthy()
-    const cropFrame = screen.getByTestId('camera-mode-crop-frame') as HTMLDivElement
-    expect(cropFrame.style.top).toBe('-12px')
-    expect(cropFrame.style.left).toBe('-18px')
-    expect(cropFrame.style.right).toBe('')
-    expect(cropFrame.style.bottom).toBe('')
-    expect(cropFrame.style.width).toBe('calc(100% + 32px)')
-    expect(cropFrame.style.height).toBe('calc(100% + 28px)')
+    const video = screen.getByTestId('camera-mode-video')
+    expect(video.className).toContain('webcamVideo')
+    fireEvent(video, new Event('loadedmetadata'))
+    const cropFrame = screen.getByTestId('camera-mode-setup-crop-frame') as HTMLDivElement
+    expect(cropFrame.style.transform).not.toBe('')
   })
 
-  it('applies crop styles to the preview crop frame after recording stops', async () => {
+  it('orients the feed and resolves crop values from visible edges', async () => {
+    useAppStore.getState().setCameraOverlay({
+      cropBottom: 30,
+      cropLeft: 40,
+      cropRight: 20,
+      cropTop: 10,
+      flipHorizontal: true,
+      rotation: 90,
+    })
+    Object.defineProperty(window, 'electronFS', {
+      configurable: true,
+      value: { mkdir: vi.fn(), rm: vi.fn(), writeFile: mockWriteFile },
+    })
+    render(<CameraModeHarness />)
+
+    await waitFor(() => expect(mockVideoPlay).toHaveBeenCalledTimes(1))
+
+    const orientation = screen.getByTestId('camera-mode-feed-orientation')
+    expect(orientation.style.transform).toBe('rotate(90deg) scaleX(-1) scaleY(1)')
+    expect(orientation.style.transformOrigin).toBe('center')
+
+    const video = screen.getByTestId('camera-mode-video')
+    fireEvent(video, new Event('loadedmetadata'))
+    const cropFrame = screen.getByTestId('camera-mode-setup-crop-frame') as HTMLDivElement
+    expect(cropFrame.style.transform).not.toBe('')
+  })
+
+  it('keeps the preview video surface stable while crop values change after recording stops', async () => {
     useAppStore.getState().setCameraOverlay({
       cropBottom: 10,
       cropLeft: 8,
@@ -357,13 +416,20 @@ describe('CameraMode', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
 
     expect(screen.getByTestId('camera-mode-preview-video')).toBeTruthy()
+    expect(useAppStore.getState().activeSecondBarTab).toBe('camera')
     const cropFrame = screen.getByTestId('camera-mode-crop-frame') as HTMLDivElement
-    expect(cropFrame.style.top).toBe('-4px')
-    expect(cropFrame.style.left).toBe('-8px')
-    expect(cropFrame.style.right).toBe('')
-    expect(cropFrame.style.bottom).toBe('')
-    expect(cropFrame.style.width).toBe('calc(100% + 14px)')
-    expect(cropFrame.style.height).toBe('calc(100% + 14px)')
+    const previewVideo = screen.getByTestId('camera-mode-preview-video')
+    expect(cropFrame.style.width).toBe('100%')
+    expect(cropFrame.style.height).toBe('100%')
+    expect(cropFrame.style.transform).toBe('translate3d(0, 0, 0) scale(1)')
+
+    act(() => {
+      useAppStore.getState().setCameraOverlay({ cropLeft: 0 })
+    })
+    expect(cropFrame.style.width).toBe('100%')
+    expect(cropFrame.style.height).toBe('100%')
+    expect(cropFrame.style.transform).toBe('translate3d(0, 0, 0) scale(1)')
+    expect(screen.getByTestId('camera-mode-preview-video')).toBe(previewVideo)
   })
 
   it('renders an alignment click overlay over the live camera view and forwards clicks', async () => {
@@ -423,13 +489,39 @@ describe('CameraMode', () => {
   })
 
   it('shows an error state when camera access fails', async () => {
-    mockGetUserMedia.mockRejectedValueOnce(new Error('denied'))
+    mockGetUserMedia
+      .mockRejectedValueOnce(new Error('microphone denied'))
+      .mockRejectedValueOnce(new Error('camera denied'))
 
     render(<CameraModeHarness />)
 
     await waitFor(() => {
       expect(screen.getByTestId('camera-error-state')).toBeTruthy()
     })
+  })
+
+  it('continues with video-only capture when the microphone is unavailable', async () => {
+    const warningSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    mockGetUserMedia
+      .mockRejectedValueOnce(new Error('microphone denied'))
+      .mockResolvedValueOnce({
+        getTracks: () => [{ stop: mockTrackStop }],
+      })
+
+    render(<CameraModeHarness />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('camera-mode-video')).toBeTruthy()
+    })
+    const preferredVideo = {
+      frameRate: { ideal: 60 },
+      height: { ideal: 1080 },
+      width: { ideal: 1920 },
+    }
+    expect(mockGetUserMedia).toHaveBeenNthCalledWith(1, { audio: true, video: preferredVideo })
+    expect(mockGetUserMedia).toHaveBeenNthCalledWith(2, { audio: false, video: preferredVideo })
+    expect(screen.queryByTestId('camera-error-state')).toBeNull()
+    warningSpy.mockRestore()
   })
 
   it('starts recording at the beginning of the 3 second countdown and aligns playback pre-roll', async () => {
@@ -454,10 +546,12 @@ describe('CameraMode', () => {
       await Promise.resolve()
     })
     expect(mockWarmUp).toHaveBeenCalledTimes(1)
-    expect(mockSetMuted).toHaveBeenCalledWith(true)
+    expect(mockSetMuted).toHaveBeenCalledWith(false)
     expect(mockMediaRecorderStart).toHaveBeenCalledTimes(1)
     expect(mockPlaybackSeek).toHaveBeenCalledWith(0)
     expect(mockPlayWithPreRoll).toHaveBeenCalledWith(3)
+    expect(mockAudioSchedulerSeek).toHaveBeenCalledWith(0)
+    expect(mockAudioSchedulerStart).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('camera-countdown').textContent).toBe('3')
     expect(backButton.disabled).toBe(true)
     expect(screen.getByRole('button', { name: 'Recording countdown' }).textContent).toBe('3')
@@ -523,6 +617,7 @@ describe('CameraMode', () => {
     })
 
     await act(async () => {
+      useAppStore.setState({ currentTick: useAppStore.getState().projectData!.totalTicks })
       for (const listener of mockPlaybackListeners.get('onEnded') ?? []) {
         listener()
       }
@@ -536,6 +631,27 @@ describe('CameraMode', () => {
     expect(screen.queryByTestId('camera-countdown')).toBeNull()
     expect(screen.getByTestId('camera-mode-preview-video')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('does not let an onEnded event during the three-second countdown stop the recorder', async () => {
+    render(<CameraModeHarness />)
+
+    await waitFor(() => {
+      expect(mockVideoPlay).toHaveBeenCalledTimes(1)
+    })
+
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }))
+    await act(async () => {
+      await Promise.resolve()
+      useAppStore.setState({ currentTick: useAppStore.getState().projectData!.totalTicks })
+      for (const listener of mockPlaybackListeners.get('onEnded') ?? []) {
+        listener()
+      }
+    })
+
+    expect(mockMediaRecorderStop).not.toHaveBeenCalled()
+    expect(screen.getByTestId('camera-countdown')).toBeTruthy()
   })
 
   it('plays and pauses the recorded preview after recording stops', async () => {
@@ -559,18 +675,20 @@ describe('CameraMode', () => {
     mockPlayWithPreRoll.mockClear()
     mockPlaybackPause.mockClear()
     mockPlaybackSeek.mockClear()
-    let performanceNow = 1000
-    const performanceNowSpy = vi.spyOn(performance, 'now').mockImplementation(() => performanceNow)
-
+    mockAudioSchedulerSeek.mockClear()
+    mockAudioSchedulerStart.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Play preview' }))
     await act(async () => {
       await Promise.resolve()
     })
 
     expect(mockVideoPlay).toHaveBeenCalledTimes(1)
-    expect(mockSetMuted).toHaveBeenCalledWith(false)
-    expect(mockPlayWithPreRoll).toHaveBeenCalledWith(3)
-    expect(mockPlaybackSeek).not.toHaveBeenCalled()
+    expect(mockWarmUp).toHaveBeenCalled()
+    // Review honors the three-second lead-in through the timeline clock: no
+    // MIDI transport starts until the recorded video reaches that point.
+    expect(mockAudioSchedulerSeek).not.toHaveBeenCalled()
+    expect(mockAudioSchedulerStart).not.toHaveBeenCalled()
+    expect(mockPlayWithPreRoll).not.toHaveBeenCalled()
 
     const previewVideo = screen.getByTestId('camera-mode-preview-video') as HTMLVideoElement
     fireEvent(previewVideo, new Event('play'))
@@ -578,11 +696,7 @@ describe('CameraMode', () => {
 
     previewVideo.currentTime = 4.5
     fireEvent(previewVideo, new Event('timeupdate'))
-    expect(mockPlaybackSeek).not.toHaveBeenCalled()
-
-    performanceNow = 3500
-    fireEvent(previewVideo, new Event('timeupdate'))
-    expect(mockPlaybackSeek).toHaveBeenLastCalledWith(1440)
+    expect(mockPlaybackSeek).toHaveBeenCalledWith(1440)
 
     fireEvent.click(screen.getByRole('button', { name: 'Pause preview' }))
 
@@ -591,21 +705,31 @@ describe('CameraMode', () => {
     expect(screen.getByRole('button', { name: 'Play preview' })).toBeTruthy()
   })
 
-  it('toggles MIDI mute from the control bar', async () => {
+  it('shows independent MIDI and camera audio controls in the timeline', async () => {
     render(<CameraModeHarness />)
 
     await waitFor(() => {
       expect(mockVideoPlay).toHaveBeenCalledTimes(1)
     })
 
-    const muteButton = screen.getByRole('button', { name: 'Mute MIDI' })
-    fireEvent.click(muteButton)
-    expect(mockSetMuted).toHaveBeenLastCalledWith(true)
-    expect(screen.getByRole('button', { name: 'Unmute MIDI' }).textContent).toBe('🔇')
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }))
+    await act(async () => {
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
+    vi.useRealTimers()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Unmute MIDI' }))
-    expect(mockSetMuted).toHaveBeenLastCalledWith(false)
-    expect(screen.getByRole('button', { name: 'Mute MIDI' }).textContent).toBe('🎹')
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline' }))
+    expect(screen.getByTestId('recording-timeline-editor')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-midiAudio')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-midiVideo')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-cameraAudio')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-cameraVideo')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'MIDI Audio' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Camera Audio' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByRole('button', { name: 'Mute MIDI' })).toBeNull()
   })
 
   it('plays preview video without visualizer sync when no project is loaded', async () => {
@@ -639,14 +763,14 @@ describe('CameraMode', () => {
     expect(mockPlaybackSeek).not.toHaveBeenCalled()
   })
 
-  it('keeps track and export disabled until a recording exists', async () => {
+  it('keeps timeline and export disabled until a recording exists', async () => {
     render(<CameraModeHarness />)
 
     await waitFor(() => {
       expect(mockVideoPlay).toHaveBeenCalledTimes(1)
     })
 
-    const trackButton = screen.getByRole('button', { name: 'Track' }) as HTMLButtonElement
+    const trackButton = screen.getByRole('button', { name: 'Timeline' }) as HTMLButtonElement
     const exportButton = screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement
 
     expect(trackButton.disabled).toBe(true)
@@ -662,16 +786,17 @@ describe('CameraMode', () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
 
-    expect((screen.getByRole('button', { name: 'Track' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Timeline' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
 
-    expect((screen.getByRole('button', { name: 'Track' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Timeline' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('composites the visualizer on export and disables controls while exporting', async () => {
+    useAppStore.getState().setVisualizerSettings({ aspectRatio: '9:16', resolution: '1080p' })
     render(<CameraModeHarness />)
 
     await waitFor(() => {
@@ -686,7 +811,6 @@ describe('CameraMode', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
 
-    const createdVideoCountBeforeExport = createdVideoElements.length
     mockVideoPlay.mockClear()
     mockCreateObjectURL.mockClear()
     mockRevokeObjectURL.mockClear()
@@ -695,28 +819,43 @@ describe('CameraMode', () => {
     mockMediaRecorderStop.mockClear()
 
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(screen.getByRole('dialog', { name: 'Export Camera Video' })).toBeTruthy()
+    expect(screen.getByText(/Camera source:/)).toBeTruthy()
+    expect(screen.getByText('Output frame: 1080×1920')).toBeTruthy()
+    expect(screen.getByText('Timeline offsets are included in this export.')).toBeTruthy()
+    expect(screen.getByText('Aspect ratio, resolution, and framerate apply to the full composite.')).toBeTruthy()
+    fireEvent.change(screen.getByDisplayValue('camera-recording.webm'), {
+      target: { value: 'C:/exports/camera-result.mp4' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start Export' }))
     await act(async () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByRole('button', { name: 'Exporting' }).textContent).toBe('EXPORTING...')
+    expect(screen.getByRole('button', { name: 'Exporting' }).querySelector('.lucide-download')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Track' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Timeline' }) as HTMLButtonElement).disabled).toBe(true)
     expect(mockMediaRecorderStart).toHaveBeenCalledTimes(1)
     expect(mockVideoPlay).toHaveBeenCalledTimes(1)
 
-    const exportVideo = createdVideoElements[createdVideoCountBeforeExport]
+    const exportVideo = createdVideoElements.at(-1)
     expect(exportVideo).toBeTruthy()
+    Object.defineProperty(exportVideo, 'currentTime', { configurable: true, value: 5 })
     fireEvent(exportVideo, new Event('ended'))
 
     expect(mockMediaRecorderStop).toHaveBeenCalledTimes(1)
-    expect(mockCreateObjectURL).toHaveBeenCalledTimes(2)
-    expect(mockAnchorClick).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(mockWriteFile).toHaveBeenCalledTimes(1)
+    expect(mockWriteFile).toHaveBeenCalledWith('C:/exports/camera-result.webm', expect.any(Uint8Array))
+    expect(mockAnchorClick).not.toHaveBeenCalled()
     expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:camera-mode')
     await act(async () => {
       await Promise.resolve()
     })
-    expect(screen.getByRole('button', { name: 'Export' }).textContent).toBe('EXPORT')
+    expect(screen.getByRole('button', { name: 'Export' }).querySelector('.lucide-download')).toBeTruthy()
   })
 
   it('still exports successfully when camera crop values are set', async () => {
@@ -744,16 +883,17 @@ describe('CameraMode', () => {
     mockMediaRecorderStart.mockClear()
     mockVideoPlay.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start Export' }))
     await act(async () => {
       await Promise.resolve()
     })
 
     expect(mockMediaRecorderStart).toHaveBeenCalledTimes(1)
     expect(mockVideoPlay).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: 'Exporting' }).textContent).toBe('EXPORTING...')
+    expect(screen.getByRole('button', { name: 'Exporting' }).querySelector('.lucide-download')).toBeTruthy()
   })
 
-  it('shows the interactive timeline after recording and draws the waveform', async () => {
+  it('shows and hides the four-row timeline after recording', async () => {
     render(<CameraModeHarness />)
 
     await waitFor(() => {
@@ -769,92 +909,19 @@ describe('CameraMode', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
 
     vi.useRealTimers()
-    fireEvent.click(screen.getByRole('button', { name: 'Track' }))
-    await waitFor(() => {
-      expect(mockCanvasContext.beginPath).toHaveBeenCalled()
-    })
-
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline' }))
     expect(screen.getByTestId('camera-mode-timeline')).toBeTruthy()
-    expect(screen.getByTestId('camera-mode-preview-video')).toBeTruthy()
-    expect(screen.getByTestId('camera-track-row-audio')).toBeTruthy()
-    expect(screen.getByTestId('camera-track-row-video')).toBeTruthy()
-    expect(screen.getByTestId('camera-track-row-visualization')).toBeTruthy()
-    expect(screen.getByTestId('camera-audio-waveform')).toBeTruthy()
-    expect(mockDecodeAudioData).toHaveBeenCalledTimes(1)
-    expect(mockCanvasContext.stroke).toHaveBeenCalled()
+    expect(screen.getByTestId('recording-timeline-editor')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-midiAudio')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-midiVideo')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-cameraAudio')).toBeTruthy()
+    expect(screen.getByTestId('recording-timeline-row-cameraVideo')).toBeTruthy()
+    expect((screen.getByLabelText('Camera Audio offset') as HTMLInputElement).disabled).toBe(true)
     expect(screen.getByTestId('camera-visualizer-slot').style.height).toBe(
       `calc(60% - ${TIMELINE_HEIGHT_PX}px)`,
     )
-    expect(screen.getByTestId('camera-mode-panel-slot').style.height).toBe(`calc(40% + ${TIMELINE_HEIGHT_PX}px)`)
-    const webcamSection = screen.getByTestId('camera-mode-video-section')
-    const timelineSection = screen.getByTestId('camera-mode-timeline')
-    expect(webcamSection.compareDocumentPosition(timelineSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Track' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline' }))
     expect(screen.queryByTestId('camera-mode-timeline')).toBeNull()
-  })
-
-  it('draws a flat fallback waveform when audio decoding fails', async () => {
-    mockDecodeAudioData.mockRejectedValueOnce(new Error('decode failed'))
-
-    render(<CameraModeHarness />)
-
-    await waitFor(() => {
-      expect(mockVideoPlay).toHaveBeenCalledTimes(1)
-    })
-
-    vi.useFakeTimers()
-    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }))
-    await act(async () => {
-      await Promise.resolve()
-      await vi.advanceTimersByTimeAsync(3000)
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
-
-    vi.useRealTimers()
-    mockCanvasContext.moveTo.mockClear()
-    mockCanvasContext.lineTo.mockClear()
-    fireEvent.click(screen.getByRole('button', { name: 'Track' }))
-
-    await waitFor(() => {
-      expect(mockCanvasContext.moveTo).toHaveBeenCalledWith(0, 400)
-    })
-    expect(mockCanvasContext.lineTo).toHaveBeenCalledWith(1200, 400)
-  })
-
-  it('supports dragging track offsets and trim handles', async () => {
-    render(<CameraModeHarness />)
-
-    await waitFor(() => {
-      expect(mockVideoPlay).toHaveBeenCalledTimes(1)
-    })
-
-    vi.useFakeTimers()
-    fireEvent.click(screen.getByRole('button', { name: 'Start recording' }))
-    await act(async () => {
-      await Promise.resolve()
-      await vi.advanceTimersByTimeAsync(3000)
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Track' }))
-
-    const videoTrack = screen.getByTestId('camera-track-content-video')
-    fireEvent.mouseDown(videoTrack, { clientX: 100 })
-    fireEvent.mouseMove(document, { clientX: 140 })
-    fireEvent.mouseUp(document)
-    expect(videoTrack.style.transform).toBe('translateX(40px)')
-
-    const startHandle = screen.getByTestId('camera-track-handle-start-video')
-    fireEvent.mouseDown(startHandle, { clientX: 100 })
-    fireEvent.mouseMove(document, { clientX: 130 })
-    fireEvent.mouseUp(document)
-    expect(videoTrack.style.left).toBe('30px')
-
-    const endHandle = screen.getByTestId('camera-track-handle-end-video')
-    fireEvent.mouseDown(endHandle, { clientX: 200 })
-    fireEvent.mouseMove(document, { clientX: 160 })
-    fireEvent.mouseUp(document)
-    expect(videoTrack.style.right).toBe('40px')
   })
 
   it('returns to Create Mode and pauses playback from the back button', async () => {
@@ -864,6 +931,8 @@ describe('CameraMode', () => {
     await waitFor(() => {
       expect(mockVideoPlay).toHaveBeenCalledTimes(1)
     })
+
+    mockPlaybackPause.mockClear()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
@@ -886,6 +955,7 @@ function CameraModeHarness({
 }: {
   onAlignClick?: (event: React.MouseEvent<HTMLDivElement>) => void
 }) {
+  const visualizerCanvasRef = React.useRef<HTMLCanvasElement | null>(null)
   const [isTimelineVisible, setIsTimelineVisible] = React.useState(false)
   const visualizerHeight = isTimelineVisible
     ? `calc(60% - ${TIMELINE_HEIGHT_PX}px)`
@@ -894,10 +964,20 @@ function CameraModeHarness({
     ? `calc(40% + ${TIMELINE_HEIGHT_PX}px)`
     : '40%'
 
+  React.useEffect(() => {
+    mockActiveVisualizerCanvas.current = visualizerCanvasRef.current
+
+    return () => {
+      if (mockActiveVisualizerCanvas.current === visualizerCanvasRef.current) {
+        mockActiveVisualizerCanvas.current = null
+      }
+    }
+  }, [])
+
   return (
     <div data-testid="camera-layout" style={{ width: '100%', height: '100%' }}>
       <div data-testid="camera-visualizer-slot" style={{ height: visualizerHeight }}>
-        <canvas data-testid="pixi-canvas" />
+        <canvas ref={visualizerCanvasRef} data-testid="pixi-canvas" />
       </div>
       <div data-testid="camera-mode-panel-slot" style={{ height: cameraModeHeight }}>
         <CameraMode

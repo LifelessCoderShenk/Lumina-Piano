@@ -1,14 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectData, Track } from '../midi/types'
+import type { VisualizerRenderFrameOptions, VisualizerResizeOptions } from '../renderer/VisualizerRenderer'
 import { resetStore, useAppStore } from '../store/store'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
-import { secondsToTick } from '../tempo/tempoMap'
-import { ExportEngine, ExportError, runFFmpeg, validateSettings } from './ExportEngine'
+import { secondsToTick, tickToSeconds } from '../tempo/tempoMap'
+import { ExportEngine, ExportError, getVp9VideoBitrate, runFFmpeg, validateSettings } from './ExportEngine'
+import type { ExportSettings } from './types'
 
 const mockMkdir = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const mockRm = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const mockGetCanvas = vi.hoisted(() => vi.fn(() => createMockCanvas()))
+const mockActiveVisualizerRenderer = vi.hoisted(() => ({
+  current: null as null | {
+    beginOfflineRender: () => void
+    endOfflineRender: () => void
+    getCanvas: () => HTMLCanvasElement
+    getRenderLayoutContext?: () => { keyboardHeightRatio: number }
+    isReady: () => boolean
+    renderFrame: (tick: number, options?: VisualizerRenderFrameOptions) => void
+    resize: (width: number, height: number, options?: VisualizerResizeOptions) => void
+  },
+}))
+const mockBeginOfflineRender = vi.hoisted(() => vi.fn())
+const mockEndOfflineRender = vi.hoisted(() => vi.fn())
 const mockRenderFrame = vi.hoisted(() => vi.fn())
 const mockResize = vi.hoisted(() => vi.fn())
 const mockGetTempDir = vi.hoisted(() => vi.fn(() => Promise.resolve('C:\\temp\\lumina-export-test')))
@@ -75,13 +89,8 @@ vi.mock('tone', () => ({
   loaded: mockToneLoaded,
 }))
 
-vi.mock('../renderer/Renderer', () => ({
-  renderer: {
-    getCanvas: mockGetCanvas,
-    isReady: vi.fn(() => true),
-    renderFrame: mockRenderFrame,
-    resize: mockResize,
-  },
+vi.mock('../renderer/activeVisualizerRenderer', () => ({
+  getActiveVisualizerRenderer: () => mockActiveVisualizerRenderer.current,
 }))
 
 vi.mock('../camera/CameraSystem', () => ({
@@ -101,6 +110,14 @@ vi.mock('../playback/PlaybackEngine', () => ({
 beforeEach(() => {
   resetStore()
   vi.clearAllMocks()
+  mockActiveVisualizerRenderer.current = {
+    beginOfflineRender: mockBeginOfflineRender,
+    endOfflineRender: mockEndOfflineRender,
+    getCanvas: () => createMockCanvas(),
+    isReady: () => true,
+    renderFrame: mockRenderFrame,
+    resize: mockResize,
+  }
   vi.stubGlobal('VideoEncoder', class VideoEncoder {
     readonly encodeQueueSize = 0
     private readonly output: (chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata) => void
@@ -140,7 +157,6 @@ beforeEach(() => {
     }
   })
   window.electronAPI = {
-    deleteSong: vi.fn(),
     openJsonFile: vi.fn(),
     openMidiFile: vi.fn(),
     showSaveDialog: vi.fn(),
@@ -156,16 +172,9 @@ beforeEach(() => {
     ffmpeg: {
       run: mockFfmpegRun,
     },
-    getSongs: vi.fn(async () => []),
-    library: {
-      deleteUserSong: vi.fn(),
-      getUserSongs: vi.fn(async () => []),
-      saveUserSong: vi.fn(),
-    },
     shell: {
       openPath: vi.fn(),
     },
-    uploadSong: vi.fn(),
     window: {
       close: vi.fn(),
       maximize: vi.fn(),
@@ -188,25 +197,33 @@ afterEach(() => {
 })
 
 describe('validateSettings', () => {
-  it('maps 720p, 1080p, and 4K resolutions', () => {
-    expect(validateSettings(createSettings({ resolution: '720p' }))).toEqual({
-      height: 720,
-      width: 1280,
-    })
-    expect(validateSettings(createSettings({ resolution: '1080p' }))).toEqual({
-      height: 1080,
-      width: 1920,
-    })
-    expect(validateSettings(createSettings({ resolution: '4K' }))).toEqual({
-      height: 2160,
-      width: 3840,
+  it('uses the visualizer settings to derive the export format', () => {
+    const visualizerSettings = {
+      ...useAppStore.getState().visualizerSettings,
+      aspectRatio: '9:16' as const,
+      framerate: 30 as const,
+      resolution: '1080p' as const,
+    }
+
+    expect(validateSettings(createSettings(), visualizerSettings)).toMatchObject({
+      aspectRatio: '9:16',
+      fps: 30,
+      resolution: { height: 1920, width: 1080 },
+      resolutionTier: '1080p',
     })
   })
 
-  it('throws INVALID_SETTINGS for invalid resolution, fps, and output path', () => {
-    expect(() => validateSettings(createSettings({ resolution: 'portrait' as '1080p' }))).toThrowError(ExportError)
-    expect(() => validateSettings(createSettings({ fps: 24 as 30 }))).toThrowError(ExportError)
-    expect(() => validateSettings(createSettings({ outputPath: '/tmp/output.mov' }))).toThrowError(ExportError)
+  it('throws INVALID_SETTINGS for invalid visualizer settings or output path', () => {
+    const visualizerSettings = useAppStore.getState().visualizerSettings
+    expect(() => validateSettings(createSettings(), {
+      ...visualizerSettings,
+      resolution: 'portrait' as '1080p',
+    })).toThrowError(ExportError)
+    expect(() => validateSettings(createSettings(), {
+      ...visualizerSettings,
+      framerate: 24 as 30,
+    })).toThrowError(ExportError)
+    expect(() => validateSettings(createSettings({ outputPath: '/tmp/output.mov' }), visualizerSettings)).toThrowError(ExportError)
   })
 })
 
@@ -254,6 +271,50 @@ describe('ExportEngine', () => {
     expect(useAppStore.getState().isExporting).toBe(false)
   })
 
+  it('throws NOT_INITIALIZED when no active renderer is ready', async () => {
+    loadProject(480)
+    mockActiveVisualizerRenderer.current = null
+
+    const engine = new ExportEngine()
+    await expect(engine.export(createSettings())).rejects.toMatchObject({ code: 'NOT_INITIALIZED' })
+  })
+
+  it('suspends the active renderer for offline export and restores it before playback resumes', async () => {
+    loadProject(480)
+    useAppStore.setState({
+      currentTick: 240,
+      isPlaying: true,
+      viewportHeight: 720,
+      viewportWidth: 1280,
+    })
+
+    const engine = new ExportEngine()
+    await engine.export(createSettings({ includeAudio: false }))
+
+    expect(mockPlaybackPause).toHaveBeenCalledTimes(2)
+    expect(mockBeginOfflineRender).toHaveBeenCalledTimes(1)
+    expect(mockEndOfflineRender).toHaveBeenCalledTimes(1)
+    expect(mockResize).toHaveBeenNthCalledWith(1, 1920, 1080, {
+      pixelRatio: 1,
+      postprocessScale: 2,
+    })
+    expect(mockResize).toHaveBeenNthCalledWith(2, 1280, 720)
+    expect(mockPlaybackSeek).toHaveBeenCalledWith(240)
+    expect(mockPlaybackPlay).toHaveBeenCalledTimes(1)
+
+    const beginOrder = mockBeginOfflineRender.mock.invocationCallOrder[0]
+    const exportResizeOrder = mockResize.mock.invocationCallOrder[0]
+    const restoreResizeOrder = mockResize.mock.invocationCallOrder[1]
+    const seekOrder = mockPlaybackSeek.mock.invocationCallOrder[0]
+    const endOrder = mockEndOfflineRender.mock.invocationCallOrder[0]
+    const playOrder = mockPlaybackPlay.mock.invocationCallOrder[0]
+
+    expect(beginOrder).toBeLessThan(exportResizeOrder)
+    expect(restoreResizeOrder).toBeLessThan(seekOrder)
+    expect(seekOrder).toBeLessThan(endOrder)
+    expect(endOrder).toBeLessThan(playOrder)
+  })
+
   it('renders the expected number of frames and seeks renderer per tick', async () => {
     const tempoMap = createTempoMap()
     loadProject(960, tempoMap)
@@ -265,11 +326,113 @@ describe('ExportEngine', () => {
 
     expect(mockRenderFrame).toHaveBeenCalledTimes(expectedFrames)
     expect(mockRenderFrame.mock.calls[0]?.[0]).toBe(0)
-    expect(mockGetCanvas).toHaveBeenCalled()
+    expect(mockRenderFrame.mock.calls[0]?.[1]).toEqual({ animationTimeSeconds: 0 })
+    expect((mockRenderFrame.mock.calls[1]?.[1] as VisualizerRenderFrameOptions | undefined)?.animationTimeSeconds)
+      .toBeCloseTo(1 / 30, 6)
     expect(mockVideoEncoderEncode).toHaveBeenCalledTimes(expectedFrames)
     expect(mockSaveFile).toHaveBeenCalledTimes(1)
     expect(mockMkdir).toHaveBeenCalled()
     expect(mockRm).toHaveBeenCalled()
+    expect(mockResize).toHaveBeenNthCalledWith(1, 1920, 1080, {
+      pixelRatio: 1,
+      postprocessScale: 2,
+    })
+    expect(mockResize).toHaveBeenLastCalledWith(useAppStore.getState().viewportWidth, useAppStore.getState().viewportHeight)
+  })
+
+  it('caps export postprocess supersampling for 4K renders', async () => {
+    loadProject(480)
+    const engine = new ExportEngine()
+
+    await engine.export(createSettings({
+      includeAudio: false,
+      resolution: '4K',
+    }))
+
+    expect(mockResize).toHaveBeenNthCalledWith(1, 3840, 2160, {
+      pixelRatio: 1,
+      postprocessScale: 1,
+    })
+  })
+
+  it('renders a vertical Create export at the full portrait resolution', async () => {
+    loadProject(480)
+
+    await new ExportEngine().export(createSettings({
+      aspectRatio: '9:16',
+      includeAudio: false,
+      resolution: '1080p',
+    }))
+
+    expect(mockResize).toHaveBeenNthCalledWith(1, 1_080, 1_920, {
+      pixelRatio: 1,
+      postprocessScale: 1.125,
+    })
+    expect(mockRenderFrame).toHaveBeenCalled()
+    expect(mockBeginOfflineRender.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRenderFrame.mock.invocationCallOrder[0])
+    expect(mockEndOfflineRender.mock.invocationCallOrder[0])
+      .toBeGreaterThan(mockRenderFrame.mock.invocationCallOrder.at(-1) ?? 0)
+  })
+
+  it('snapshots the live keyboard height ratio for the offline renderer', async () => {
+    loadProject(480)
+    mockActiveVisualizerRenderer.current = {
+      beginOfflineRender: mockBeginOfflineRender,
+      endOfflineRender: mockEndOfflineRender,
+      getCanvas: () => createMockCanvas(),
+      getRenderLayoutContext: () => ({ keyboardHeightRatio: 0.42 }),
+      isReady: () => true,
+      renderFrame: mockRenderFrame,
+      resize: mockResize,
+    }
+
+    await new ExportEngine().export(createSettings({ includeAudio: false }))
+
+    expect(mockResize).toHaveBeenNthCalledWith(1, 1920, 1080, {
+      layoutContext: { keyboardHeightRatio: 0.42 },
+      pixelRatio: 1,
+      postprocessScale: 2,
+    })
+    expect(mockResize).toHaveBeenNthCalledWith(2, useAppStore.getState().viewportWidth, useAppStore.getState().viewportHeight, {
+      layoutContext: { keyboardHeightRatio: 0.42 },
+    })
+  })
+
+  it('scales VP9 bitrate with export pixels and framerate', () => {
+    expect(getVp9VideoBitrate(1280, 720, 30)).toBe(8_000_000)
+    expect(getVp9VideoBitrate(1920, 1080, 30)).toBe(9_953_280)
+    expect(getVp9VideoBitrate(3840, 2160, 60)).toBe(79_626_240)
+  })
+
+  it('snapshots visualizer settings when export begins', async () => {
+    loadProject(480)
+    useAppStore.getState().setVisualizerSettings({
+      aspectRatio: '4:3',
+      framerate: 30,
+      resolution: '1080p',
+    })
+    mockRenderFrame.mockImplementationOnce(() => {
+      useAppStore.getState().setVisualizerSettings({
+        aspectRatio: '1:1',
+        framerate: 60,
+        resolution: '4K',
+      })
+    })
+
+    const engine = new ExportEngine()
+    await engine.export(createSettings({ includeAudio: false }))
+
+    expect(mockResize).toHaveBeenNthCalledWith(1, 1920, 1440, {
+      pixelRatio: 1,
+      postprocessScale: 1.5,
+    })
+    expect(mockVideoEncoderConfigure).toHaveBeenCalledWith(expect.objectContaining({
+      framerate: 30,
+      height: 1440,
+      width: 1920,
+    }))
+    expect(mockRenderFrame).toHaveBeenCalledTimes(15)
   })
 
   it('writes zero-padded PNG filenames and updates progress', async () => {
@@ -347,6 +510,47 @@ describe('ExportEngine', () => {
     expect(mockFsWriteFile).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps audio and video aligned to the same zero-offset export timeline', async () => {
+    loadProject(960, createTempoMap(), [
+      {
+        channel: 0,
+        id: 'track-1',
+        name: 'Track 1',
+        notes: [
+          createNote('note-1', 0, 120, 60),
+          createNote('note-2', 480, 600, 64),
+        ],
+      },
+    ])
+
+    const engine = new ExportEngine()
+    await engine.export(createSettings())
+
+    expect(mockRenderFrame.mock.calls[0]?.[0]).toBe(0)
+    expect(mockSamplerTriggerAttackRelease.mock.calls[0]?.[2]).toBe(0)
+    expect(mockSamplerTriggerAttackRelease.mock.calls[1]?.[2]).toBeCloseTo(0.5, 6)
+  })
+
+  it('uses per-frame time mapping to avoid cumulative drift at 110 BPM and 30 fps', async () => {
+    const tempoMap = createTempoMap(110)
+    const totalTicks = secondsToTick(60, tempoMap)
+    loadProject(totalTicks, tempoMap)
+
+    const engine = new ExportEngine()
+    await engine.export(createSettings({ fps: 30, includeAudio: false }))
+
+    const expectedFrames = Math.ceil(tickToSeconds(totalTicks, tempoMap) * 30)
+    const lastFrameIndex = expectedFrames - 1
+    const lastRenderedTick = mockRenderFrame.mock.calls.at(-1)?.[0]
+    const expectedLastTick = secondsToTick(lastFrameIndex / 30, tempoMap)
+    const oldTicksPerFrame = secondsToTick(1 / 30, tempoMap)
+    const oldSteppedLastTick = Math.min(totalTicks, lastFrameIndex * oldTicksPerFrame)
+
+    expect(lastRenderedTick).toBe(expectedLastTick)
+    expect(lastRenderedTick).not.toBe(oldSteppedLastTick)
+    expect(tickToSeconds(lastRenderedTick ?? 0, tempoMap)).toBeCloseTo(lastFrameIndex / 30, 2)
+  })
+
   it('throws FFMPEG_FAILED when ffmpeg exits with a non-zero code', async () => {
     loadProject(480)
     mockFfmpegRun.mockRejectedValueOnce(new Error('ffmpeg failed'))
@@ -363,13 +567,27 @@ describe('runFFmpeg', () => {
   })
 })
 
-function createSettings(overrides: Partial<import('./types').ExportSettings> = {}): import('./types').ExportSettings {
+type TestSettingsOverrides = Partial<ExportSettings> & {
+  fps?: 30 | 60
+  resolution?: '720p' | '1080p' | '4K'
+  aspectRatio?: 'fit' | '16:9' | '9:16' | '1:1' | '4:3'
+}
+
+function createSettings(overrides: TestSettingsOverrides = {}): ExportSettings {
+  const { aspectRatio, fps, resolution, ...exportSettings } = overrides
+
+  if (aspectRatio != null || fps != null || resolution != null) {
+    useAppStore.getState().setVisualizerSettings({
+      ...(aspectRatio == null ? {} : { aspectRatio }),
+      ...(fps == null ? {} : { framerate: fps }),
+      ...(resolution == null ? {} : { resolution }),
+    })
+  }
+
   return {
-    fps: 30,
     includeAudio: true,
     outputPath: 'C:\\temp\\export.mp4',
-    resolution: '1080p',
-    ...overrides,
+    ...exportSettings,
   }
 }
 
@@ -409,16 +627,18 @@ function createNote(id: string, startTick: number, visualEndTick: number, pitch:
   }
 }
 
-function createTempoMap(): PrecomputedTempoMap {
+function createTempoMap(bpm = 120): PrecomputedTempoMap {
+  const microsecondsPerBeat = 60_000_000 / bpm
+
   return {
     segments: [
       {
-        bpm: 120,
+        bpm,
         endTick: Number.POSITIVE_INFINITY,
-        microsecondsPerBeat: 500_000,
+        microsecondsPerBeat,
         startSeconds: 0,
         startTick: 0,
-        ticksPerSecond: (480 * 1_000_000) / 500_000,
+        ticksPerSecond: (480 * 1_000_000) / microsecondsPerBeat,
       },
     ],
   }

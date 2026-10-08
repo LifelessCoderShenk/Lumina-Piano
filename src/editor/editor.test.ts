@@ -73,7 +73,7 @@ import {
   commandHistory,
 } from '../commands'
 import type { Note, ProjectData } from '../midi/types'
-import { KEYBOARD_HEIGHT } from '../renderer/layoutConstants'
+import { getKeyboardLayoutMetrics } from '../renderer/layoutConstants'
 import { resetStore, useAppStore } from '../store/store'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 import { NoteEditorController } from './NoteEditorController'
@@ -301,7 +301,7 @@ describe('noteToScreenRect', () => {
     const rect = noteToScreenRect(note, note.startTick)!
 
     expect(rect.x).toBeGreaterThan(0)
-    expect(rect.y + rect.h).toBe(useAppStore.getState().viewportHeight - KEYBOARD_HEIGHT)
+    expect(rect.y + rect.h).toBe(getKeyboardLayoutMetrics(useAppStore.getState().viewportHeight).keyboardY)
   })
 })
 

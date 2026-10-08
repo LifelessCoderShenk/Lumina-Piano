@@ -6,6 +6,7 @@ export { MoveNotesCommand } from './MoveNotesCommand'
 export { PasteNotesCommand } from './PasteNotesCommand'
 export { QuantizeNotesCommand } from './QuantizeNotesCommand'
 export { ResizeNotesCommand } from './ResizeNotesCommand'
+export { SetNoteVelocityCommand } from './SetNoteVelocityCommand'
 export { useCommandShortcuts } from './useCommandShortcuts'
 export { CommandError } from './errors'
 

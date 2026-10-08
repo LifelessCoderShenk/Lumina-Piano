@@ -11,6 +11,13 @@
   box-sizing: border-box;
 }
 
+.sheetOverlay {
+  position: absolute;
+  padding: 16px;
+  background: rgb(0 0 0 / 48%);
+  backdrop-filter: none;
+}
+
 .dialog {
   width: 480px;
   max-width: min(480px, calc(100vw - 48px));
@@ -69,7 +76,7 @@
 
 .closeButton:disabled {
   cursor: default;
-  opacity: 0.35;
+  color: var(--color-icon-muted);
 }
 
 .body {

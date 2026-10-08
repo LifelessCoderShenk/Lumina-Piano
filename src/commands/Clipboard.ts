@@ -49,6 +49,7 @@ export class Clipboard {
       trackId: copiedNote.trackId,
       velocity: copiedNote.note.velocity,
       visualEndTick: copiedNote.note.visualEndTick,
+      ...(copiedNote.note.fingering == null ? {} : { fingering: { ...copiedNote.note.fingering } }),
     }))
 
     return new PasteNotesCommand(notes, targetTick)

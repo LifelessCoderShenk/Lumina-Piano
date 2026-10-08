@@ -1,3 +1,12 @@
+export type PianoHand = 'left' | 'right'
+export type PianoFinger = 1 | 2 | 3 | 4 | 5
+
+export interface NoteFingering {
+  hand: PianoHand
+  finger: PianoFinger
+  source: 'generated' | 'manual'
+}
+
 export interface Note {
   id: string
   pitch: number
@@ -5,6 +14,7 @@ export interface Note {
   endTick: number
   visualEndTick: number
   velocity: number
+  fingering?: NoteFingering
 }
 
 export interface Track {

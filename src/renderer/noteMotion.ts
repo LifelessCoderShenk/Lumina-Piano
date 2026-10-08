@@ -1,7 +1,7 @@
 import type { Note } from '../midi/types'
 import { secondsToTick, tickToSeconds } from '../tempo/tempoMap'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
-import { NOTE_MIN_HEIGHT, getKeyboardLayoutMetrics } from './layoutConstants'
+import { NOTE_MIN_HEIGHT, getKeyboardLayoutMetrics, type RenderLayoutContext } from './layoutConstants'
 import {
   getBlackKeyWidth,
   getWhiteKeyWidth,
@@ -36,11 +36,23 @@ interface NoteScreenRectOptions {
   canvasHeight: number
   currentSeconds: number
   currentTick: number
+  layoutContext?: RenderLayoutContext
+  noteWidthScale?: number
   tempoMap: PrecomputedTempoMap
   worldZoom: number
 }
 
-export function getEffectivePixelsPerSecond(worldZoom: number): number {
+export function getEffectivePixelsPerSecond(
+  worldZoom: number,
+  noteFieldHeight?: number,
+  layoutContext?: Partial<RenderLayoutContext>,
+): number {
+  const travelSeconds = layoutContext?.noteFieldTravelSeconds
+  const safeNoteFieldHeight = Number.isFinite(noteFieldHeight) ? Math.max(0, noteFieldHeight as number) : 0
+  if (Number.isFinite(travelSeconds) && (travelSeconds as number) > 0 && safeNoteFieldHeight > 0) {
+    return (safeNoteFieldHeight / (travelSeconds as number)) * Math.max(worldZoom, 0.1)
+  }
+
   return DEFAULT_PIXELS_PER_SECOND * Math.max(worldZoom, 0.1)
 }
 
@@ -50,8 +62,9 @@ export function getVisibleTickWindow(
   tempoMap: PrecomputedTempoMap,
   noteFieldHeight: number,
   worldZoom: number,
+  layoutContext?: Partial<RenderLayoutContext>,
 ): VisibleTickWindow {
-  const pixelsPerSecond = getEffectivePixelsPerSecond(worldZoom)
+  const pixelsPerSecond = getEffectivePixelsPerSecond(worldZoom, noteFieldHeight, layoutContext)
   const minSeconds = Math.max(0, currentSeconds - RECENT_NOTE_BUFFER_SECONDS)
   const maxSeconds = currentSeconds + (noteFieldHeight / pixelsPerSecond) + FUTURE_NOTE_BUFFER_SECONDS
 
@@ -121,8 +134,8 @@ function getBaseNoteScreenRect(
     tempoMap,
     worldZoom,
   } = options
-  const { keyboardY } = getKeyboardLayoutMetrics(canvasHeight)
-  const pixelsPerSecond = getEffectivePixelsPerSecond(worldZoom)
+  const { keyboardY } = getKeyboardLayoutMetrics(canvasHeight, options.layoutContext)
+  const pixelsPerSecond = getEffectivePixelsPerSecond(worldZoom, keyboardY, options.layoutContext)
   const startSeconds = tickToSeconds(note.startTick, tempoMap)
   const endSeconds = tickToSeconds(effectiveVisualEndTick, tempoMap)
   const durationSeconds = Math.max(0, endSeconds - startSeconds)
@@ -149,7 +162,10 @@ function getBaseNoteScreenRect(
   const noteWidthRatio = isBlackKey(note.pitch)
     ? BLACK_NOTE_WIDTH_RATIO
     : WHITE_NOTE_WIDTH_RATIO
-  const noteWidth = Math.max(4, keyWidth * noteWidthRatio)
+  const noteWidthScale = Number.isFinite(options.noteWidthScale)
+    ? Math.min(1.2, Math.max(0.6, options.noteWidthScale as number))
+    : 1
+  const noteWidth = Math.max(4, keyWidth * noteWidthRatio * noteWidthScale)
   const noteX = keyX + ((keyWidth - noteWidth) / 2)
   const yTop = yBottom - noteHeight
 

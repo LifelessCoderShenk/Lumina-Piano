@@ -1,5 +1,4 @@
 import type { SaveDialogOptions } from 'electron'
-import type { SongMetadata } from '../learn/types'
 
 export interface ElectronFS {
   mkdir(path: string): Promise<void>
@@ -9,6 +8,7 @@ export interface ElectronFS {
 }
 
 export interface ElectronExportBridge {
+  saveScorePdf?(html: string, outputPath: string): Promise<void>
   getTempDir(): Promise<string>
   saveFile(payload: {
     buffer: number[]
@@ -17,14 +17,19 @@ export interface ElectronExportBridge {
 }
 
 export interface ElectronAPI {
-  getSongs(): Promise<SongMetadata[]>
-  uploadSong(): Promise<SongMetadata | null>
-  deleteSong(songId: string): Promise<void>
   showSaveDialog(options: SaveDialogOptions): Promise<string | null>
   openJsonFile(): Promise<string | null>
   openMidiFile(): Promise<string | null>
+  openMusicXmlFile?(): Promise<string | null>
+  openProjectFile?(): Promise<string | null>
+  openVideoFile?(): Promise<string | null>
+  openAudioFile?(): Promise<string | null>
   dialog: {
+    openAudioFile?(): Promise<string | null>
     openMidiFile(): Promise<string | null>
+    openMusicXmlFile?(): Promise<string | null>
+    openProjectFile?(): Promise<string | null>
+    openVideoFile?(): Promise<string | null>
     showSaveDialog(options: SaveDialogOptions): Promise<string | null>
     getDefaultExportPath(): Promise<string | null>
   }
@@ -32,10 +37,9 @@ export interface ElectronAPI {
   ffmpeg: {
     run(args: string[]): Promise<void>
   }
-  library: {
-    getUserSongs(): Promise<SongMetadata[]>
-    saveUserSong(payload: { sourcePath: string }): Promise<SongMetadata>
-    deleteUserSong(songId: string): Promise<void>
+  samplePieces: {
+    list(): Promise<string[]>
+    read(fileName: string): Promise<Uint8Array>
   }
   shell: {
     openPath(path: string): Promise<void>

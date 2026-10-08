@@ -212,10 +212,20 @@ describe('playNotes()', () => {
 
     scheduler.destroy()
   })
+
+  it('plays a live note at its MIDI velocity without timeline playback', async () => {
+    const scheduler = await setupScheduler()
+    mockFrequencyToNote.mockReturnValue('E4')
+
+    await scheduler.playLiveNote(64, 96, 700)
+
+    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('E4', 0.7, undefined, 96 / 127)
+    scheduler.destroy()
+  })
 })
 
 describe('warmUpAudio()', () => {
-  it('warmUp starts Tone, waits for samples, primes the sampler, and restores volume after the warm-up delay', async () => {
+  it('warmUp starts Tone, waits for samples, and primes silently without changing volume', async () => {
     const scheduler = await setupScheduler()
     scheduler.setVolume(-18)
 
@@ -223,27 +233,19 @@ describe('warmUpAudio()', () => {
 
     expect(mockToneStart).toHaveBeenCalled()
     expect(mockToneLoaded).toHaveBeenCalled()
-    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('C4', 0.01)
-    expect(getSamplerVolume()).toBe(Number.NEGATIVE_INFINITY)
-
-    vi.advanceTimersByTime(50)
-
+    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('C4', 0.01, undefined, 0)
     expect(getSamplerVolume()).toBe(-18)
 
     scheduler.destroy()
   })
 
-  it('primeSampler triggers a silent note and restores the previous volume after the warm-up delay', async () => {
+  it('primeSampler uses zero velocity so no warm-up tail leaks into the visual lead-in', async () => {
     const scheduler = await setupScheduler()
     scheduler.setVolume(-20)
 
     scheduler.primeSampler()
 
-    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('C4', 0.01)
-    expect(getSamplerVolume()).toBe(Number.NEGATIVE_INFINITY)
-
-    vi.advanceTimersByTime(50)
-
+    expect(mockTriggerAttackRelease).toHaveBeenCalledWith('C4', 0.01, undefined, 0)
     expect(getSamplerVolume()).toBe(-20)
 
     scheduler.destroy()
@@ -404,65 +406,6 @@ describe('scheduleAhead()', () => {
     scheduler.destroy()
   })
 
-  it('hand left skips scheduling notes with pitch 60 and above', async () => {
-    const scheduler = await setupScheduler()
-    loadProjectWithNotes([
-      createNote('left-note', 0, 480, 59, 100),
-      createNote('right-note', 0, 480, 60, 100),
-    ])
-
-    useAppStore.getState().setSessionConfig({ hand: 'left', mode: 'listen' })
-    useAppStore.getState().startSession()
-    useAppStore.getState().setCurrentTick(0)
-    useAppStore.getState().setIsPlaying(true)
-    scheduler.start()
-
-    vi.advanceTimersByTime(25)
-
-    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(1)
-
-    scheduler.destroy()
-  })
-
-  it('hand right skips scheduling notes with pitch below 60', async () => {
-    const scheduler = await setupScheduler()
-    loadProjectWithNotes([
-      createNote('left-note', 0, 480, 59, 100),
-      createNote('right-note', 0, 480, 60, 100),
-    ])
-
-    useAppStore.getState().setSessionConfig({ hand: 'right', mode: 'listen' })
-    useAppStore.getState().startSession()
-    useAppStore.getState().setCurrentTick(0)
-    useAppStore.getState().setIsPlaying(true)
-    scheduler.start()
-
-    vi.advanceTimersByTime(25)
-
-    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(1)
-
-    scheduler.destroy()
-  })
-
-  it('hand both schedules all notes', async () => {
-    const scheduler = await setupScheduler()
-    loadProjectWithNotes([
-      createNote('left-note', 0, 480, 59, 100),
-      createNote('right-note', 0, 480, 60, 100),
-    ])
-
-    useAppStore.getState().setSessionConfig({ hand: 'both', mode: 'listen' })
-    useAppStore.getState().startSession()
-    useAppStore.getState().setCurrentTick(0)
-    useAppStore.getState().setIsPlaying(true)
-    scheduler.start()
-
-    vi.advanceTimersByTime(25)
-
-    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(2)
-
-    scheduler.destroy()
-  })
 })
 
 describe('seek()', () => {
@@ -532,30 +475,6 @@ describe('seek()', () => {
     scheduler.destroy()
   })
 
-  it('applies the hand filter after a seek reschedule', async () => {
-    const scheduler = await setupScheduler()
-    loadProjectWithNotes([
-      createNote('left-note', 960, 1_440, 59, 100),
-      createNote('right-note', 960, 1_440, 60, 100),
-    ])
-
-    useAppStore.getState().setSessionConfig({ hand: 'left', mode: 'listen' })
-    useAppStore.getState().startSession()
-    useAppStore.getState().setCurrentTick(0)
-    useAppStore.getState().setIsPlaying(true)
-    scheduler.start()
-    vi.advanceTimersByTime(25)
-
-    mockTriggerAttackRelease.mockClear()
-
-    useAppStore.getState().setCurrentTick(960)
-    scheduler.seek(960)
-    vi.advanceTimersByTime(25)
-
-    expect(mockTriggerAttackRelease).toHaveBeenCalledTimes(1)
-
-    scheduler.destroy()
-  })
 })
 
 describe('store integration', () => {

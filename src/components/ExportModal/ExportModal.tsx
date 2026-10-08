@@ -1,30 +1,29 @@
-import { useEffect, useId, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
+import { CircleAlert } from 'lucide-react'
 
+import { AppIcon } from '../AppIcon/AppIcon'
 import { ExportComplete } from './ExportComplete'
 import { ExportProgress } from './ExportProgress'
 import { ExportSettings } from './ExportSettings'
+import { ExportSheetShell } from './ExportSheetShell'
 import { useExportState } from './useExportState'
 import styles from './ExportModal.module.css'
 
 export interface ExportModalProps {
   isOpen: boolean
   onClose(): void
+  variant?: 'modal' | 'sheet'
 }
 
-export function ExportModal({ isOpen, onClose }: ExportModalProps) {
-  const modalRef = useRef<HTMLDivElement>(null)
-  const titleId = useId()
-  const previousActiveElementRef = useRef<HTMLElement | null>(null)
+export function ExportModal({ isOpen, onClose, variant = 'modal' }: ExportModalProps) {
   const {
     browseOutputPath,
     cancelExport,
     ensureDefaultOutputPath,
     openFile,
     resetTransientState,
-    setFps,
     setIncludeAudio,
     setOutputPath,
-    setResolution,
     startExport,
     state,
   } = useExportState()
@@ -32,12 +31,6 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const isExporting = state.phase === 'exporting'
   const canDismiss = !isExporting
   const startDisabled = state.outputPath.trim().length === 0
-  const dialogClassName = [
-    styles.dialog,
-    isExporting ? styles.dialogLocked : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
 
   useEffect(() => {
     if (!isOpen) {
@@ -50,71 +43,6 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
     void ensureDefaultOutputPath()
   }, [ensureDefaultOutputPath, isExporting, isOpen, resetTransientState])
 
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    previousActiveElementRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-
-    const focusableElements = getFocusableElements(modalRef.current)
-    focusableElements[0]?.focus()
-
-    return () => {
-      previousActiveElementRef.current?.focus()
-    }
-  }, [isOpen])
-
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (!canDismiss) {
-          return
-        }
-
-        event.preventDefault()
-        resetTransientState()
-        onClose()
-        return
-      }
-
-      if (event.key !== 'Tab') {
-        return
-      }
-
-      const focusableElements = getFocusableElements(modalRef.current)
-      if (focusableElements.length === 0) {
-        event.preventDefault()
-        return
-      }
-
-      const firstElement = focusableElements[0]
-      const lastElement = focusableElements[focusableElements.length - 1]
-      const activeElement = document.activeElement
-
-      if (event.shiftKey && activeElement === firstElement) {
-        event.preventDefault()
-        lastElement.focus()
-        return
-      }
-
-      if (!event.shiftKey && activeElement === lastElement) {
-        event.preventDefault()
-        firstElement.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [canDismiss, isOpen, onClose, resetTransientState])
 
   const content = useMemo(() => {
     if (state.phase === 'complete') {
@@ -134,13 +62,12 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
       return (
         <ExportProgress
           estimatedSecondsRemaining={state.estimatedSecondsRemaining}
-          fps={state.fps}
           framesRendered={state.framesRendered}
+          formatSummary={state.formatSummary}
           includeAudio={state.includeAudio}
           onCancel={cancelExport}
           phaseLabel={state.phaseLabel}
           progress={state.progress}
-          resolution={state.resolution}
           totalFrames={state.totalFrames}
         />
       )
@@ -150,7 +77,7 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
       return (
         <div className={styles.errorState}>
           <div className={styles.errorBanner}>
-            <span className={styles.errorIcon}>!</span>
+            <AppIcon className={styles.errorIcon} icon={CircleAlert} size={20} />
             <div className={styles.errorText}>
               <strong>Export failed</strong>
               <span>{state.errorMessage ?? 'Export failed'}</span>
@@ -182,20 +109,16 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
 
     return (
       <ExportSettings
-        fps={state.fps}
         includeAudio={state.includeAudio}
         onBrowse={() => {
           void browseOutputPath()
         }}
-        onFpsChange={setFps}
         onIncludeAudioChange={setIncludeAudio}
         onOutputPathChange={setOutputPath}
-        onResolutionChange={setResolution}
         onStartExport={() => {
           void startExport()
         }}
         outputPath={state.outputPath}
-        resolution={state.resolution}
         startDisabled={startDisabled}
       />
     )
@@ -205,76 +128,28 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
     onClose,
     openFile,
     resetTransientState,
-    setFps,
     setIncludeAudio,
     setOutputPath,
-    setResolution,
     startDisabled,
     startExport,
     state,
   ])
 
-  if (!isOpen) {
-    return null
-  }
-
   return (
-    <div
-      className={styles.overlay}
-      onMouseDown={(event) => {
+    <ExportSheetShell
+      canDismiss={canDismiss}
+      isOpen={isOpen}
+      onClose={() => {
         if (!canDismiss) {
           return
         }
-
-        if (event.target === event.currentTarget) {
-          resetTransientState()
-          onClose()
-        }
+        resetTransientState()
+        onClose()
       }}
+      title="Export Video"
+      variant={variant}
     >
-      <div
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className={dialogClassName}
-        ref={modalRef}
-        role="dialog"
-      >
-        <div className={styles.header}>
-          <h2 className={styles.title} id={titleId}>Export Video</h2>
-          <button
-            aria-label="Close export dialog"
-            className={styles.closeButton}
-            disabled={!canDismiss}
-            onClick={() => {
-              if (!canDismiss) {
-                return
-              }
-
-              resetTransientState()
-              onClose()
-            }}
-            type="button"
-          >
-            x
-          </button>
-        </div>
-
-        <div className={styles.body}>
-          {content}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function getFocusableElements(container: HTMLDivElement | null): HTMLElement[] {
-  if (container == null) {
-    return []
-  }
-
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
+      {content}
+    </ExportSheetShell>
   )
 }

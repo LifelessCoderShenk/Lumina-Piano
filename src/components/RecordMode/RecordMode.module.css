@@ -1,3 +1,93 @@
+.recordHub {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+}
+
+.recordHubHeader {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--color-bg);
+}
+
+.hubBackButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.recordViewTabs {
+  display: flex;
+  gap: 8px;
+}
+
+.recordViewTabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recordViewTabs button:hover:enabled, .hubBackButton:hover:enabled { background: rgba(255, 255, 255, 0.08); }
+.recordViewTabs button[aria-selected='true'] { border-color: var(--color-icon); color: var(--color-text-header); }
+.recordViewTabs button:disabled, .hubBackButton:disabled { opacity: .5; cursor: not-allowed; }
+.sidebarToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 96px;
+  height: 38px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: #b8c5d4;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sidebarToggle:hover { background: rgba(255, 255, 255, 0.08); color: var(--color-text-body); }
+.sidebarToggle:focus-visible { outline: 2px solid #7bb7f1; outline-offset: 2px; }
+@media (max-width: 900px) {
+  .recordHubHeader { gap: 4px; padding-inline: 6px; }
+  .hubBackButton, .recordViewTabs button { padding-inline: 6px; white-space: nowrap; }
+  .recordViewTabs { gap: 4px; }
+  .sidebarToggle { min-width: 38px; width: 38px; padding: 0; justify-content: center; }
+  .sidebarToggle span { display: none; }
+}
+.recordHubBody { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+
 .recordMode {
   width: 100%;
   height: 100%;
@@ -54,6 +144,125 @@
   letter-spacing: 0.08em;
 }
 
+.setupStage {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.setupControlsRegion {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 62.5%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  pointer-events: none;
+}
+
+.setupPanel {
+  pointer-events: auto;
+  width: min(980px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.94);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.34);
+}
+
+.setupPanelHeader {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setupPanelHeader .setupIntro { margin-top: 4px; }
+
+.setupSection {
+  align-self: stretch;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.audioIncluded {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #a8c8e8;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.optionalLabel {
+  margin-left: 4px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.setupPanel > .setupWarning { grid-column: 1 / -1; }
+.setupPanel .recordButton { grid-column: 1 / -1; margin-top: 0; padding: 10px 14px; }
+.setupPanel .cameraPreview { height: 88px; min-height: 72px; margin-top: 0; overflow: hidden; }
+.setupPanel .midiTestStatus { min-height: 18px; font-size: 12px; }
+
+.cameraSourceHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.importVideoButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: #9fc4e8;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .05em;
+  cursor: pointer;
+}
+
+.importVideoButton:hover:enabled { color: #d5e8fa; }
+.importVideoButton:disabled { color: var(--color-icon-muted); cursor: wait; }
+
+.setupIntro,
+.setupHint,
+.setupWarning {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.setupIntro,
+.setupHint { color: rgba(255, 255, 255, 0.62); }
+.setupWarning { color: #ef9da5; }
+
 .section {
   display: flex;
   flex-direction: column;
@@ -87,8 +296,7 @@
 }
 
 .inlineRow,
-.toggleRow,
-.trackToggleRow {
+.toggleRow {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -100,7 +308,6 @@
 
 .toggleButton,
 .testButton,
-.placeholderButton,
 .stopButton,
 .controlButton {
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -121,6 +328,9 @@
 }
 
 .midiTestStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 20px;
   color: rgba(255, 255, 255, 0.7);
   font-family: Arial, sans-serif;
@@ -159,10 +369,22 @@
   border-radius: 4px;
 }
 
-.liveVideo,
-.reviewVideo {
+.liveVideo {
   height: 100%;
   object-fit: cover;
+}
+
+.reviewVideo {
+  height: 100%;
+  object-fit: fill;
+}
+
+.framedVideo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  object-fit: fill;
 }
 
 .recordButton {
@@ -183,33 +405,6 @@
 .recordDot {
   color: #ff3333;
   line-height: 1;
-}
-
-.disabledControls {
-  opacity: 0.4;
-  pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.enabledControls {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cropGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.disabledNote {
-  margin: 0;
-  color: #7b7b7b;
-  font-family: Arial, sans-serif;
-  font-size: 12px;
 }
 
 .overlayMessage {
@@ -238,6 +433,33 @@
 .liveVideo {
   position: absolute;
   inset: 0;
+}
+
+@media (max-width: 920px), (max-height: 680px) {
+  .setupPanel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cameraSetupSection { grid-column: 1 / -1; }
+  .setupPanel .cameraPreview { display: none; }
+}
+
+.liveVisualizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60%;
+  z-index: 2;
+  display: flex;
+}
+
+.liveVideoSlot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40%;
+  z-index: 1;
+  overflow: hidden;
+  background: #000000;
 }
 
 .countdown {
@@ -325,32 +547,49 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .cropFrame {
   position: absolute;
+  will-change: transform;
 }
 
-.reviewControlsPanel {
+.reviewTimeline {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 260px;
-  max-height: calc(100% - 96px);
-  overflow: auto;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  z-index: 18;
-  box-sizing: border-box;
+  left: 0;
+  right: 0;
+  bottom: 48px;
+  max-height: 230px;
+  z-index: 15;
 }
 
-.alignInstruction {
+.exportError,
+.exportWarning {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 56px;
+  z-index: 18;
   margin: 0;
-  color: #ffffff;
-  font-family: Arial, sans-serif;
-  font-size: 12px;
-  font-style: italic;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.exportError {
+  color: #ffd5d1;
+  background: rgb(156 42 31 / 88%);
+}
+
+.exportWarning {
+  color: #fff0b3;
+  background: rgb(105 77 16 / 88%);
+}
+
+.feedOrientation {
+  position: absolute;
+  inset: 0;
 }
 
 .overlayBar {
@@ -379,11 +618,33 @@
 
 .controlButton[disabled],
 .recordButton:disabled,
-.placeholderButton:disabled,
-.enabledControls input:disabled,
-.disabledControls input:disabled {
-  opacity: 0.4;
+.testButton:disabled {
+  color: var(--color-icon-muted);
   cursor: not-allowed;
+}
+
+.exportFormat {
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 3px;
+  background: #111;
+  color: var(--color-text-body);
+  font: inherit;
+}
+
+.exportProgress { width: 90px; accent-color: var(--color-icon); }
+
+.exportStatus {
+  color: var(--color-text-body);
+  font-size: 11px;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+.loadingIcon { animation: spin 900ms linear infinite; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .scrubber {

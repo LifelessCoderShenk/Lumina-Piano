@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+/*
+INPUT: TopBar interactions and an isolated application store.
+OUTPUT: Toolbar behavior coverage for the Create home and unified Record Mode entry.
+PURPOSE: Ensures Transcription is reached through Record Mode while Create remains a stable visualizer action.
+*/
+
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +26,12 @@ vi.mock('../../playback/PlaybackEngine', () => ({
   },
 }))
 
+const { registerMidiPieceLoader } = await import('../../store/midiPieceLoaderAccess')
+registerMidiPieceLoader({
+  loadMidiFileFromPath: mockLoadMidiFileFromPath,
+  warmUpAudioAndStartPlayback: mockWarmUpAudioAndStartPlayback,
+})
+
 const { TopBar } = await import('./TopBar')
 const { resetStore, useAppStore } = await import('../../store/store')
 
@@ -35,7 +47,6 @@ describe('TopBar', () => {
     applyDesignTokens()
 
     window.electronAPI = {
-      deleteSong: vi.fn(),
       dialog: {
         getDefaultExportPath: vi.fn(),
         openMidiFile: vi.fn(async () => null),
@@ -48,19 +59,16 @@ describe('TopBar', () => {
       ffmpeg: {
         run: vi.fn(),
       },
-      getSongs: vi.fn(async () => []),
-      library: {
-        deleteUserSong: vi.fn(),
-        getUserSongs: vi.fn(async () => []),
-        saveUserSong: vi.fn(),
-      },
       openJsonFile: vi.fn(),
       openMidiFile: vi.fn(async () => 'C:/music/demo-piece.mid'),
+      samplePieces: {
+        list: vi.fn(async () => []),
+        read: vi.fn(async () => new Uint8Array()),
+      },
       shell: {
         openPath: vi.fn(),
       },
       showSaveDialog: vi.fn(),
-      uploadSong: vi.fn(),
       window: {
         close: vi.fn(),
         maximize: vi.fn(),
@@ -74,36 +82,44 @@ describe('TopBar', () => {
     resetStore()
   })
 
-  it('renders all 5 top bar buttons', () => {
+  it('renders the Falling Keys tools and one wide Create recording action', () => {
     render(<TopBar />)
 
     const topBar = screen.getByTestId('top-bar')
-    const addButton = screen.getByRole('button', { name: 'Add Piece' })
-    const homeButton = screen.getByRole('button', { name: 'Home' })
+    const createButton = screen.getByRole('button', { name: 'Create' })
+    const clearButton = screen.getByRole('button', { name: 'Clear piece' })
     const settingsButton = screen.getByRole('button', { name: 'Settings' })
     const cameraButton = screen.getByRole('button', { name: 'Camera' })
-    const recordButton = screen.getByRole('button', { name: 'Record' })
 
     expect(topBar.style.backgroundColor).toBe('var(--color-bg)')
-    expect(addButton).toBeTruthy()
-    expect(homeButton).toBeTruthy()
+    expect(createButton.textContent).toBe('Create')
+    expect(clearButton).toBeTruthy()
     expect(settingsButton).toBeTruthy()
     expect(cameraButton).toBeTruthy()
-    expect(recordButton).toBeTruthy()
-    expect(addButton.style.color).toBe('var(--color-icon)')
-    expect(homeButton.style.color).toBe('var(--color-icon)')
+    expect(screen.queryByRole('button', { name: 'Record' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add Piece' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open Transcriptor' })).toBeNull()
+    expect(clearButton.style.color).toBe('var(--color-icon-muted)')
+    expect((clearButton as HTMLButtonElement).disabled).toBe(true)
+    expect(clearButton.title).toBe('No piece loaded')
     expect(settingsButton.style.color).toBe('var(--color-icon)')
-    expect(cameraButton.style.color).toBe('var(--color-icon)')
-    expect(recordButton.style.color).toBe('var(--color-icon)')
+    expect(cameraButton.style.color).toBe('var(--color-icon-muted)')
+    expect(createButton.style.color).toBe('var(--color-icon)')
+    expect(clearButton.querySelector('svg.lucide-file-x-corner[fill="none"]')).toBeTruthy()
+    expect(settingsButton.querySelector('svg.lucide-sliders-horizontal')).toBeTruthy()
+    for (const button of [clearButton, settingsButton, cameraButton, createButton]) {
+      expect(button.querySelector('svg')?.getAttribute('width')).toBe('20')
+    }
   })
 
-  it('dims the camera button when no piece is loaded', () => {
+  it('uses the muted icon token when the camera button is unavailable', () => {
     render(<TopBar />)
 
     const cameraButton = screen.getByRole('button', { name: 'Camera' }) as HTMLButtonElement
     expect(cameraButton.disabled).toBe(true)
     expect(cameraButton.title).toBe('Load a piece first')
-    expect(cameraButton.style.opacity).toBe('0.5')
+    expect(cameraButton.style.color).toBe('var(--color-icon-muted)')
+    expect(cameraButton.style.opacity).toBe('')
   })
 
   it('toggles settings through the settings button props', () => {
@@ -115,36 +131,11 @@ describe('TopBar', () => {
     expect(toggleSettings).toHaveBeenCalledTimes(1)
   })
 
-  it('opens the file picker, creates a piece, and starts playback for MIDI files', async () => {
-    render(<TopBar />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add Piece' }))
-
-    await waitFor(() => {
-      expect(window.electronAPI.openMidiFile).toHaveBeenCalledTimes(1)
-    })
-
-    await waitFor(() => {
-      expect(mockLoadMidiFileFromPath).toHaveBeenCalledWith('C:/music/demo-piece.mid')
-    })
-
-    await waitFor(() => {
-      expect(mockWarmUpAudioAndStartPlayback).toHaveBeenCalledTimes(1)
-    })
-
-    expect(useAppStore.getState().pieces).toHaveLength(1)
-    expect(useAppStore.getState().pieces[0]).toMatchObject({
-      filePath: 'C:/music/demo-piece.mid',
-      name: 'demo-piece',
-      type: 'midi',
-    })
-  })
-
-  it('home clears the currently loaded piece state', () => {
+  it('Clear piece clears the currently loaded piece state', () => {
     useAppStore.getState().loadProject(createProjectData(), createTempoMap())
 
     render(<TopBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear piece' }))
 
     expect(mockPlaybackPause).toHaveBeenCalledTimes(1)
     expect(mockPlaybackSeek).toHaveBeenCalledWith(0)
@@ -172,13 +163,42 @@ describe('TopBar', () => {
     expect(useAppStore.getState().appMode).toBe('createCamera')
   })
 
-  it('enters record mode from the record button', () => {
+  it('opens the Performance and Transcription workspace from Create', () => {
     render(<TopBar />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Record' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
     expect(useAppStore.getState().appMode).toBe('createRecord')
-    expect(useAppStore.getState().activeSecondBarTab).toBe('pieces')
+    expect(useAppStore.getState().activeSecondBarTab).toBe('camera')
+  })
+
+  it('keeps the selected recording workspace when Create is already open', () => {
+    useAppStore.setState({ appMode: 'createRecord', recordModeView: 'transcription', transcriptionPhase: 'stopped' })
+    render(<TopBar />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    expect(mockPlaybackPause).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().appMode).toBe('createRecord')
+    expect(useAppStore.getState().recordModeView).toBe('transcription')
+  })
+
+  it('locks workflow switching while a transcription is being captured', () => {
+    useAppStore.setState({ appMode: 'createRecord', recordModeView: 'transcription', transcriptionPhase: 'recording' })
+    render(<TopBar />)
+
+    expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('locks every Create navigation exit while another recorder is busy', () => {
+    useAppStore.setState({ isProjectLoaded: true })
+    render(<TopBar isCreateNavigationLocked onToggleSettings={vi.fn()} />)
+
+    for (const name of ['Clear piece', 'Settings', 'Camera', 'Create']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement
+      expect(button.disabled).toBe(true)
+      expect(button.title).toContain('Stop or cancel')
+    }
   })
 })
 

@@ -1,158 +1,58 @@
-import React, { useState } from 'react'
+/*
+INPUT: Active app and recording state plus mode-specific tool availability.
+OUTPUT: The primary Falling Keys tools and a wide Create recording-workspace entry.
+PURPOSE: Opens Performance video and Transcription from one clear Create action.
+*/
 
-import { isMidiFilePath } from '../../midi/loadMidiProject'
+import React from 'react'
+import { Camera, Circle, FileX2, SlidersHorizontal } from 'lucide-react'
+
+import { AppIcon } from '../AppIcon/AppIcon'
 import { playbackEngine } from '../../playback/PlaybackEngine'
-import { type Piece, useAppStore } from '../../store/store'
+import { useAppStore } from '../../store/store'
 import styles from './TopBar.module.css'
 
-const topBarStyle = {
-  backgroundColor: 'var(--color-bg)',
-} as const
-
-const iconButtonStyle = {
-  backgroundColor: 'var(--color-bg)',
-  color: 'var(--color-icon)',
-} as const
+const topBarStyle = { backgroundColor: 'var(--color-bg)' } as const
+const iconButtonStyle = { backgroundColor: 'var(--color-bg)', color: 'var(--color-icon)' } as const
 
 interface TopBarProps {
   isSettingsOpen?: boolean
+  isCreateNavigationLocked?: boolean
   onToggleSettings?: () => void
 }
 
-export function TopBar({ isSettingsOpen = false, onToggleSettings }: TopBarProps) {
-  const [isOpeningFile, setIsOpeningFile] = useState(false)
-  const addPiece = useAppStore((state) => state.addPiece)
+export function TopBar({ isSettingsOpen = false, isCreateNavigationLocked = false, onToggleSettings }: TopBarProps) {
+  const appMode = useAppStore((state) => state.appMode)
+  const recordModeView = useAppStore((state) => state.recordModeView)
+  const transcriptionPhase = useAppStore((state) => state.transcriptionPhase)
   const clearLoadedPiece = useAppStore((state) => state.clearLoadedPiece)
   const enterCameraMode = useAppStore((state) => state.enterCameraMode)
   const enterRecordMode = useAppStore((state) => state.enterRecordMode)
-  const loadPiece = useAppStore((state) => state.loadPiece)
+  const isTranscriptionRecorder = appMode === 'createRecord' && recordModeView === 'transcription'
+  const switchingLocked = isCreateNavigationLocked || (isTranscriptionRecorder && !['idle', 'stopped'].includes(transcriptionPhase))
+  const lockedTitle = 'Stop or cancel the current recording before leaving this workspace'
   const isProjectLoaded = useAppStore((state) => state.isProjectLoaded)
 
-  const handleAddPiece = async () => {
-    if (isOpeningFile) {
-      return
-    }
-
-    const electronApi = window.electronAPI
-    const openFile = electronApi?.openMidiFile ?? electronApi?.dialog?.openMidiFile
-    if (typeof openFile !== 'function') {
-      console.error('Piece file picker bridge is unavailable.')
-      return
-    }
-
-    setIsOpeningFile(true)
-
-    try {
-      const filePath = await openFile()
-      if (filePath == null) {
-        return
-      }
-
-      const piece = createPieceFromFilePath(filePath)
-      addPiece(piece)
-
-      if (piece.type !== 'midi') {
-        return
-      }
-
-      await loadPiece(piece.id)
-    } finally {
-      setIsOpeningFile(false)
-    }
+  const openCreate = () => {
+    playbackEngine.pause()
+    if (appMode !== 'createRecord') enterRecordMode()
   }
-
   const handleClearLoadedPiece = () => {
     playbackEngine.pause()
     playbackEngine.seek(0)
     clearLoadedPiece()
   }
-
   const cameraTitle = isProjectLoaded ? 'Open Camera Mode' : 'Load a piece first'
 
-  return (
-    <div className={styles.topBar} data-testid="top-bar" style={topBarStyle}>
-      <button
-        type="button"
-        className={styles.button}
-        aria-label="Add Piece"
-        title="Add MIDI or MP4 piece"
-        onClick={() => {
-          void handleAddPiece()
-        }}
-        disabled={isOpeningFile}
-        style={iconButtonStyle}
-      >
-        {isOpeningFile ? '...' : '+'}
-      </button>
-
-      <button
-        type="button"
-        className={styles.button}
-        aria-label="Home"
-        title="Clear the current piece"
-        onClick={handleClearLoadedPiece}
-        style={iconButtonStyle}
-      >
-        HM
-      </button>
-
-      <button
-        type="button"
-        className={styles.button}
-        aria-label="Settings"
-        title={isSettingsOpen ? 'Close visualizer settings' : 'Open visualizer settings'}
-        aria-pressed={isSettingsOpen}
-        onClick={() => {
-          onToggleSettings?.()
-        }}
-        style={iconButtonStyle}
-      >
-        PC
-      </button>
-
-      <button
-        type="button"
-        className={styles.button}
-        aria-label="Camera"
-        title={cameraTitle}
-        disabled={!isProjectLoaded}
-        onClick={() => {
-          enterCameraMode()
-        }}
-        style={{
-          ...iconButtonStyle,
-          opacity: isProjectLoaded ? 1 : 0.5,
-        }}
-      >
-        CM
-      </button>
-
-      <button
-        type="button"
-        className={styles.button}
-        aria-label="Record"
-        title="Open Record Mode"
-        onClick={() => {
-          enterRecordMode()
-        }}
-        style={iconButtonStyle}
-      >
-        RC
-      </button>
-    </div>
-  )
-}
-
-function createPieceFromFilePath(filePath: string): Piece {
-  const fileName = filePath.split(/[/\\]/).pop() ?? filePath
-  const pieceType = isMidiFilePath(filePath) ? 'midi' : 'recording'
-  const name = fileName.replace(/\.[^.]+$/, '') || fileName
-
-  return {
-    createdAt: Date.now(),
-    filePath,
-    id: globalThis.crypto?.randomUUID?.() ?? `piece-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    name,
-    type: pieceType,
-  }
+  return <div className={styles.topBar} data-testid="top-bar" style={topBarStyle}>
+    {!isTranscriptionRecorder && <>
+      <button type="button" className={styles.button} aria-label="Clear piece" title={switchingLocked ? lockedTitle : isProjectLoaded ? 'Clear the current piece' : 'No piece loaded'} disabled={switchingLocked || !isProjectLoaded} onClick={handleClearLoadedPiece} style={{ ...iconButtonStyle, color: isProjectLoaded && !switchingLocked ? 'var(--color-icon)' : 'var(--color-icon-muted)' }}><AppIcon icon={FileX2} size={20} /></button>
+      <button type="button" className={styles.button} aria-label="Settings" title={switchingLocked ? lockedTitle : isSettingsOpen ? 'Close visualizer settings' : 'Open visualizer settings'} disabled={switchingLocked} aria-pressed={isSettingsOpen} onClick={() => onToggleSettings?.()} style={iconButtonStyle}><AppIcon icon={SlidersHorizontal} size={20} /></button>
+      <button type="button" className={styles.button} aria-label="Camera" title={switchingLocked ? lockedTitle : cameraTitle} disabled={switchingLocked || !isProjectLoaded} onClick={enterCameraMode} style={{ ...iconButtonStyle, color: isProjectLoaded && !switchingLocked ? 'var(--color-icon)' : 'var(--color-icon-muted)' }}><AppIcon icon={Camera} size={20} /></button>
+    </>}
+    <button type="button" className={`${styles.button} ${styles.createButton}`} aria-label="Create" aria-pressed={appMode === 'createRecord'} title={switchingLocked ? lockedTitle : 'Open Performance video and Transcription'} disabled={switchingLocked} onClick={openCreate} style={iconButtonStyle}>
+      <AppIcon icon={Circle} size={20} />
+      <span>Create</span>
+    </button>
+  </div>
 }

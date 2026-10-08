@@ -1,0 +1,22 @@
+.editor { position:absolute; z-index:5; top:10px; left:10px; right:10px; height:min(46%,360px); min-height:230px; display:flex; flex-direction:column; overflow:hidden; border:1px solid rgba(255,255,255,.22); border-radius:7px; background:#0b0d10; color:#eef4fb; box-shadow:0 12px 32px rgba(0,0,0,.45); }
+.toolbar { display:flex; align-items:center; gap:7px; min-height:42px; padding:5px 8px; border-bottom:1px solid rgba(255,255,255,.13); font:11px/1 var(--font-family-base); }
+.toolbar strong { margin-right:auto; font-size:12px; }
+.toolbar label { display:flex; align-items:center; gap:5px; color:#aeb9c5; }
+.toolbar select,.toolbar input { height:28px; box-sizing:border-box; border:1px solid #3a4652; border-radius:4px; background:#11161c; color:#fff; padding:0 5px; font:inherit; }
+.toolbar input { width:54px; }
+.velocityControl { min-width:168px; }
+.toolbar .velocitySlider { width:88px; padding:0; border:0; background:transparent; accent-color:#78b6ff; cursor:pointer; }
+.toolbar .velocitySlider:disabled { cursor:default; }
+.velocityValue { width:32px; color:#eef4fb; font-variant-numeric:tabular-nums; text-align:right; }
+.toolbar button { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:28px; border:1px solid #3a4652; border-radius:4px; background:#161c23; color:#e8f2fc; font:inherit; cursor:pointer; }
+.toolbar button:disabled { opacity:.35; cursor:default; }
+.zoomTools { display:flex; gap:2px; }
+.zoomTools button { min-width:28px; }
+.roll { position:relative; flex:1; overflow:auto; background-color:#11151a; background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.055) 1px,transparent 1px); background-size:100% 9px,90px 100%; }
+.rollContent { position:relative; background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.055) 1px,transparent 1px); }
+.playhead { position:absolute; z-index:4; top:0; bottom:0; width:1px; background:#ff4f69; box-shadow:0 0 5px rgba(255,79,105,.65); pointer-events:none; }
+.playhead::before { content:""; position:absolute; top:0; left:50%; width:7px; height:7px; border-radius:0 0 2px 2px; background:#ff4f69; transform:translateX(-50%); }
+.note { position:absolute; min-width:5px; height:8px; padding:0; border:0; border-radius:2px; background:rgba(79,142,247,var(--velocity-alpha,.7)); box-shadow:0 0 var(--velocity-glow,5px) rgba(79,142,247,var(--velocity-glow-alpha,.45)); cursor:grab; }
+.note:hover { filter:brightness(1.2); }
+.selected { outline:1px solid #fff; filter:brightness(1.22); z-index:2; }
+.resizeHandle { position:absolute; top:0; right:0; bottom:0; width:6px; cursor:ew-resize; }

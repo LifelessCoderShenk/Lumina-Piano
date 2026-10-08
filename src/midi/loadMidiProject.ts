@@ -2,11 +2,13 @@ import { parseMidi } from './parser'
 
 import { audioScheduler } from '../audio/AudioScheduler'
 import { PlaybackEngineError, playbackEngine } from '../playback/PlaybackEngine'
-import { renderer } from '../renderer/Renderer'
+import { getActiveVisualizerRenderer } from '../renderer/activeVisualizerRenderer'
 import { spatialIndex } from '../spatial/SpatialIndex'
-import { getAppState, useAppStore } from '../store/store'
+import { registerMidiPieceLoader } from '../store/midiPieceLoaderAccess'
+import { getStoreCurrentTick, loadProjectIntoStore } from '../store/projectLoadingAccess'
 import { buildTempoMap } from '../tempo/tempoMap'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
+import type { ProjectData } from './types'
 
 const CREATE_MODE_PLAYBACK_PRE_ROLL_SECONDS = 1
 
@@ -53,16 +55,21 @@ export async function loadMidiFileFromPath(filePath: string): Promise<boolean> {
 
 export async function loadMidiBytes(bytes: Uint8Array): Promise<boolean> {
   const parsedProject = parseMidi(bytes)
-  const tempoMap = buildTempoMap(parsedProject.tempoMap, parsedProject.ticksPerQuarter)
+  return loadProjectData(parsedProject)
+}
+
+export async function loadProjectData(projectData: ProjectData): Promise<boolean> {
+  const tempoMap = buildTempoMap(projectData.tempoMap, projectData.ticksPerQuarter)
 
   await ensureAudioSchedulerReady()
   ensurePlaybackEngineReady(tempoMap)
-  spatialIndex.build(parsedProject)
-  useAppStore.getState().loadProject(parsedProject, tempoMap)
+  spatialIndex.build(projectData)
+  loadProjectIntoStore(projectData, tempoMap)
   playbackEngine.seek(0)
 
-  if (renderer.isReady()) {
-    renderer.renderFrame(getAppState().currentTick)
+  const activeRenderer = getActiveVisualizerRenderer()
+  if (activeRenderer?.isReady()) {
+    activeRenderer.renderFrame(getStoreCurrentTick())
   }
 
   return true
@@ -105,3 +112,8 @@ export function isMidiFilePath(filePath: string): boolean {
   const normalizedPath = filePath.trim().toLowerCase()
   return normalizedPath.endsWith('.mid') || normalizedPath.endsWith('.midi')
 }
+
+registerMidiPieceLoader({
+  loadMidiFileFromPath,
+  warmUpAudioAndStartPlayback,
+})

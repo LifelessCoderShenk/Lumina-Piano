@@ -33,106 +33,65 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .cropFrame {
   position: absolute;
+  will-change: transform;
+}
+
+.setupNativeViewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.setupNativeFrame {
+  position: absolute;
+  inset: 0;
+}
+
+.setupNativeVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000000;
+}
+
+.setupSafeFrame {
+  position: absolute;
+  z-index: 8;
+  box-sizing: border-box;
+  border: 2px solid rgba(126, 193, 255, 0.95);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+
+.setupSafeFrameLabel {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 2px 5px;
+  color: #d5efff;
+  background: rgba(0, 0, 0, 0.65);
+  font-size: 11px;
+}
+
+.feedOrientation {
+  position: absolute;
+  inset: 0;
 }
 
 .timeline {
   width: 100%;
-  flex: 0 0 120px;
-  min-height: 120px;
+  flex: 0 0 230px;
+  min-height: 230px;
   background: #0a0a0a;
   box-sizing: border-box;
-}
-
-.timelineRow {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 40px;
-  border-top: 1px solid #1a1a1a;
-  box-sizing: border-box;
-}
-
-.timelineRow:first-child {
-  border-top: 0;
-}
-
-.trackLabelColumn {
-  flex: 0 0 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-}
-
-.trackLabel {
-  color: var(--color-text-body);
-  font-family: Arial, sans-serif;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.trackBarArea {
-  position: relative;
-  flex: 1 1 auto;
-  height: 100%;
-  overflow: hidden;
-}
-
-.trackBarContent {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  min-width: 20px;
-  cursor: grab;
-}
-
-.trackDragging {
-  cursor: grabbing;
-}
-
-.waveformCanvas,
-.videoBar,
-.visualizationBar {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.waveformCanvas {
-  background: transparent;
-}
-
-.videoBar {
-  background: #555555;
-}
-
-.visualizationBar {
-  background: rgba(255, 255, 255, 0.6);
-}
-
-.trimHandle {
-  position: absolute;
-  top: 0;
-  width: 8px;
-  height: 100%;
-  background: #2e65a2;
-  cursor: ew-resize;
-}
-
-.trimHandleStart {
-  left: 0;
-}
-
-.trimHandleEnd {
-  right: 0;
-}
-
-.trimHandleDragging {
-  background: #4a86c8;
 }
 
 .webcamVideo {
@@ -141,7 +100,7 @@
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: fill;
   background: #000000;
 }
 
@@ -204,7 +163,7 @@
 }
 
 .controlButton[disabled] {
-  opacity: 0.4;
+  color: var(--color-icon-muted);
   cursor: not-allowed;
   pointer-events: none;
 }

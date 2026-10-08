@@ -1,0 +1,216 @@
+.panel {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg);
+  color: var(--color-text-body);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fieldLabel,
+.colorLabel {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.segmentedControl {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.segmentButton {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #000000;
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.segmentButtonActive {
+  background: #ffffff;
+  color: #000000;
+}
+
+.segmentButton:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.colorField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.paletteField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.paletteField select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #000000;
+  color: #ffffff;
+  font: inherit;
+  padding: 0 8px;
+}
+
+.colorField input[type="color"] {
+  width: 100%;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #000000;
+  cursor: pointer;
+}
+
+.pitchClassGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 8px;
+}
+
+.gradientPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rainbowSwatch {
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(90deg, #ef3232 0%, #f5a623 18%, #f7df3a 32%, #55d85a 48%, #37d8df 64%, #367cf5 80%, #7c3aed 100%);
+}
+
+.gradientLabels {
+  display: flex;
+  justify-content: space-between;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.velocityColors {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.velocitySwatch {
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.velocityColorFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dynamicPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.dynamicSwatch {
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(90deg, #f04f4f, #f0d84f, #55d868, #4fd9f0, #6f62f2, #e755d8, #f04f4f);
+  background-size: 200% 100%;
+}
+
+.randomSwatch {
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(90deg,
+    #e9517c 0 12.5%, #52c5e8 12.5% 25%, #f1c84b 25% 37.5%, #795ee8 37.5% 50%,
+    #58d27d 50% 62.5%, #ed704e 62.5% 75%, #4f8ef7 75% 87.5%, #d857da 87.5% 100%);
+}
+
+.tutorialPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tutorialSwatch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 36px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #303030;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.tutorialLower,
+.tutorialUpper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tutorialLower {
+  background: #77a3ca;
+}
+
+.tutorialUpper {
+  background: #9ee65a;
+  color: #13220c;
+}
+
+.tutorialCaption {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}

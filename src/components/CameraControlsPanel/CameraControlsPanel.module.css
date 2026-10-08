@@ -20,6 +20,8 @@
   font: inherit;
   cursor: pointer;
   padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .controlGroup {
@@ -50,10 +52,69 @@
   width: 100%;
 }
 
+.labelIcon { margin-right: 6px; vertical-align: middle; }
+.buttonIcon { flex: 0 0 auto; margin-right: 6px; }
+
+.disabled {
+  color: var(--color-icon-muted);
+}
+
+.disabled button { color: var(--color-icon-muted); }
+
+.orientationToggles,
+.rotationControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orientationToggles {
+  flex-wrap: wrap;
+}
+
+.orientationButton {
+  border: 1px solid rgba(46, 101, 162, 0.5);
+  background: transparent;
+  color: var(--color-text-body);
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.orientationButton[aria-pressed='true'] {
+  border-color: var(--color-icon);
+  background: rgba(46, 101, 162, 0.28);
+}
+
+.rotationValue {
+  min-width: 42px;
+  color: var(--color-icon);
+  text-align: center;
+}
+
 .cropGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.resetCropButton {
+  align-self: flex-start;
+  border: 1px solid rgba(46, 101, 162, 0.5);
+  background: transparent;
+  color: var(--color-text-body);
+  font: inherit;
+  cursor: pointer;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.resetCropButton:disabled {
+  cursor: not-allowed;
 }
 
 .cropField {
@@ -94,6 +155,9 @@
   font: inherit;
   cursor: pointer;
   padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .cancelButton {
