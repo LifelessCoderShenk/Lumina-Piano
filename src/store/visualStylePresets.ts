@@ -122,6 +122,7 @@ export function captureVisualStyle(state: AppState): VisualStyle {
 
 export function applyVisualStyle(state: AppState, style: VisualStyle): void {
   Object.assign(state, structuredClone(style.appearance))
+  state.backgroundImage = null
   state.backgroundStyle = style.appearance.backgroundStyle ?? 'flat'
   state.fallSpeed = style.appearance.fallSpeed ?? 100
   state.keyboardSaber = style.appearance.keyboardSaber ?? false

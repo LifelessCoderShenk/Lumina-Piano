@@ -174,6 +174,7 @@ export interface UISlice {
 }
 
 export interface VisualizerSettingsSlice {
+  backgroundImage: string | null
   backgroundStyle: 'flat' | 'studio' | 'aurora' | 'stage'
   colorMode: 'track' | 'pitch' | 'split' | 'velocity'
   pitchClassColors: Record<number, string>
@@ -301,6 +302,7 @@ export interface AppActions {
   setGradientBottomColorRightBlack(color: string): void
   setGradientBottomColorLeftBlack(color: string): void
   setBackgroundColor(color: string): void
+  setBackgroundImage(image: string | null): void
   setBackgroundStyle(style: VisualizerSettingsSlice['backgroundStyle']): void
   setLaneOpacity(value: number): void
   setNoteLabelsOnNotes(value: boolean): void

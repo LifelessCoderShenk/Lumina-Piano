@@ -112,6 +112,7 @@ export const UNSUPPORTED_RECORDING_PIECE_MESSAGE =
 export function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   return {
     backgroundColor: DEFAULT_VISUALIZER_BACKGROUND_COLOR,
+    backgroundImage: null,
     backgroundStyle: 'flat',
     colorMode: 'split',
     gradientBottomColorLeft: '#77a3ca',

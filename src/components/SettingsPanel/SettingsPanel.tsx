@@ -1,5 +1,5 @@
-import React from 'react'
-import { X } from 'lucide-react'
+import React, { useRef, useState } from 'react'
+import { ImagePlus, Trash2, X } from 'lucide-react'
 
 import { AppIcon } from '../AppIcon/AppIcon'
 import { type VisualizerSettings, useAppStore, visualizerSettingsInitial } from '../../store/store'
@@ -26,15 +26,18 @@ const RESOLUTION_OPTIONS: VisualizerSettings['resolution'][] = ['720p', '1080p',
 const FRAMERATE_OPTIONS: VisualizerSettings['framerate'][] = [30, 60]
 const NOTE_STYLE_OPTIONS = ['solid', 'gradient', 'saber', 'outline', 'crystal', 'gem'] as const
 const BACKGROUND_STYLE_OPTIONS = ['flat', 'studio', 'aurora', 'stage'] as const
+const MAX_BACKGROUND_IMAGE_BYTES = 12 * 1024 * 1024
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const settings = useAppStore((state) => state.visualizerSettings)
   const setVisualizerSettings = useAppStore((state) => state.setVisualizerSettings)
   const backgroundColor = useAppStore((state) => state.backgroundColor)
+  const backgroundImage = useAppStore((state) => state.backgroundImage)
   const backgroundStyle = useAppStore((state) => state.backgroundStyle)
   const noteLabelsOnKeys = useAppStore((state) => state.noteLabelsOnKeys)
   const noteLabelsOnNotes = useAppStore((state) => state.noteLabelsOnNotes)
   const setBackgroundColor = useAppStore((state) => state.setBackgroundColor)
+  const setBackgroundImage = useAppStore((state) => state.setBackgroundImage)
   const setBackgroundStyle = useAppStore((state) => state.setBackgroundStyle)
   const setNoteLabelsOnKeys = useAppStore((state) => state.setNoteLabelsOnKeys)
   const setNoteLabelsOnNotes = useAppStore((state) => state.setNoteLabelsOnNotes)
@@ -54,6 +57,20 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const setLightingIntensity = useAppStore((state) => state.setLightingIntensity)
   const setKeyboardSaber = useAppStore((state) => state.setKeyboardSaber)
   const setHandVisualization = useAppStore((state) => state.setHandVisualization)
+  const backgroundImageInputRef = useRef<HTMLInputElement>(null)
+  const [backgroundImageError, setBackgroundImageError] = useState<string | null>(null)
+
+  const chooseBackgroundImage = async (file: File | undefined) => {
+    if (file == null) return
+
+    try {
+      const dataUrl = await readBackgroundImage(file)
+      setBackgroundImage(dataUrl)
+      setBackgroundImageError(null)
+    } catch (error) {
+      setBackgroundImageError(error instanceof Error ? error.message : 'Could not use that image.')
+    }
+  }
 
   return (
     <section className={styles.panel} data-testid="settings-panel" style={panelStyle}>
@@ -99,20 +116,79 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
       <div className={styles.section}>
         <h3 className={styles.sectionTitle} style={headerTextStyle}>APPEARANCE</h3>
-        <span className={styles.controlLabel}>Background scene</span>
-        <div className={styles.segmentedControl} aria-label="Background scene">
-          {BACKGROUND_STYLE_OPTIONS.map((style) => (
+        <span className={styles.controlLabel}>Background</span>
+        <input
+          ref={backgroundImageInputRef}
+          className={styles.fileInput}
+          aria-label="Choose background image file"
+          type="file"
+          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+          onChange={(event) => {
+            void chooseBackgroundImage(event.target.files?.[0])
+            event.target.value = ''
+          }}
+        />
+        {backgroundImage == null ? (
+          <>
+            <div className={styles.segmentedControl} aria-label="Background scene">
+              {BACKGROUND_STYLE_OPTIONS.map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  aria-pressed={backgroundStyle === style}
+                  className={`${styles.segmentButton} ${backgroundStyle === style ? styles.segmentButtonActive : ''}`}
+                  onClick={() => setBackgroundStyle(style)}
+                >
+                  {style === 'flat' ? 'Plain' : style === 'studio' ? 'Studio' : style === 'aurora' ? 'Aurora' : 'Stage'}
+                </button>
+              ))}
+            </div>
+            <div className={styles.backgroundControls}>
+              <label className={styles.colorControl}>
+                <span>Color</span>
+                <span className={styles.colorInputGroup}>
+                  <input
+                    aria-label="Visualizer background"
+                    type="color"
+                    value={backgroundColor}
+                    onChange={(event) => setBackgroundColor(event.target.value)}
+                  />
+                  <output>{backgroundColor.toUpperCase()}</output>
+                </span>
+              </label>
+              <button
+                type="button"
+                className={styles.imageButton}
+                onClick={() => backgroundImageInputRef.current?.click()}
+              >
+                <AppIcon icon={ImagePlus} size={16} />
+                Add image
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className={styles.backgroundImageCard}>
+            <img className={styles.backgroundPreview} src={backgroundImage} alt="Custom background preview" />
             <button
-              key={style}
               type="button"
-              aria-pressed={backgroundStyle === style}
-              className={`${styles.segmentButton} ${backgroundStyle === style ? styles.segmentButtonActive : ''}`}
-              onClick={() => setBackgroundStyle(style)}
+              className={styles.imageButton}
+              onClick={() => backgroundImageInputRef.current?.click()}
             >
-              {style === 'flat' ? 'Plain' : style === 'studio' ? 'Studio' : style === 'aurora' ? 'Aurora' : 'Stage'}
+              Replace
             </button>
-          ))}
-        </div>
+            <button
+              type="button"
+              className={styles.removeImageButton}
+              aria-label="Remove background image"
+              onClick={() => setBackgroundImage(null)}
+            >
+              <AppIcon icon={Trash2} size={16} />
+            </button>
+          </div>
+        )}
+        {backgroundImageError == null ? null : (
+          <p className={styles.imageError} role="alert">{backgroundImageError}</p>
+        )}
         <span className={styles.controlLabel}>Falling notes</span>
         <div className={styles.segmentedControl} aria-label="Falling note style">
           {NOTE_STYLE_OPTIONS.map((style) => (
@@ -229,18 +305,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             <output>{handVisualization.opacity}%</output>
           </label>
         ) : null}
-        <label className={styles.colorControl}>
-          <span>Visualizer background</span>
-          <span className={styles.colorInputGroup}>
-            <input
-              aria-label="Visualizer background"
-              type="color"
-              value={backgroundColor}
-              onChange={(event) => setBackgroundColor(event.target.value)}
-            />
-            <output>{backgroundColor.toUpperCase()}</output>
-          </span>
-        </label>
       </div>
 
       <div className={styles.section}>
@@ -270,6 +334,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       </p>
     </section>
   )
+}
+
+function readBackgroundImage(file: File): Promise<string> {
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    return Promise.reject(new Error('Choose a PNG, JPG, or WebP image.'))
+  }
+  if (file.size > MAX_BACKGROUND_IMAGE_BYTES) {
+    return Promise.reject(new Error('Choose an image smaller than 12 MB.'))
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Could not read that image.'))
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Could not read that image.'))
+        return
+      }
+      resolve(reader.result)
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 interface SettingsSectionProps<T extends string | number> {

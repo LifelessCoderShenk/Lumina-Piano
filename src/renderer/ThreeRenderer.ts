@@ -16,6 +16,7 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  SRGBColorSpace,
   Sprite,
   SpriteMaterial,
   Vector2,
@@ -407,6 +408,9 @@ interface SharedFloatUniform {
 interface BackgroundUniforms {
   backgroundAspect: { value: number }
   backgroundColor: { value: Color }
+  backgroundImage: { value: CanvasTexture | null }
+  backgroundImageAspect: { value: number }
+  backgroundImageEnabled: { value: number }
   backgroundStyle: { value: number }
   backgroundTime: SharedFloatUniform
 }
@@ -489,6 +493,8 @@ export class ThreeRenderer implements VisualizerRenderer {
   private ambientLight: AmbientLight | null = null
   private backgroundMesh: Mesh<PlaneGeometry, ShaderMaterial> | null = null
   private backgroundUniforms: BackgroundUniforms | null = null
+  private backgroundImageTexture: CanvasTexture | null = null
+  private backgroundImageLoadId = 0
   private rectGeometry: PlaneGeometry | null = null
   private laneGroup: Group | null = null
   private keyboardGroup: Group | null = null
@@ -577,6 +583,9 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     if (nextState.backgroundColor !== previousState.backgroundColor) {
       this.applyBackgroundColor(nextState.backgroundColor)
+    }
+    if (nextState.backgroundImage !== previousState.backgroundImage) {
+      this.applyBackgroundImage(nextState.backgroundImage)
     }
     if (nextState.backgroundStyle !== previousState.backgroundStyle) {
       this.applyBackgroundAppearance(nextState)
@@ -686,6 +695,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.ambientLight = new AmbientLight(NOTE_AMBIENT_LIGHT_COLOR, NOTE_AMBIENT_LIGHT_INTENSITY)
 
     this.initBackgroundSurface()
+    this.applyBackgroundImage(getAppState().backgroundImage)
     if (this.backgroundMesh != null) this.scene.add(this.backgroundMesh)
     this.scene.add(this.laneGroup)
     this.scene.add(this.keyboardGroup)
@@ -712,6 +722,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   }
 
   async destroy(): Promise<void> {
+    this.backgroundImageLoadId += 1
     playbackEngine.off('onSeek', this.handlePlaybackSeek)
     this.storeUnsubscribe?.()
     this.storeUnsubscribe = null
@@ -764,6 +775,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     for (const resource of this.persistentResources) {
       resource.dispose()
     }
+    this.backgroundImageTexture?.dispose()
 
     this.rectGeometry?.dispose()
 
@@ -779,6 +791,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.laneGroup = null
     this.backgroundMesh = null
     this.backgroundUniforms = null
+    this.backgroundImageTexture = null
     this.keyboardGroup = null
     this.noteGroup = null
     this.particleGroup = null
@@ -1149,11 +1162,60 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.renderScene()
   }
 
+  /** Loads a user image into the WebGL background so previews and exports share the same frame. */
+  private applyBackgroundImage(source: string | null): void {
+    const loadId = ++this.backgroundImageLoadId
+    if (source == null) {
+      this.backgroundImageTexture?.dispose()
+      this.backgroundImageTexture = null
+      if (this.backgroundUniforms != null) {
+        this.backgroundUniforms.backgroundImage.value = null
+        this.backgroundUniforms.backgroundImageEnabled.value = 0
+      }
+      this.renderScene()
+      return
+    }
+
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => {
+      if (loadId !== this.backgroundImageLoadId || this.backgroundUniforms == null) return
+
+      const sourceWidth = Math.max(1, image.naturalWidth || image.width)
+      const sourceHeight = Math.max(1, image.naturalHeight || image.height)
+      const scale = Math.min(1, 4096 / Math.max(sourceWidth, sourceHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale))
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale))
+      const context = canvas.getContext('2d')
+      if (context == null) return
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+      const texture = new CanvasTexture(canvas)
+      texture.colorSpace = SRGBColorSpace
+      texture.generateMipmaps = false
+      texture.minFilter = LinearFilter
+      texture.magFilter = LinearFilter
+      texture.needsUpdate = true
+
+      this.backgroundImageTexture?.dispose()
+      this.backgroundImageTexture = texture
+      this.backgroundUniforms.backgroundImage.value = texture
+      this.backgroundUniforms.backgroundImageAspect.value = sourceWidth / sourceHeight
+      this.backgroundUniforms.backgroundImageEnabled.value = 1
+      this.renderScene()
+    }
+    image.src = source
+  }
+
   private initBackgroundSurface(): void {
     const state = getAppState()
     const uniforms: BackgroundUniforms = {
       backgroundAspect: { value: 1 },
       backgroundColor: { value: new Color(state.backgroundColor) },
+      backgroundImage: { value: null },
+      backgroundImageAspect: { value: 1 },
+      backgroundImageEnabled: { value: 0 },
       backgroundStyle: { value: backgroundStyleMode(state.backgroundStyle) },
       backgroundTime: this.sharedNoteMaterialTimeUniform,
     }
@@ -1171,6 +1233,9 @@ void main() {
       fragmentShader: `
 uniform float backgroundAspect;
 uniform vec3 backgroundColor;
+uniform sampler2D backgroundImage;
+uniform float backgroundImageAspect;
+uniform float backgroundImageEnabled;
 uniform float backgroundStyle;
 uniform float backgroundTime;
 varying vec2 vBackgroundUv;
@@ -1225,6 +1290,16 @@ void main() {
   stageColor += stageAccent * (stageHorizontalGrid + stageVerticalGrid) * stageFloorDepth * 0.18;
   stageColor += stageAccent * stageHorizon * 0.24;
   color = mix(color, stageColor, stageMix);
+
+  if (backgroundImageEnabled > 0.5) {
+    vec2 imageUv = uv;
+    if (backgroundAspect > backgroundImageAspect) {
+      imageUv.y = ((uv.y - 0.5) * (backgroundImageAspect / backgroundAspect)) + 0.5;
+    } else {
+      imageUv.x = ((uv.x - 0.5) * (backgroundAspect / backgroundImageAspect)) + 0.5;
+    }
+    color = texture2D(backgroundImage, imageUv).rgb;
+  }
 
   gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
 }`,

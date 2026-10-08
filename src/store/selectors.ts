@@ -42,6 +42,7 @@ const exportSelector = (state: AppState) => ({
 
 const visualizerSelector = (state: AppState) => ({
   backgroundColor: state.backgroundColor,
+  backgroundImage: state.backgroundImage,
   colorMode: state.colorMode,
   fallSpeed: state.fallSpeed,
   gradientBottomColorLeft: state.gradientBottomColorLeft,

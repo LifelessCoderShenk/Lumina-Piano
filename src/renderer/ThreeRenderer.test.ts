@@ -56,6 +56,7 @@ vi.mock('three', () => {
   const AdditiveBlending = 'AdditiveBlending'
   const LinearFilter = 'LinearFilter'
   const LinearToneMapping = 'LinearToneMapping'
+  const SRGBColorSpace = 'SRGBColorSpace'
 
   class AmbientLight {
     layers = {
@@ -417,6 +418,7 @@ vi.mock('three', () => {
     Points,
     Scene,
     ShaderMaterial,
+    SRGBColorSpace,
     Sprite,
     SpriteMaterial,
     Vector2,
@@ -833,6 +835,7 @@ describe('ThreeRenderer', () => {
         closePath: vi.fn(),
         clearRect: vi.fn(),
         createLinearGradient: mockCanvasCreateLinearGradient,
+        drawImage: vi.fn(),
         fill: vi.fn(),
         fillRect: mockCanvasFillRect,
         fillStyle: '#000000',
@@ -854,6 +857,7 @@ describe('ThreeRenderer', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('binds the provided canvas and builds the static Create Mode scene', async () => {
@@ -1029,6 +1033,46 @@ describe('ThreeRenderer', () => {
     expect(material.uniforms.backgroundStyle.value).toBe(3)
     expect(material.fragmentShader).toContain('stagePerspectiveDepth')
     expect(material.fragmentShader).toContain('stageHorizontalGrid')
+  })
+
+  it('loads a custom image into the background and releases it when returning to a scene', async () => {
+    class MockImage {
+      decoding = ''
+      height = 1080
+      naturalHeight = 1080
+      naturalWidth = 1920
+      onload: (() => void) | null = null
+      width = 1920
+
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.())
+      }
+    }
+    vi.stubGlobal('Image', MockImage)
+
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    useAppStore.getState().setBackgroundImage('data:image/png;base64,YmFja2dyb3VuZA==')
+
+    const uniforms = (renderer as any).backgroundMesh.material.uniforms as {
+      backgroundImage: { value: { colorSpace: string } | null }
+      backgroundImageAspect: { value: number }
+      backgroundImageEnabled: { value: number }
+    }
+    await vi.waitFor(() => expect(uniforms.backgroundImageEnabled.value).toBe(1))
+    expect(uniforms.backgroundImageAspect.value).toBeCloseTo(16 / 9)
+    expect(uniforms.backgroundImage.value?.colorSpace).toBe('SRGBColorSpace')
+
+    const disposeCountBeforeRemoval = mockCanvasTextureDispose.mock.calls.length
+    useAppStore.getState().setBackgroundImage(null)
+
+    expect(uniforms.backgroundImageEnabled.value).toBe(0)
+    expect(uniforms.backgroundImage.value).toBeNull()
+    expect(mockCanvasTextureDispose.mock.calls.length).toBeGreaterThan(disposeCountBeforeRemoval)
   })
 
   it('renders only the static keyboard in guide mode without mutating playback data', async () => {

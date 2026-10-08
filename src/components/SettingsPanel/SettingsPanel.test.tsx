@@ -182,6 +182,39 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().noteLabelsOnKeys).toBe(true)
   })
 
+  it('adds, previews, replaces, and removes a custom background image', async () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    const file = new File(['custom-background'], 'concert.webp', { type: 'image/webp' })
+    fireEvent.change(screen.getByLabelText('Choose background image file'), {
+      target: { files: [file] },
+    })
+
+    await waitFor(() => {
+      expect(useAppStore.getState().backgroundImage).toMatch(/^data:image\/webp;base64,/)
+    })
+    expect(screen.getByAltText('Custom background preview')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Plain' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove background image' }))
+
+    expect(useAppStore.getState().backgroundImage).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add image' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Plain' })).toBeTruthy()
+  })
+
+  it('rejects unsupported background files without changing the visualizer', async () => {
+    render(<SettingsPanel onClose={() => undefined} />)
+
+    fireEvent.change(screen.getByLabelText('Choose background image file'), {
+      target: { files: [new File(['svg'], 'background.svg', { type: 'image/svg+xml' })] },
+    })
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Choose a PNG, JPG, or WebP image.')
+    expect(useAppStore.getState().backgroundImage).toBeNull()
+  })
+
   it('switches falling-note material and adjusts note glow', () => {
     render(<SettingsPanel onClose={() => undefined} />)
 

@@ -44,6 +44,7 @@ describe('Lumina project files', () => {
       projectData,
       isProjectLoaded: true,
       backgroundColor: '#123456',
+      backgroundImage: 'data:image/png;base64,YmFja2dyb3VuZA==',
       currentTick: 720,
       loopEnabled: true,
       loopStartTick: 480,
@@ -63,6 +64,7 @@ describe('Lumina project files', () => {
     expect(useAppStore.getState()).toMatchObject({
       appMode: 'create',
       backgroundColor: '#123456',
+      backgroundImage: 'data:image/png;base64,YmFja2dyb3VuZA==',
       currentTick: 720,
       isPlaying: false,
       loopEnabled: true,
@@ -80,6 +82,16 @@ describe('Lumina project files', () => {
     await applyLuminaProjectDocument(legacy)
 
     expect(useAppStore.getState().handVisualization).toEqual({ enabled: false, opacity: 35 })
+  })
+
+  it('opens older projects without a custom background using the color fallback', async () => {
+    const legacy = createLuminaProjectDocument({ ...useAppStore.getState(), projectData } as never, 'Legacy background')
+    delete (legacy.workspace.appearance as Partial<typeof legacy.workspace.appearance>).backgroundImage
+    useAppStore.setState({ backgroundImage: 'data:image/png;base64,c3RhbGU=' })
+
+    await applyLuminaProjectDocument(legacy)
+
+    expect(useAppStore.getState().backgroundImage).toBeNull()
   })
 
   it('rejects invalid stored finger assignments', () => {

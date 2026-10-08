@@ -20,6 +20,7 @@ type VisualizerAppearanceStoreSlice =
   & Pick<
     AppActions,
     | 'setBackgroundColor'
+    | 'setBackgroundImage'
     | 'setBackgroundStyle'
     | 'setColorMode'
     | 'setGradientBottomColorLeft'
@@ -212,6 +213,16 @@ export const createVisualizerAppearanceSlice: StateCreator<
 
     set((state) => {
       state.backgroundColor = color
+    })
+  },
+
+  setBackgroundImage: (image) => {
+    if (image != null && !/^data:image\/(?:png|jpeg|webp);base64,/i.test(image)) {
+      throw new Error('Background image must be a PNG, JPEG, or WebP image.')
+    }
+
+    set((state) => {
+      state.backgroundImage = image
     })
   },
 
