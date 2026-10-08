@@ -959,6 +959,32 @@ describe('ThreeRenderer', () => {
     expect((renderer as any).particleSystem.positionAttribute.array.length).toBe(4_096 * 3)
   })
 
+  it('uses quiet octave guides with a restrained Middle C anchor', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+
+    await renderer.init(canvas)
+
+    const laneGuides = (renderer as any).laneGroup.children as Array<{
+      material: { color: { value: number }; opacity: number }
+      scale: { x: number }
+      userData: { laneGuidePitch: number; laneGuideRole: string }
+    }>
+    const middleCGuide = laneGuides.find((guide) => guide.userData.laneGuidePitch === 60)
+    const octaveGuides = laneGuides.filter((guide) => guide.userData.laneGuideRole === 'octave')
+
+    expect(laneGuides).toHaveLength(8)
+    expect(octaveGuides).toHaveLength(7)
+    expect(octaveGuides.every((guide) => guide.material.opacity === 0.16)).toBe(true)
+    expect(middleCGuide).toMatchObject({
+      material: { color: { value: 0x52657e }, opacity: 0.22 },
+      scale: { x: 1.25 },
+      userData: { laneGuideRole: 'anchor' },
+    })
+  })
+
   it('lets isolated live MIDI notes finish falling after release without changing file playback data', async () => {
     loadProjectWithNotes([
       {

@@ -88,8 +88,13 @@ import type {
 
 type AppState = ReturnType<typeof getAppState>
 
-const CREATE_MODE_LANE_LINE_COLOR = 0x444444
-const CREATE_MODE_LANE_LINE_ALPHA = 0.4
+const CREATE_MODE_LANE_LINE_COLOR = 0x3b424d
+const CREATE_MODE_LANE_LINE_ALPHA = 0.16
+const CREATE_MODE_LANE_ANCHOR_COLOR = 0x52657e
+const CREATE_MODE_LANE_ANCHOR_ALPHA = 0.22
+const CREATE_MODE_LANE_LINE_WIDTH = 1
+const CREATE_MODE_LANE_ANCHOR_WIDTH = 1.25
+const CREATE_MODE_LANE_ANCHOR_PITCH = 60
 const CREATE_MODE_BLACK_KEY_HEIGHT_RATIO = 0.6
 const CREATE_MODE_BOUNDARY_OUTER_AURA_THICKNESS = 10
 const CREATE_MODE_BOUNDARY_MID_GLOW_THICKNESS = 3.5
@@ -1763,17 +1768,21 @@ void main() {
       }
 
       const x = pitchToKeyX(pitch, this.viewportWidth)
+      const isAnchor = pitch === CREATE_MODE_LANE_ANCHOR_PITCH
+      const width = isAnchor ? CREATE_MODE_LANE_ANCHOR_WIDTH : CREATE_MODE_LANE_LINE_WIDTH
       const mesh = this.createStaticRectMesh(
         laneGroup,
-        x,
+        x - (width / 2),
         0,
-        1,
+        width,
         this.viewportHeight,
-        CREATE_MODE_LANE_LINE_COLOR,
-        CREATE_MODE_LANE_LINE_ALPHA,
+        isAnchor ? CREATE_MODE_LANE_ANCHOR_COLOR : CREATE_MODE_LANE_LINE_COLOR,
+        isAnchor ? CREATE_MODE_LANE_ANCHOR_ALPHA : CREATE_MODE_LANE_LINE_ALPHA,
         LANE_GUIDE_Z,
       )
       mesh.renderOrder = 0
+      mesh.userData.laneGuidePitch = pitch
+      mesh.userData.laneGuideRole = isAnchor ? 'anchor' : 'octave'
     }
   }
 
