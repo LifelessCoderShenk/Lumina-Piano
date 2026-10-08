@@ -136,6 +136,11 @@ const BLACK_KEY_Z = 2
 const WHITE_KEY_HIGHLIGHT_Z = WHITE_KEY_Z + 0.4
 const BLACK_KEY_SURFACE_Z = BLACK_KEY_Z
 const BLACK_KEY_HIGHLIGHT_Z = BLACK_KEY_Z + 0.4
+const WHITE_KEY_PRESS_Z = WHITE_KEY_Z + 0.18
+const BLACK_KEY_PRESS_Z = BLACK_KEY_Z + 0.18
+const KEY_PRESS_SHADOW_Z_OFFSET = 0.04
+const WHITE_KEY_PRESS_DEPTH = 3.2
+const BLACK_KEY_PRESS_DEPTH = 2.1
 const KEYBOARD_DEPTH_Z = BLACK_KEY_Z + 0.7
 const BLACK_NOTE_Z = 4
 const WHITE_NOTE_Z = 6
@@ -307,13 +312,33 @@ interface KeyboardMaterialState {
 }
 
 interface KeyHighlightState {
+  basePositionY: number
   currentStrength: number
   fromStrength: number
   material: MeshBasicMaterial
+  mesh: Mesh<PlaneGeometry, MeshBasicMaterial>
+  pressDepth: number
   baseOpacity: number
   targetStrength: number
   transitionDurationSeconds: number
   transitionStartSeconds: number
+}
+
+interface KeyPressUniforms {
+  blackKey: { value: number }
+  keyboardOpacity: { value: number }
+  pressStrength: { value: number }
+  reflectionColor: { value: Color }
+}
+
+interface KeyPressState {
+  basePositionY: number
+  material: ShaderMaterial
+  mesh: Mesh<PlaneGeometry, ShaderMaterial>
+  pressDepth: number
+  shadowMaterial: MeshBasicMaterial
+  shadowMesh: Mesh<PlaneGeometry, MeshBasicMaterial>
+  uniforms: KeyPressUniforms
 }
 
 interface WaveLayerDefinition {
@@ -517,6 +542,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   private persistentResources: Array<{ dispose(): void }> = []
   private keyboardMaterialStates: KeyboardMaterialState[] = []
   private keyHighlightStates = new Map<number, KeyHighlightState>()
+  private keyPressStates = new Map<number, KeyPressState>()
   private impactReflectionStates = new Map<number, ImpactReflectionState>()
   private keyboardSaberStates = new Map<number, KeyboardSaberState>()
   private explicitActiveKeyPitches = new Set<number>()
@@ -1826,11 +1852,23 @@ void main() {
         WHITE_KEY_HIGHLIGHT_Z,
       )
       highlight.layers.enable(BLOOM_LAYER)
+      this.createKeyPressSurface(
+        keyboardGroup,
+        pitch,
+        whiteKeyBounds.x,
+        keyboardY,
+        whiteKeyWidth,
+        whiteKeyHeight,
+        false,
+      )
       this.keyHighlightStates.set(pitch, {
+        basePositionY: highlight.position.y,
         baseOpacity: WHITE_KEY_ACTIVE_ALPHA,
         currentStrength: 0,
         fromStrength: 0,
         material: highlight.material,
+        mesh: highlight,
+        pressDepth: WHITE_KEY_PRESS_DEPTH * this.getLayoutScale(),
         targetStrength: 0,
         transitionDurationSeconds: 0,
         transitionStartSeconds: 0,
@@ -1871,11 +1909,23 @@ void main() {
         BLACK_KEY_HIGHLIGHT_Z,
       )
       highlight.layers.enable(BLOOM_LAYER)
+      this.createKeyPressSurface(
+        keyboardGroup,
+        pitch,
+        keyX + 1,
+        keyboardY + 1,
+        Math.max(1, blackKeyWidth - 2),
+        Math.max(1, blackFaceHeight - 2),
+        true,
+      )
       this.keyHighlightStates.set(pitch, {
+        basePositionY: highlight.position.y,
         baseOpacity: BLACK_KEY_ACTIVE_ALPHA,
         currentStrength: 0,
         fromStrength: 0,
         material: highlight.material,
+        mesh: highlight,
+        pressDepth: BLACK_KEY_PRESS_DEPTH * this.getLayoutScale(),
         targetStrength: 0,
         transitionDurationSeconds: 0,
         transitionStartSeconds: 0,
@@ -3596,6 +3646,108 @@ void main() {
     })
   }
 
+  private createKeyPressSurface(
+    group: Group,
+    pitch: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    blackKey: boolean,
+  ): void {
+    const pressDepth = (blackKey ? BLACK_KEY_PRESS_DEPTH : WHITE_KEY_PRESS_DEPTH) * this.getLayoutScale()
+    const z = blackKey ? BLACK_KEY_PRESS_Z : WHITE_KEY_PRESS_Z
+    const uniforms: KeyPressUniforms = {
+      blackKey: { value: blackKey ? 1 : 0 },
+      keyboardOpacity: { value: this.keyboardOpacity },
+      pressStrength: { value: 0 },
+      reflectionColor: {
+        value: new Color(this.resolveCreateModeColor(pitch, getAppState().createNoteColors)),
+      },
+    }
+    const material = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: `
+        uniform float blackKey;
+        uniform float keyboardOpacity;
+        uniform float pressStrength;
+        uniform vec3 reflectionColor;
+        varying vec2 vUv;
+
+        void main() {
+          vec3 whiteTop = vec3(0.995, 0.992, 0.975);
+          vec3 whiteBottom = vec3(0.73, 0.72, 0.69);
+          vec3 blackTop = vec3(0.075, 0.082, 0.092);
+          vec3 blackBottom = vec3(0.003, 0.004, 0.006);
+          float faceCurve = pow(clamp(vUv.y, 0.0, 1.0), 0.72);
+          vec3 whiteSurface = mix(whiteBottom, whiteTop, faceCurve);
+          vec3 blackSurface = mix(blackBottom, blackTop, faceCurve);
+          vec3 surface = mix(whiteSurface, blackSurface, blackKey);
+
+          float sideDistance = min(vUv.x, 1.0 - vUv.x);
+          float sideBevel = 1.0 - smoothstep(0.0, 0.12, sideDistance);
+          float frontBevel = 1.0 - smoothstep(0.0, 0.13, vUv.y);
+          surface *= 1.0 - (sideBevel * mix(0.09, 0.24, blackKey));
+          surface *= 1.0 - (frontBevel * mix(0.17, 0.32, blackKey));
+
+          float contactReflection = pow(clamp(vUv.y, 0.0, 1.0), 10.0) * pressStrength;
+          surface = mix(surface, reflectionColor, contactReflection * mix(0.15, 0.34, blackKey));
+          surface *= 1.0 - (pressStrength * mix(0.045, 0.08, blackKey));
+
+          float alpha = smoothstep(0.0, 0.16, pressStrength) * keyboardOpacity;
+          gl_FragColor = vec4(surface, alpha);
+        }
+      `,
+      transparent: true,
+      uniforms,
+      vertexShader: `
+        varying vec2 vUv;
+
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+    })
+    const mesh = new Mesh(this.requireRectGeometry(), material)
+    mesh.position.set(x + (width / 2), this.toSceneRectY(y, height), z)
+    mesh.scale.set(width, height, 1)
+    mesh.renderOrder = Math.round(z * 10)
+    mesh.visible = false
+    group.add(mesh)
+
+    const shadowHeight = Math.max(2, Math.ceil(pressDepth + this.getLayoutScale()))
+    const shadowMaterial = new MeshBasicMaterial({
+      color: 0x000000,
+      depthTest: false,
+      depthWrite: false,
+      opacity: 0,
+      transparent: true,
+    })
+    const shadowMesh = new Mesh(this.requireRectGeometry(), shadowMaterial)
+    shadowMesh.position.set(
+      x + (width / 2),
+      this.toSceneRectY(y, shadowHeight),
+      z + KEY_PRESS_SHADOW_Z_OFFSET,
+    )
+    shadowMesh.scale.set(width, shadowHeight, 1)
+    shadowMesh.renderOrder = Math.round((z + KEY_PRESS_SHADOW_Z_OFFSET) * 10)
+    shadowMesh.visible = false
+    group.add(shadowMesh)
+
+    this.staticResources.push(material, shadowMaterial)
+    this.keyPressStates.set(pitch, {
+      basePositionY: mesh.position.y,
+      material,
+      mesh,
+      pressDepth,
+      shadowMaterial,
+      shadowMesh,
+      uniforms,
+    })
+  }
+
   private createKeyboardSaberMesh(
     group: Group,
     pitch: number,
@@ -4078,6 +4230,15 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       state.transitionStartSeconds = animationTimeSeconds
       state.material.opacity = 0
       state.material.needsUpdate = true
+      state.mesh.position.y = state.basePositionY
+    }
+
+    for (const state of this.keyPressStates.values()) {
+      state.uniforms.pressStrength.value = 0
+      state.mesh.position.y = state.basePositionY
+      state.mesh.visible = false
+      state.shadowMaterial.opacity = 0
+      state.shadowMesh.visible = false
     }
 
     for (const impactReflection of this.impactReflectionStates.values()) {
@@ -4096,6 +4257,12 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     for (const label of this.keyboardLabelSprites) {
       label.material.opacity = this.keyboardOpacity
       label.material.needsUpdate = true
+    }
+
+    for (const state of this.keyPressStates.values()) {
+      state.uniforms.keyboardOpacity.value = this.keyboardOpacity
+      state.shadowMaterial.opacity = clamp(0.46 * state.uniforms.pressStrength.value * this.keyboardOpacity, 0, 0.46)
+      state.shadowMaterial.needsUpdate = true
     }
   }
 
@@ -4133,6 +4300,21 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       state.material.color.setHex(this.resolveCreateModeColor(pitch, getAppState().createNoteColors))
       state.material.opacity = clamp(state.baseOpacity * state.currentStrength * this.keyboardOpacity, 0, 1)
       state.material.needsUpdate = true
+      state.mesh.position.y = state.basePositionY - (state.pressDepth * nextStrength)
+
+      const pressState = this.keyPressStates.get(pitch)
+      if (pressState != null) {
+        pressState.uniforms.pressStrength.value = nextStrength
+        pressState.uniforms.keyboardOpacity.value = this.keyboardOpacity
+        pressState.uniforms.reflectionColor.value.setHex(
+          this.resolveCreateModeColor(pitch, getAppState().createNoteColors),
+        )
+        pressState.mesh.position.y = pressState.basePositionY - (pressState.pressDepth * nextStrength)
+        pressState.mesh.visible = nextStrength > 0.001
+        pressState.shadowMaterial.opacity = clamp(0.46 * nextStrength * this.keyboardOpacity, 0, 0.46)
+        pressState.shadowMaterial.needsUpdate = true
+        pressState.shadowMesh.visible = nextStrength > 0.001
+      }
 
       const keyboardSaber = this.keyboardSaberStates.get(pitch)
       if (keyboardSaber != null) {
@@ -4227,6 +4409,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     this.keyboardLabelSprites = []
     this.keyboardMaterialStates = []
     this.keyHighlightStates.clear()
+    this.keyPressStates.clear()
     this.keyboardSaberStates.clear()
     this.impactReflectionStates.clear()
   }

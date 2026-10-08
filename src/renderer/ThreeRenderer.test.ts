@@ -1241,9 +1241,18 @@ describe('ThreeRenderer', () => {
 
     const highlightState = (renderer as any).keyHighlightStates.get(60) as {
       material: { opacity: number }
+      mesh: { position: { y: number } }
+    }
+    const keyPressState = (renderer as any).keyPressStates.get(60) as {
+      basePositionY: number
+      mesh: { position: { y: number }; visible: boolean }
+      shadowMaterial: { opacity: number }
+      shadowMesh: { visible: boolean }
+      uniforms: { pressStrength: { value: number }; reflectionColor: { value: number } }
     }
 
     expect(highlightState.material.opacity).toBe(0)
+    expect(keyPressState.mesh.visible).toBe(false)
 
     ;(renderer as any).playbackActiveKeyPitches = new Set([60])
     ;(renderer as any).applyActiveKeyHighlights(1)
@@ -1255,6 +1264,11 @@ describe('ThreeRenderer', () => {
     ;(renderer as any).applyActiveKeyHighlights(1.06)
 
     expect(highlightState.material.opacity).toBeCloseTo(0.45, 3)
+    expect(keyPressState.uniforms.pressStrength.value).toBeCloseTo(1, 3)
+    expect(keyPressState.mesh.visible).toBe(true)
+    expect(keyPressState.mesh.position.y).toBeLessThan(keyPressState.basePositionY)
+    expect(keyPressState.shadowMaterial.opacity).toBeCloseTo(0.46, 3)
+    expect(keyPressState.shadowMesh.visible).toBe(true)
 
     ;(renderer as any).playbackActiveKeyPitches = new Set()
     ;(renderer as any).applyActiveKeyHighlights(1.06)
@@ -1266,6 +1280,38 @@ describe('ThreeRenderer', () => {
     ;(renderer as any).applyActiveKeyHighlights(1.24)
 
     expect(highlightState.material.opacity).toBeCloseTo(0, 3)
+    expect(keyPressState.mesh.visible).toBe(false)
+    expect(keyPressState.shadowMesh.visible).toBe(false)
+  })
+
+  it('gives black keys a shorter pressed travel and stronger reflected color', async () => {
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+
+    const whitePress = (renderer as any).keyPressStates.get(60) as {
+      pressDepth: number
+      uniforms: { blackKey: { value: number } }
+    }
+    const blackPress = (renderer as any).keyPressStates.get(61) as {
+      basePositionY: number
+      mesh: { position: { y: number }; visible: boolean }
+      pressDepth: number
+      uniforms: { blackKey: { value: number }; pressStrength: { value: number } }
+    }
+
+    ;(renderer as any).playbackActiveKeyPitches = new Set([61])
+    ;(renderer as any).applyActiveKeyHighlights(2)
+    ;(renderer as any).applyActiveKeyHighlights(2.06)
+
+    expect(whitePress.uniforms.blackKey.value).toBe(0)
+    expect(blackPress.uniforms.blackKey.value).toBe(1)
+    expect(blackPress.pressDepth).toBeLessThan(whitePress.pressDepth)
+    expect(blackPress.mesh.visible).toBe(true)
+    expect(blackPress.mesh.position.y).toBeCloseTo(blackPress.basePositionY - blackPress.pressDepth, 5)
+    expect(blackPress.uniforms.pressStrength.value).toBeCloseTo(1, 5)
   })
 
   it('shows keyboard beams only when enabled and follows the key highlight fade', async () => {
@@ -2605,7 +2651,7 @@ void main() {
     expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(1)
     expect(mockMeshBasicMaterialDispose).toHaveBeenCalled()
     expect(mockMeshLambertMaterialDispose).toHaveBeenCalled()
-    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(194)
+    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(282)
     expect(mockSpriteMaterialDispose).toHaveBeenCalledTimes(88)
     expect(mockUnrealBloomPassDispose).toHaveBeenCalledTimes(1)
     expect(mockOutputPassDispose).toHaveBeenCalledTimes(1)
