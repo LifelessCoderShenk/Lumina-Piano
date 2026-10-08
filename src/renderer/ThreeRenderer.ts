@@ -4007,6 +4007,14 @@ noteFaceColor = mix(noteFaceColor, vec3(noteFaceLuminance), ${NOTE_BASE_DESATURA
 noteFaceColor *= ${NOTE_BASE_BRIGHTNESS_SCALE.toFixed(2)};
 float noteSaberCore = 1.0 - smoothstep(0.02, 0.24, abs(vRoundedRectUv.x - 0.5));
 float noteOutlineMask = smoothstep(0.32, 0.88, noteEdgeMix);
+float noteHorizontalBevelWidth = clamp(2.4 / max(1.0, roundedRectSize.x), 0.035, 0.22);
+float noteVerticalBevelWidth = clamp(2.4 / max(1.0, roundedRectSize.y), 0.025, 0.18);
+float noteLeftBevel = 1.0 - smoothstep(0.0, noteHorizontalBevelWidth, vRoundedRectUv.x);
+float noteRightBevel = smoothstep(1.0 - noteHorizontalBevelWidth, 1.0, vRoundedRectUv.x);
+float noteLeadingEdge = 1.0 - smoothstep(0.0, noteVerticalBevelWidth, vRoundedRectUv.y);
+float noteTrailingEdge = smoothstep(1.0 - noteVerticalBevelWidth, 1.0, vRoundedRectUv.y);
+float noteDimensionalSide = max(noteRightBevel * 0.72, noteLeadingEdge);
+float noteRimLight = max(noteLeftBevel * 0.68, noteTrailingEdge);
 float noteCrystalRidgeA = 1.0 - smoothstep(
   0.015,
   0.065,
@@ -4037,14 +4045,25 @@ float noteGemDirectionalLight = clamp(
   0.68
 );
 vec3 noteFlatColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix * 0.12);
+noteFlatColor = mix(noteFlatColor, noteHaloDiffuseColor, noteLeadingEdge * 0.10);
+vec3 noteSculptedColor = noteFaceColor * (1.0 - (noteDimensionalSide * 0.30));
+noteSculptedColor = mix(noteSculptedColor, noteHaloDiffuseColor, noteRimLight * 0.26);
+noteSculptedColor = mix(noteSculptedColor, noteSwirlBrightColor, noteLeadingEdge * 0.34);
 vec3 noteSaberColor = mix(noteCoreDiffuseColor, vec3(1.0), noteSaberCore * 0.78);
-vec3 noteOutlineColor = mix(noteCoreDiffuseColor * 0.24, noteHaloDiffuseColor, noteOutlineMask);
+noteSaberColor = mix(noteSaberColor, vec3(1.0), noteLeadingEdge * 0.48);
+float noteCrispOutlineMask = max(noteOutlineMask, noteLeadingEdge * 0.82);
+vec3 noteOutlineColor = mix(noteCoreDiffuseColor * 0.20, noteHaloDiffuseColor, noteCrispOutlineMask);
 vec3 noteCrystalColor = mix(noteCoreDiffuseColor * 0.46, noteHaloDiffuseColor, noteEdgeMix * 0.58);
 noteCrystalColor = mix(noteCrystalColor, noteSwirlBrightColor, noteCrystalFacetLight * 0.68);
+noteCrystalColor *= 1.0 - (noteDimensionalSide * 0.18);
+noteCrystalColor = mix(noteCrystalColor, noteSwirlBrightColor, max(noteRimLight * 0.22, noteLeadingEdge * 0.44));
 vec3 noteGemColor = mix(noteCoreDiffuseColor * 0.42, noteHaloDiffuseColor, noteGemBevel * 0.54);
 noteGemColor *= 1.0 + noteGemDirectionalLight;
 noteGemColor = mix(noteGemColor, noteSwirlBrightColor, noteGemCenterRidge * 0.20);
+noteGemColor *= 1.0 - (noteDimensionalSide * 0.26);
+noteGemColor = mix(noteGemColor, noteSwirlBrightColor, max(noteRimLight * 0.28, noteLeadingEdge * 0.50));
 noteFaceColor = noteStyleMode < 0.5 ? noteFlatColor : noteFaceColor;
+noteFaceColor = noteStyleMode > 0.5 && noteStyleMode < 1.5 ? noteSculptedColor : noteFaceColor;
 noteFaceColor = noteStyleMode > 1.5 && noteStyleMode < 2.5 ? noteSaberColor : noteFaceColor;
 noteFaceColor = noteStyleMode > 2.5 && noteStyleMode < 3.5 ? noteOutlineColor : noteFaceColor;
 noteFaceColor = noteStyleMode > 3.5 && noteStyleMode < 4.5 ? noteCrystalColor : noteFaceColor;
@@ -4092,6 +4111,13 @@ roundedNoteEmissiveRadiance = noteStyleMode > 4.5
     + noteSwirlBrightColor * noteGemCenterRidge * 0.38
   )
   : roundedNoteEmissiveRadiance;
+float noteContactGlowStrength = noteStyleMode < 0.5
+  ? 0.08
+  : (noteStyleMode > 2.5 && noteStyleMode < 3.5 ? 0.42 : 0.68);
+roundedNoteEmissiveRadiance += noteHaloEmissiveColor
+  * noteLeadingEdge
+  * noteContactGlowStrength
+  * noteHaloEmissiveStrength;
 roundedNoteEmissiveRadiance *= noteGlowStrength;
 roundedNoteEmissiveRadiance *= roundedRectMask;`,
         )
@@ -4100,7 +4126,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
           'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v12'
+    material.customProgramCacheKey = () => 'rounded-note-pill-v13'
     return material
   }
 
