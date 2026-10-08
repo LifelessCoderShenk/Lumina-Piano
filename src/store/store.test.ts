@@ -62,6 +62,12 @@ describe('initial state', () => {
       useMidiAudio: true,
     })
     expect(state.handVisualization).toEqual({ enabled: false, opacity: 35 })
+    expect(state.backgroundImageTreatment).toEqual({
+      blur: 0,
+      dim: 20,
+      saturation: 100,
+      vignette: 20,
+    })
     expect(state.createNoteColors).toEqual({
       mode: 'single',
       pitchClassColors: {
@@ -86,6 +92,22 @@ describe('initial state', () => {
 })
 
 describe('note appearance', () => {
+  it('clamps custom background image finishing controls', () => {
+    useAppStore.getState().setBackgroundImageTreatment({
+      blur: 140,
+      dim: -10,
+      saturation: 170,
+      vignette: 53.6,
+    })
+
+    expect(getAppState().backgroundImageTreatment).toEqual({
+      blur: 100,
+      dim: 0,
+      saturation: 150,
+      vignette: 54,
+    })
+  })
+
   it('clamps note glow to its supported range', () => {
     useAppStore.getState().setNoteGlow(260)
     expect(getAppState().noteGlow).toBe(200)

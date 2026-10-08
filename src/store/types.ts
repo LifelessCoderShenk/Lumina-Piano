@@ -84,6 +84,13 @@ export interface HandVisualizationSettings {
   opacity: number
 }
 
+export interface BackgroundImageTreatment {
+  blur: number
+  dim: number
+  saturation: number
+  vignette: number
+}
+
 export interface ProjectSlice {
   projectData: ProjectData | null
   precomputedTempoMap: PrecomputedTempoMap | null
@@ -175,6 +182,7 @@ export interface UISlice {
 
 export interface VisualizerSettingsSlice {
   backgroundImage: string | null
+  backgroundImageTreatment: BackgroundImageTreatment
   backgroundStyle: 'flat' | 'studio' | 'aurora' | 'stage'
   colorMode: 'track' | 'pitch' | 'split' | 'velocity'
   pitchClassColors: Record<number, string>
@@ -303,6 +311,7 @@ export interface AppActions {
   setGradientBottomColorLeftBlack(color: string): void
   setBackgroundColor(color: string): void
   setBackgroundImage(image: string | null): void
+  setBackgroundImageTreatment(patch: Partial<BackgroundImageTreatment>): void
   setBackgroundStyle(style: VisualizerSettingsSlice['backgroundStyle']): void
   setLaneOpacity(value: number): void
   setNoteLabelsOnNotes(value: boolean): void

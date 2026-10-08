@@ -88,6 +88,7 @@ export type {
   AppMode,
   AppState,
   CameraOverlaySettings,
+  BackgroundImageTreatment,
   HandVisualizationSettings,
   CreateTab,
   Piece,

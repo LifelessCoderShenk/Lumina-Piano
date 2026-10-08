@@ -45,6 +45,7 @@ describe('Lumina project files', () => {
       isProjectLoaded: true,
       backgroundColor: '#123456',
       backgroundImage: 'data:image/png;base64,YmFja2dyb3VuZA==',
+      backgroundImageTreatment: { blur: 12, dim: 30, saturation: 115, vignette: 48 },
       currentTick: 720,
       loopEnabled: true,
       loopStartTick: 480,
@@ -65,6 +66,7 @@ describe('Lumina project files', () => {
       appMode: 'create',
       backgroundColor: '#123456',
       backgroundImage: 'data:image/png;base64,YmFja2dyb3VuZA==',
+      backgroundImageTreatment: { blur: 12, dim: 30, saturation: 115, vignette: 48 },
       currentTick: 720,
       isPlaying: false,
       loopEnabled: true,
@@ -87,11 +89,18 @@ describe('Lumina project files', () => {
   it('opens older projects without a custom background using the color fallback', async () => {
     const legacy = createLuminaProjectDocument({ ...useAppStore.getState(), projectData } as never, 'Legacy background')
     delete (legacy.workspace.appearance as Partial<typeof legacy.workspace.appearance>).backgroundImage
+    delete (legacy.workspace.appearance as Partial<typeof legacy.workspace.appearance>).backgroundImageTreatment
     useAppStore.setState({ backgroundImage: 'data:image/png;base64,c3RhbGU=' })
 
     await applyLuminaProjectDocument(legacy)
 
     expect(useAppStore.getState().backgroundImage).toBeNull()
+    expect(useAppStore.getState().backgroundImageTreatment).toEqual({
+      blur: 0,
+      dim: 20,
+      saturation: 100,
+      vignette: 20,
+    })
   })
 
   it('rejects invalid stored finger assignments', () => {

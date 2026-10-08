@@ -19,7 +19,7 @@ export const LUMINA_PROJECT_VERSION = 1
 
 type AppearanceSettings = Pick<
   VisualizerSettingsSlice,
-  | 'backgroundColor' | 'backgroundImage' | 'backgroundStyle' | 'colorMode' | 'fallSpeed' | 'gradientBottomColorLeft' | 'gradientBottomColorLeftBlack'
+  | 'backgroundColor' | 'backgroundImage' | 'backgroundImageTreatment' | 'backgroundStyle' | 'colorMode' | 'fallSpeed' | 'gradientBottomColorLeft' | 'gradientBottomColorLeftBlack'
   | 'gradientBottomColorRight' | 'gradientBottomColorRightBlack' | 'gradientTopColor' | 'laneOpacity'
   | 'keyboardSaber' | 'leftHandColor' | 'lightingIntensity' | 'noteGradientDirection' | 'noteLabelColor' | 'noteLabelFormat'
   | 'noteGlow' | 'noteLabelSize' | 'noteLabelsOnKeys' | 'noteLabelsOnNotes' | 'noteOpacity' | 'noteStyle' | 'noteWidth' | 'pitchClassColors'
@@ -54,7 +54,7 @@ export interface LuminaProjectDocument {
 }
 
 const APPEARANCE_KEYS: readonly (keyof AppearanceSettings)[] = [
-  'backgroundColor', 'backgroundImage', 'backgroundStyle', 'colorMode', 'fallSpeed', 'gradientBottomColorLeft', 'gradientBottomColorLeftBlack',
+  'backgroundColor', 'backgroundImage', 'backgroundImageTreatment', 'backgroundStyle', 'colorMode', 'fallSpeed', 'gradientBottomColorLeft', 'gradientBottomColorLeftBlack',
   'gradientBottomColorRight', 'gradientBottomColorRightBlack', 'gradientTopColor', 'laneOpacity',
   'keyboardSaber', 'leftHandColor', 'lightingIntensity', 'noteGradientDirection', 'noteLabelColor', 'noteLabelFormat', 'noteLabelSize',
   'noteGlow', 'noteLabelsOnKeys', 'noteLabelsOnNotes', 'noteOpacity', 'noteStyle', 'noteWidth', 'pitchClassColors', 'rightHandColor',
@@ -141,6 +141,12 @@ export async function applyLuminaProjectDocument(document: LuminaProjectDocument
   useAppStore.getState().batchUpdate((state) => {
     Object.assign(state, workspace.appearance)
     state.backgroundImage = workspace.appearance.backgroundImage ?? null
+    state.backgroundImageTreatment = workspace.appearance.backgroundImageTreatment ?? {
+      blur: 0,
+      dim: 20,
+      saturation: 100,
+      vignette: 20,
+    }
     state.backgroundStyle = workspace.appearance.backgroundStyle ?? 'flat'
     state.fallSpeed = workspace.appearance.fallSpeed ?? 100
     state.keyboardSaber = workspace.appearance.keyboardSaber ?? false

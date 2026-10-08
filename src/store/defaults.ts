@@ -113,6 +113,12 @@ export function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
   return {
     backgroundColor: DEFAULT_VISUALIZER_BACKGROUND_COLOR,
     backgroundImage: null,
+    backgroundImageTreatment: {
+      blur: 0,
+      dim: 20,
+      saturation: 100,
+      vignette: 20,
+    },
     backgroundStyle: 'flat',
     colorMode: 'split',
     gradientBottomColorLeft: '#77a3ca',

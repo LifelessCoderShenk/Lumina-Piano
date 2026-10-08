@@ -21,6 +21,7 @@ type VisualizerAppearanceStoreSlice =
     AppActions,
     | 'setBackgroundColor'
     | 'setBackgroundImage'
+    | 'setBackgroundImageTreatment'
     | 'setBackgroundStyle'
     | 'setColorMode'
     | 'setGradientBottomColorLeft'
@@ -223,6 +224,20 @@ export const createVisualizerAppearanceSlice: StateCreator<
 
     set((state) => {
       state.backgroundImage = image
+    })
+  },
+
+  setBackgroundImageTreatment: (patch) => {
+    for (const [key, value] of Object.entries(patch)) {
+      validateFiniteStateNumber(value, `backgroundImageTreatment.${key}`)
+    }
+    set((state) => {
+      state.backgroundImageTreatment = {
+        blur: clamp(Math.round(patch.blur ?? state.backgroundImageTreatment.blur), 0, 100),
+        dim: clamp(Math.round(patch.dim ?? state.backgroundImageTreatment.dim), 0, 80),
+        saturation: clamp(Math.round(patch.saturation ?? state.backgroundImageTreatment.saturation), 0, 150),
+        vignette: clamp(Math.round(patch.vignette ?? state.backgroundImageTreatment.vignette), 0, 100),
+      }
     })
   },
 

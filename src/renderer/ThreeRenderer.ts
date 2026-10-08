@@ -1,4 +1,5 @@
 import {
+  ACESFilmicToneMapping,
   AdditiveBlending,
   AmbientLight,
   BufferAttribute,
@@ -7,7 +8,6 @@ import {
   Color,
   Group,
   LinearFilter,
-  LinearToneMapping,
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
@@ -26,6 +26,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
 import {
@@ -154,8 +155,9 @@ const NOTE_ROUNDED_CORNER_RATIO = 0.18
 const NOTE_MAX_CORNER_RADIUS = 6
 const BLOOM_LAYER = 1
 const BLOOM_STRENGTH = 0.7
-const BLOOM_RADIUS = 0.025
-const BLOOM_THRESHOLD = 0.25
+const BLOOM_RADIUS = 0.018
+const BLOOM_THRESHOLD = 0.42
+const RENDER_EXPOSURE = 1.08
 const SHOW_BLOOM_DEBUG_VIEW = false
 const SHOW_BLOOM_CLIP_DEBUG_LINE = false
 const BLOOM_CLIP_FEATHER_PIXELS = 3
@@ -410,7 +412,12 @@ interface BackgroundUniforms {
   backgroundColor: { value: Color }
   backgroundImage: { value: CanvasTexture | null }
   backgroundImageAspect: { value: number }
+  backgroundImageBlur: { value: number }
+  backgroundImageDim: { value: number }
   backgroundImageEnabled: { value: number }
+  backgroundImageSaturation: { value: number }
+  backgroundImageSize: { value: Vector2 }
+  backgroundImageVignette: { value: number }
   backgroundStyle: { value: number }
   backgroundTime: SharedFloatUniform
 }
@@ -488,6 +495,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   private bloomPass: UnrealBloomPass | null = null
   private bloomCompositePass: ShaderPass | null = null
   private outputPass: OutputPass | null = null
+  private smaaPass: SMAAPass | null = null
   private scene: Scene | null = null
   private camera: OrthographicCamera | null = null
   private ambientLight: AmbientLight | null = null
@@ -587,6 +595,9 @@ export class ThreeRenderer implements VisualizerRenderer {
     if (nextState.backgroundImage !== previousState.backgroundImage) {
       this.applyBackgroundImage(nextState.backgroundImage)
     }
+    if (nextState.backgroundImageTreatment !== previousState.backgroundImageTreatment) {
+      this.applyBackgroundAppearance(nextState)
+    }
     if (nextState.backgroundStyle !== previousState.backgroundStyle) {
       this.applyBackgroundAppearance(nextState)
     }
@@ -681,8 +692,9 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.postprocessScale = 1
     this.composerPixelRatio = resolveComposerPixelRatio(this.effectivePixelRatio, this.postprocessScale)
     this.renderer.setPixelRatio(this.effectivePixelRatio)
-    this.renderer.toneMapping = LinearToneMapping
-    this.renderer.toneMappingExposure = 1
+    this.renderer.outputColorSpace = SRGBColorSpace
+    this.renderer.toneMapping = ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = RENDER_EXPOSURE
 
     this.rectGeometry = new PlaneGeometry(1, 1)
     this.laneGroup = new Group()
@@ -811,6 +823,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.bloomPass = null
     this.bloomCompositePass = null
     this.outputPass = null
+    this.smaaPass = null
     this.renderer = null
     this.canvas = null
     this.explicitActiveKeyPitches.clear()
@@ -1159,6 +1172,10 @@ export class ThreeRenderer implements VisualizerRenderer {
 
     this.backgroundUniforms.backgroundColor.value.setHex(hexToPixi(state.backgroundColor))
     this.backgroundUniforms.backgroundStyle.value = backgroundStyleMode(state.backgroundStyle)
+    this.backgroundUniforms.backgroundImageBlur.value = state.backgroundImageTreatment.blur / 100
+    this.backgroundUniforms.backgroundImageDim.value = state.backgroundImageTreatment.dim / 100
+    this.backgroundUniforms.backgroundImageSaturation.value = state.backgroundImageTreatment.saturation / 100
+    this.backgroundUniforms.backgroundImageVignette.value = state.backgroundImageTreatment.vignette / 100
     this.renderScene()
   }
 
@@ -1202,6 +1219,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       this.backgroundImageTexture = texture
       this.backgroundUniforms.backgroundImage.value = texture
       this.backgroundUniforms.backgroundImageAspect.value = sourceWidth / sourceHeight
+      this.backgroundUniforms.backgroundImageSize.value.set(canvas.width, canvas.height)
       this.backgroundUniforms.backgroundImageEnabled.value = 1
       this.renderScene()
     }
@@ -1215,7 +1233,12 @@ export class ThreeRenderer implements VisualizerRenderer {
       backgroundColor: { value: new Color(state.backgroundColor) },
       backgroundImage: { value: null },
       backgroundImageAspect: { value: 1 },
+      backgroundImageBlur: { value: state.backgroundImageTreatment.blur / 100 },
+      backgroundImageDim: { value: state.backgroundImageTreatment.dim / 100 },
       backgroundImageEnabled: { value: 0 },
+      backgroundImageSaturation: { value: state.backgroundImageTreatment.saturation / 100 },
+      backgroundImageSize: { value: new Vector2(1, 1) },
+      backgroundImageVignette: { value: state.backgroundImageTreatment.vignette / 100 },
       backgroundStyle: { value: backgroundStyleMode(state.backgroundStyle) },
       backgroundTime: this.sharedNoteMaterialTimeUniform,
     }
@@ -1235,7 +1258,12 @@ uniform float backgroundAspect;
 uniform vec3 backgroundColor;
 uniform sampler2D backgroundImage;
 uniform float backgroundImageAspect;
+uniform float backgroundImageBlur;
+uniform float backgroundImageDim;
 uniform float backgroundImageEnabled;
+uniform float backgroundImageSaturation;
+uniform vec2 backgroundImageSize;
+uniform float backgroundImageVignette;
 uniform float backgroundStyle;
 uniform float backgroundTime;
 varying vec2 vBackgroundUv;
@@ -1298,7 +1326,22 @@ void main() {
     } else {
       imageUv.x = ((uv.x - 0.5) * (backgroundAspect / backgroundImageAspect)) + 0.5;
     }
-    color = texture2D(backgroundImage, imageUv).rgb;
+    vec2 blurStep = (vec2(1.0) / max(backgroundImageSize, vec2(1.0))) * (backgroundImageBlur * 18.0);
+    vec3 imageColor = texture2D(backgroundImage, imageUv).rgb * 0.28;
+    imageColor += texture2D(backgroundImage, imageUv + vec2(blurStep.x, 0.0)).rgb * 0.12;
+    imageColor += texture2D(backgroundImage, imageUv - vec2(blurStep.x, 0.0)).rgb * 0.12;
+    imageColor += texture2D(backgroundImage, imageUv + vec2(0.0, blurStep.y)).rgb * 0.12;
+    imageColor += texture2D(backgroundImage, imageUv - vec2(0.0, blurStep.y)).rgb * 0.12;
+    imageColor += texture2D(backgroundImage, imageUv + blurStep).rgb * 0.06;
+    imageColor += texture2D(backgroundImage, imageUv - blurStep).rgb * 0.06;
+    imageColor += texture2D(backgroundImage, imageUv + vec2(blurStep.x, -blurStep.y)).rgb * 0.06;
+    imageColor += texture2D(backgroundImage, imageUv + vec2(-blurStep.x, blurStep.y)).rgb * 0.06;
+    float imageLuminance = dot(imageColor, vec3(0.2126, 0.7152, 0.0722));
+    imageColor = mix(vec3(imageLuminance), imageColor, backgroundImageSaturation);
+    imageColor *= 1.0 - backgroundImageDim;
+    float imageVignette = smoothstep(0.32, 0.94, length(centered * vec2(0.76, 1.0)));
+    imageColor *= 1.0 - (imageVignette * backgroundImageVignette * 0.72);
+    color = imageColor;
   }
 
   gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
@@ -4302,10 +4345,15 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       `,
     }, 'baseTexture')
     this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
+    this.smaaPass = new SMAAPass(
+      this.viewportWidth * this.composerPixelRatio,
+      this.viewportHeight * this.composerPixelRatio,
+    )
     this.outputPass = new OutputPass()
 
     this.finalComposer.addPass(this.finalRenderPass)
     this.finalComposer.addPass(this.bloomCompositePass)
+    this.finalComposer.addPass(this.smaaPass)
     this.finalComposer.addPass(this.outputPass)
 
     this.updateBloomCompositeUniforms()
@@ -4313,6 +4361,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       this.bloomPass,
       this.bloomComposer,
       this.bloomCompositePass,
+      this.smaaPass,
       this.outputPass,
       this.finalComposer,
     )

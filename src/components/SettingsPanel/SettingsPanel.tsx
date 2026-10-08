@@ -33,11 +33,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const setVisualizerSettings = useAppStore((state) => state.setVisualizerSettings)
   const backgroundColor = useAppStore((state) => state.backgroundColor)
   const backgroundImage = useAppStore((state) => state.backgroundImage)
+  const backgroundImageTreatment = useAppStore((state) => state.backgroundImageTreatment)
   const backgroundStyle = useAppStore((state) => state.backgroundStyle)
   const noteLabelsOnKeys = useAppStore((state) => state.noteLabelsOnKeys)
   const noteLabelsOnNotes = useAppStore((state) => state.noteLabelsOnNotes)
   const setBackgroundColor = useAppStore((state) => state.setBackgroundColor)
   const setBackgroundImage = useAppStore((state) => state.setBackgroundImage)
+  const setBackgroundImageTreatment = useAppStore((state) => state.setBackgroundImageTreatment)
   const setBackgroundStyle = useAppStore((state) => state.setBackgroundStyle)
   const setNoteLabelsOnKeys = useAppStore((state) => state.setNoteLabelsOnKeys)
   const setNoteLabelsOnNotes = useAppStore((state) => state.setNoteLabelsOnNotes)
@@ -167,24 +169,52 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </div>
           </>
         ) : (
-          <div className={styles.backgroundImageCard}>
-            <img className={styles.backgroundPreview} src={backgroundImage} alt="Custom background preview" />
-            <button
-              type="button"
-              className={styles.imageButton}
-              onClick={() => backgroundImageInputRef.current?.click()}
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              className={styles.removeImageButton}
-              aria-label="Remove background image"
-              onClick={() => setBackgroundImage(null)}
-            >
-              <AppIcon icon={Trash2} size={16} />
-            </button>
-          </div>
+          <>
+            <div className={styles.backgroundImageCard}>
+              <img className={styles.backgroundPreview} src={backgroundImage} alt="Custom background preview" />
+              <button
+                type="button"
+                className={styles.imageButton}
+                onClick={() => backgroundImageInputRef.current?.click()}
+              >
+                Replace
+              </button>
+              <button
+                type="button"
+                className={styles.removeImageButton}
+                aria-label="Remove background image"
+                onClick={() => setBackgroundImage(null)}
+              >
+                <AppIcon icon={Trash2} size={16} />
+              </button>
+            </div>
+            <div className={styles.imageTreatment}>
+              <CompactRange
+                label="Blur"
+                value={backgroundImageTreatment.blur}
+                max={100}
+                onChange={(blur) => setBackgroundImageTreatment({ blur })}
+              />
+              <CompactRange
+                label="Dim"
+                value={backgroundImageTreatment.dim}
+                max={80}
+                onChange={(dim) => setBackgroundImageTreatment({ dim })}
+              />
+              <CompactRange
+                label="Color"
+                value={backgroundImageTreatment.saturation}
+                max={150}
+                onChange={(saturation) => setBackgroundImageTreatment({ saturation })}
+              />
+              <CompactRange
+                label="Vignette"
+                value={backgroundImageTreatment.vignette}
+                max={100}
+                onChange={(vignette) => setBackgroundImageTreatment({ vignette })}
+              />
+            </div>
+          </>
         )}
         {backgroundImageError == null ? null : (
           <p className={styles.imageError} role="alert">{backgroundImageError}</p>
@@ -356,6 +386,30 @@ function readBackgroundImage(file: File): Promise<string> {
     }
     reader.readAsDataURL(file)
   })
+}
+
+interface CompactRangeProps {
+  label: string
+  max: number
+  value: number
+  onChange(value: number): void
+}
+
+function CompactRange({ label, max, value, onChange }: CompactRangeProps) {
+  return (
+    <label className={styles.compactRange}>
+      <span>{label}</span>
+      <input
+        aria-label={`Background image ${label.toLowerCase()}`}
+        type="range"
+        min="0"
+        max={max}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <output>{value}%</output>
+    </label>
+  )
 }
 
 interface SettingsSectionProps<T extends string | number> {

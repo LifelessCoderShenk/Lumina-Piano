@@ -197,6 +197,17 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('button', { name: 'Replace' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Plain' })).toBeNull()
 
+    fireEvent.change(screen.getByLabelText('Background image blur'), { target: { value: '35' } })
+    fireEvent.change(screen.getByLabelText('Background image dim'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Background image color'), { target: { value: '118' } })
+    fireEvent.change(screen.getByLabelText('Background image vignette'), { target: { value: '55' } })
+    expect(useAppStore.getState().backgroundImageTreatment).toEqual({
+      blur: 35,
+      dim: 42,
+      saturation: 118,
+      vignette: 55,
+    })
+
     fireEvent.click(screen.getByRole('button', { name: 'Remove background image' }))
 
     expect(useAppStore.getState().backgroundImage).toBeNull()

@@ -46,6 +46,7 @@ const mockLayersEnable = vi.hoisted(() => vi.fn())
 const mockLayersSet = vi.hoisted(() => vi.fn())
 const mockOutputPassDispose = vi.hoisted(() => vi.fn())
 const mockShaderPassDispose = vi.hoisted(() => vi.fn())
+const mockSmaaPassDispose = vi.hoisted(() => vi.fn())
 const mockUnrealBloomPassDispose = vi.hoisted(() => vi.fn())
 const mockPlaybackEngineOn = vi.hoisted(() => vi.fn())
 const mockPlaybackEngineOff = vi.hoisted(() => vi.fn())
@@ -53,6 +54,7 @@ const mockPlaybackSeekListeners = vi.hoisted(() => new Set<(tick: number) => voi
 const createdMeshMaterials = vi.hoisted(() => [] as Array<{ map?: unknown; opacity: number }>)
 
 vi.mock('three', () => {
+  const ACESFilmicToneMapping = 'ACESFilmicToneMapping'
   const AdditiveBlending = 'AdditiveBlending'
   const LinearFilter = 'LinearFilter'
   const LinearToneMapping = 'LinearToneMapping'
@@ -401,6 +403,7 @@ vi.mock('three', () => {
   }
 
   return {
+    ACESFilmicToneMapping,
     AdditiveBlending,
     AmbientLight,
     BufferAttribute,
@@ -477,6 +480,19 @@ vi.mock('three/examples/jsm/postprocessing/ShaderPass.js', () => {
   }
 
   return { ShaderPass }
+})
+
+vi.mock('three/examples/jsm/postprocessing/SMAAPass.js', () => {
+  class SMAAPass {
+    dispose = mockSmaaPassDispose
+
+    constructor(
+      public width: number,
+      public height: number,
+    ) {}
+  }
+
+  return { SMAAPass }
 })
 
 vi.mock('three/examples/jsm/postprocessing/UnrealBloomPass.js', () => {
@@ -814,6 +830,7 @@ describe('ThreeRenderer', () => {
     mockLayersSet.mockReset()
     mockOutputPassDispose.mockReset()
     mockShaderPassDispose.mockReset()
+    mockSmaaPassDispose.mockReset()
     mockUnrealBloomPassDispose.mockReset()
     mockPlaybackEngineOn.mockClear()
     mockPlaybackEngineOff.mockClear()
@@ -882,7 +899,7 @@ describe('ThreeRenderer', () => {
     )
     expect(mockRendererSetPixelRatio).toHaveBeenCalledWith(2)
     expect(mockRendererSetSize).toHaveBeenCalledWith(640, 360, false)
-    expect(mockEffectComposerAddPass).toHaveBeenCalledTimes(5)
+    expect(mockEffectComposerAddPass).toHaveBeenCalledTimes(6)
     expect(mockEffectComposerSetPixelRatio).toHaveBeenCalledWith(2)
     expect(mockEffectComposerSetSize).toHaveBeenCalledWith(640, 360)
     expect(mockCameraUpdateProjectionMatrix).toHaveBeenCalled()
@@ -896,7 +913,11 @@ describe('ThreeRenderer', () => {
     renderer.setKeyboardOpacity(0.4)
     renderer.setActiveKeyPitches([60])
 
-    expect((renderer as any).bloomPass.radius).toBe(0.025)
+    expect((renderer as any).bloomPass.radius).toBe(0.018)
+    expect((renderer as any).renderer.toneMapping).toBe('ACESFilmicToneMapping')
+    expect((renderer as any).renderer.outputColorSpace).toBe('SRGBColorSpace')
+    expect((renderer as any).renderer.toneMappingExposure).toBe(1.08)
+    expect((renderer as any).smaaPass).toMatchObject({ height: 720, width: 1280 })
     expect((renderer as any).bloomCompositePass.uniforms.bloomTexture.value).toBe((renderer as any).bloomComposer.renderTarget2.texture)
     expect((renderer as any).bloomComposer.renderToScreen).toBe(false)
     expect((renderer as any).bloomCompositePass.uniforms.bloomDebugView.value).toBe(0)
@@ -1061,11 +1082,27 @@ describe('ThreeRenderer', () => {
     const uniforms = (renderer as any).backgroundMesh.material.uniforms as {
       backgroundImage: { value: { colorSpace: string } | null }
       backgroundImageAspect: { value: number }
+      backgroundImageBlur: { value: number }
+      backgroundImageDim: { value: number }
       backgroundImageEnabled: { value: number }
+      backgroundImageSaturation: { value: number }
+      backgroundImageVignette: { value: number }
     }
     await vi.waitFor(() => expect(uniforms.backgroundImageEnabled.value).toBe(1))
     expect(uniforms.backgroundImageAspect.value).toBeCloseTo(16 / 9)
     expect(uniforms.backgroundImage.value?.colorSpace).toBe('SRGBColorSpace')
+
+    useAppStore.getState().setBackgroundImageTreatment({
+      blur: 40,
+      dim: 35,
+      saturation: 120,
+      vignette: 50,
+    })
+
+    expect(uniforms.backgroundImageBlur.value).toBe(0.4)
+    expect(uniforms.backgroundImageDim.value).toBe(0.35)
+    expect(uniforms.backgroundImageSaturation.value).toBe(1.2)
+    expect(uniforms.backgroundImageVignette.value).toBe(0.5)
 
     const disposeCountBeforeRemoval = mockCanvasTextureDispose.mock.calls.length
     useAppStore.getState().setBackgroundImage(null)
