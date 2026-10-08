@@ -2265,8 +2265,25 @@ void main() {
 
     renderer.renderFrame(0, { animationTimeSeconds: 1 / 30 })
 
-    expect((renderer as any).boundaryWaveTime).toBeCloseTo(0.04, 6)
+    expect((renderer as any).boundaryWaveTime).toBeCloseTo(0.016, 6)
     expect(updateWaveMeshesSpy).toHaveBeenCalledTimes(2)
+
+    const waveLayers = (renderer as any).waveLayers as Array<{
+      definition: { lineWidth: number; opacity: number; role: string }
+    }>
+    expect(waveLayers.find((layer) => layer.definition.role === 'outer')?.definition).toMatchObject({
+      lineWidth: 10,
+      opacity: 0.09,
+    })
+    expect(waveLayers.find((layer) => layer.definition.role === 'mid')?.definition).toMatchObject({
+      lineWidth: 3.5,
+      opacity: 0.24,
+    })
+    expect(waveLayers.find((layer) => layer.definition.role === 'core')?.definition).toMatchObject({
+      lineWidth: 1.35,
+      opacity: 0.92,
+    })
+    expect((renderer as any).getScaledWaveAmplitude()).toBeCloseTo(0.65, 6)
   })
 
   it('keeps the export canvas at DPR 1 while supersampling postprocessing internally', async () => {
