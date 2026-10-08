@@ -360,6 +360,9 @@ interface ImpactReflectionUniforms {
   reflectionColor: {
     value: Color
   }
+  reflectionProgress: {
+    value: number
+  }
   reflectionStrength: {
     value: number
   }
@@ -2759,10 +2762,8 @@ void main() {
   ): void {
     const particleSystem = this.particleSystem
     if (
-      particleSystem == null ||
       state.projectData == null ||
       state.precomputedTempoMap == null ||
-      !state.particleSettings.enabled ||
       maxInclusiveTick <= minExclusiveTick
     ) {
       return
@@ -2775,20 +2776,19 @@ void main() {
       Math.floor(maxInclusiveTick) + 1,
     )
     const emittedNoteIds = new Set<string>()
+    const particlesEnabled = particleSystem != null && state.particleSettings.enabled
     const densityMultiplier = state.particleSettings.density / 100
     const minParticlesPerBurst = Math.max(1, Math.round(PARTICLE_MIN_COUNT * densityMultiplier))
-    const maxBurstsThisPass = Math.min(
-      PARTICLE_MAX_NOTES_PER_DETECTION,
-      Math.floor((PARTICLE_POOL_CAPACITY - particleSystem.activeCount) / minParticlesPerBurst),
-    )
-    let emittedBurstCount = 0
+    const maxBurstsThisPass = particleSystem == null
+      ? 0
+      : Math.floor((PARTICLE_POOL_CAPACITY - particleSystem.activeCount) / minParticlesPerBurst)
+    let processedNoteCount = 0
     let particlesChanged = false
 
     for (const indexedNote of candidates) {
       const { note } = indexedNote
       if (
-        emittedBurstCount >= maxBurstsThisPass ||
-        (PARTICLE_POOL_CAPACITY - particleSystem.activeCount) < PARTICLE_MIN_COUNT ||
+        processedNoteCount >= PARTICLE_MAX_NOTES_PER_DETECTION ||
         emittedNoteIds.has(note.id) ||
         note.startTick <= minExclusiveTick ||
         note.startTick > maxInclusiveTick
@@ -2797,15 +2797,21 @@ void main() {
       }
 
       emittedNoteIds.add(note.id)
+      processedNoteCount += 1
       this.triggerImpactReflection(note)
+      if (
+        !particlesEnabled ||
+        particleSystem == null ||
+        (PARTICLE_POOL_CAPACITY - particleSystem.activeCount) < PARTICLE_MIN_COUNT ||
+        processedNoteCount > maxBurstsThisPass
+      ) {
+        continue
+      }
       const didEmitBurst = this.emitBurstForNote(indexedNote, state.particleSettings)
       particlesChanged = didEmitBurst || particlesChanged
-      if (didEmitBurst) {
-        emittedBurstCount += 1
-      }
     }
 
-    if (particlesChanged) {
+    if (particleSystem != null && particlesChanged) {
       particleSystem.geometry.setDrawRange(0, particleSystem.activeCount)
       this.markParticleAttributesDirty(particleSystem)
     }
@@ -2946,6 +2952,7 @@ void main() {
       intensity,
     )
     impactReflection.currentStrength = impactReflection.peakStrength
+    impactReflection.uniforms.reflectionProgress.value = 0
     this.applyImpactReflectionState(impactReflection)
   }
 
@@ -3594,6 +3601,9 @@ void main() {
       reflectionColor: {
         value: new Color(this.resolveCreateModeColor(pitch, getAppState().createNoteColors)),
       },
+      reflectionProgress: {
+        value: 1,
+      },
       reflectionStrength: {
         value: 0,
       },
@@ -3603,16 +3613,26 @@ void main() {
       depthWrite: false,
       fragmentShader: `
         uniform vec3 reflectionColor;
+        uniform float reflectionProgress;
         uniform float reflectionStrength;
 
         varying vec2 vUv;
 
         void main() {
-          float sideFade = smoothstep(0.0, 0.08, vUv.x) * (1.0 - smoothstep(0.92, 1.0, vUv.x));
-          float verticalFade = pow(clamp(vUv.y, 0.0, 1.0), 1.8);
-          float alpha = reflectionStrength * sideFade * verticalFade;
+          float centerDistance = abs(vUv.x - 0.5) * 2.0;
+          float sideFade = 1.0 - smoothstep(0.62, 1.0, centerDistance);
+          float surfaceReflection = pow(clamp(vUv.y, 0.0, 1.0), 2.35) * sideFade;
+          float contactDistance = (1.0 - vUv.y) / 0.075;
+          float contactBand = exp(-(contactDistance * contactDistance));
+          float centerGlint = 1.0 - smoothstep(0.0, 0.58, centerDistance);
+          float glintRelease = 1.0 - smoothstep(0.0, 0.72, reflectionProgress);
+          float alpha = reflectionStrength * (
+            (surfaceReflection * 0.38)
+            + (contactBand * (0.38 + (centerGlint * 0.44)) * glintRelease)
+          );
+          vec3 glintColor = mix(reflectionColor, vec3(1.0), contactBand * centerGlint * 0.34);
 
-          gl_FragColor = vec4(reflectionColor, alpha);
+          gl_FragColor = vec4(glintColor, alpha);
         }
       `,
       transparent: true,
@@ -3811,6 +3831,7 @@ void main() {
       impactReflection.durationSeconds = 0
       impactReflection.peakStrength = 0
       impactReflection.startTimeSeconds = Number.NaN
+      impactReflection.uniforms.reflectionProgress.value = 1
       this.applyImpactReflectionState(impactReflection)
     }
   }
@@ -4270,6 +4291,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
     for (const impactReflection of this.impactReflectionStates.values()) {
       impactReflection.currentStrength = 0
       impactReflection.startTimeSeconds = animationTimeSeconds
+      impactReflection.uniforms.reflectionProgress.value = 1
       this.applyImpactReflectionState(impactReflection)
     }
   }
@@ -4365,6 +4387,10 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
 
     for (const impactReflection of this.impactReflectionStates.values()) {
       impactReflection.currentStrength = this.getImpactReflectionStrength(impactReflection, currentTimeSeconds)
+      impactReflection.uniforms.reflectionProgress.value = this.getImpactReflectionProgress(
+        impactReflection,
+        currentTimeSeconds,
+      )
       this.applyImpactReflectionState(impactReflection)
       if (impactReflection.currentStrength > 0.001) {
         hasAnimatingReflections = true
@@ -4402,6 +4428,25 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
 
     const progress = clamp(elapsedSeconds / impactReflection.durationSeconds, 0, 1)
     return impactReflection.peakStrength * (1 - easeOutQuad(progress))
+  }
+
+  private getImpactReflectionProgress(
+    impactReflection: ImpactReflectionState,
+    currentTimeSeconds: number,
+  ): number {
+    if (
+      !Number.isFinite(currentTimeSeconds) ||
+      !Number.isFinite(impactReflection.startTimeSeconds) ||
+      impactReflection.durationSeconds <= 0
+    ) {
+      return 1
+    }
+
+    return clamp(
+      (currentTimeSeconds - impactReflection.startTimeSeconds) / impactReflection.durationSeconds,
+      0,
+      1,
+    )
   }
 
   private getKeyHighlightStrength(state: KeyHighlightState, currentTimeSeconds: number): number {

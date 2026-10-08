@@ -1649,8 +1649,10 @@ describe('ThreeRenderer', () => {
     const reflectionState = (renderer as any).impactReflectionStates.get(60) as {
       currentStrength: number
       mesh: { layers: { mask: number } }
+      material: { fragmentShader: string }
       uniforms: {
         reflectionColor: { value: { value: number } }
+        reflectionProgress: { value: number }
         reflectionStrength: { value: number }
       }
     }
@@ -1658,6 +1660,8 @@ describe('ThreeRenderer', () => {
     expect(reflectionState.uniforms.reflectionStrength.value).toBe(0)
     expect(reflectionState.mesh.layers.mask).toBe(1)
     expect(reflectionState.uniforms.reflectionColor.value.value).toBe(0x4f8ef7)
+    expect(reflectionState.material.fragmentShader).toContain('contactBand')
+    expect(reflectionState.material.fragmentShader).toContain('centerGlint')
 
     useAppStore.setState({ currentTick: 239 })
     ;(renderer as any).handleAnimationFrame(1000)
@@ -1668,10 +1672,12 @@ describe('ThreeRenderer', () => {
 
     const strengthAtImpact = reflectionState.uniforms.reflectionStrength.value
     expect(strengthAtImpact).toBeGreaterThan(0.9)
+    expect(reflectionState.uniforms.reflectionProgress.value).toBe(0)
 
     ;(renderer as any).handleAnimationFrame(1112)
     expect(reflectionState.uniforms.reflectionStrength.value).toBeGreaterThan(0)
     expect(reflectionState.uniforms.reflectionStrength.value).toBeLessThan(strengthAtImpact)
+    expect(reflectionState.uniforms.reflectionProgress.value).toBeGreaterThan(0)
 
     ;(renderer as any).handleAnimationFrame(1280)
     expect(reflectionState.currentStrength).toBe(0)
@@ -2061,7 +2067,7 @@ void main() {
     expect(Math.min(...Array.from({ length: particleSystem.activeCount }, (_, index) => particleSystem.velocities[(index * 3) + 1]))).toBeGreaterThan(0)
   })
 
-  it('does not emit particle bursts while particles are disabled', async () => {
+  it('keeps key-contact feedback while particle bursts are disabled', async () => {
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -2081,6 +2087,9 @@ void main() {
     ;(renderer as any).handleAnimationFrame(1032)
 
     expect((renderer as any).particleSystem.activeCount).toBe(0)
+    expect(
+      (renderer as any).impactReflectionStates.get(60).uniforms.reflectionStrength.value,
+    ).toBeGreaterThan(0.9)
   })
 
   it('scales density, size, speed, spread, lifetime, and glow for new bursts', async () => {
