@@ -47,7 +47,6 @@ import {
   BLACK_KEY_BOTTOM_SHADOW_HEIGHT,
   BLACK_KEY_COLOR,
   BLACK_KEY_HIGHLIGHT_COLOR,
-  BLACK_KEY_SHADOW_COLOR,
   KEYBOARD_HEIGHT,
   NOTE_MIN_HEIGHT,
   WHITE_KEY_ACTIVE_ALPHA,
@@ -109,7 +108,6 @@ const CREATE_MODE_BOUNDARY_SEGMENT_WIDTH = 12
 const ACTIVE_QUERY_TICK_SPAN = 1
 const WHITE_KEY_BOTTOM_INSET = 4
 const BLACK_KEY_BOTTOM_INSET = 2
-const BLACK_KEY_SHADOW_ALPHA = 0.55
 const WHITE_KEY_SHADOW_ALPHA = 0.3
 const BLACK_KEY_HIGHLIGHT_ALPHA = 0.6
 const KEYBOARD_TEXTURE_MAX_WIDTH = 6_144
@@ -2022,17 +2020,6 @@ void main() {
       const faceHeight = Math.max(1, blackKeyHeight - BLACK_KEY_BOTTOM_INSET)
       this.createStaticRectMesh(
         keyboardGroup,
-        x + 2,
-        keyboardY + 3,
-        blackKeyWidth,
-        faceHeight,
-        BLACK_KEY_SHADOW_COLOR,
-        BLACK_KEY_SHADOW_ALPHA,
-        BLACK_KEY_SURFACE_Z,
-        true,
-      )
-      this.createStaticRectMesh(
-        keyboardGroup,
         x,
         keyboardY,
         blackKeyWidth,
@@ -3425,16 +3412,6 @@ void main() {
     const blackKeyWidth = Math.max(1, getBlackKeyWidth(width))
     const blackKeyHeight = Math.max(1, Math.round(height * CREATE_MODE_BLACK_KEY_HEIGHT_RATIO))
     const blackFaceHeight = Math.max(1, blackKeyHeight - BLACK_KEY_BOTTOM_INSET)
-
-    for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
-      if (!isBlackKey(pitch)) continue
-      const x = pitchToKeyX(pitch, width)
-      context.fillStyle = 'rgba(0, 0, 0, 0.58)'
-      this.traceRoundedKeyFace(context, x - 2, 4, blackKeyWidth + 4, blackFaceHeight + 5, 2)
-      context.fill()
-      context.fillStyle = 'rgba(0, 0, 0, 0.34)'
-      context.fillRect(x - 3, blackFaceHeight + 2, blackKeyWidth + 6, 3)
-    }
 
     for (let pitch = PIANO_MIN_PITCH; pitch <= PIANO_MAX_PITCH; pitch += 1) {
       if (!isBlackKey(pitch)) continue
