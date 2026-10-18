@@ -1,0 +1,68 @@
+.frame {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #111317;
+}
+.screen {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: #111317;
+}
+.hero .screen {
+  aspect-ratio: 6 / 5;
+}
+.square .screen {
+  aspect-ratio: 1;
+}
+.screen > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.square .screen > svg {
+  padding: 18px;
+}
+.asset {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.frame:has(.asset) .screen {
+  aspect-ratio: 16 / 9;
+}
+.label {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 6px;
+  background: #111317e8;
+  color: #c0c4ca;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.caption {
+  padding: 9px 12px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #a1a1aa;
+  background: #0d0e10;
+}
+.stylePair {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+}
+.stylePair svg {
+  width: 50%;
+  height: 100%;
+}
+.stylePair svg:first-child {
+  border-right: 1px solid #34373d;
+}
+.notes {
+  transform: none;
+}

@@ -1,0 +1,521 @@
+.home {
+  background: #0b0b0d;
+  font-size: 17px;
+  line-height: 1.6;
+}
+.container {
+  width: min(980px, calc(100% - 48px));
+  margin-inline: auto;
+}
+.home h1,
+.home h2,
+.home h3 {
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+.home h2 {
+  font-size: 38px;
+}
+.hero {
+  padding-top: 36px;
+}
+.badge {
+  display: table;
+  border: 1px solid #657f93;
+  border-radius: 12px;
+  padding: 5px 15px;
+  color: #b8d2e5;
+  text-transform: uppercase;
+  font-size: 11px;
+  line-height: 20px;
+}
+.heroGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 14px;
+  margin-top: 14px;
+}
+.heroCopy {
+  padding-top: 22px;
+}
+.heroCopy h1 {
+  font-size: 44px;
+  line-height: 1.28;
+  margin-bottom: 34px;
+}
+.heroCopy > p {
+  max-width: 395px;
+  font-size: 17px;
+  line-height: 1.75;
+  margin-bottom: 34px;
+}
+.primaryButton {
+  min-height: 50px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 17px;
+  padding: 11px 28px;
+  border-radius: 6px;
+  background: #f5f5f7;
+  color: #0b0b0d;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.4;
+  transition: background-color 120ms;
+}
+.primaryButton:hover {
+  background: #dce6ee;
+}
+.heroCopy .primaryButton {
+  width: min(395px, 100%);
+}
+.platforms {
+  display: flex;
+  gap: 32px;
+  color: #bdcbd7;
+  margin-top: 28px;
+  font-size: 15px;
+}
+.benefits {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  min-height: 58px;
+  padding: 14px 20px;
+  margin-top: 60px;
+  border: 1px solid #27272d;
+  border-radius: 10px;
+  font-size: 14px;
+}
+.benefits li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.benefits svg {
+  color: #9ac0db;
+  flex-shrink: 0;
+}
+.overview {
+  min-height: 400px;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 38px;
+  align-items: center;
+  padding-block: 65px;
+}
+.overview h2,
+.galleryBand h2 {
+  font-size: 30px;
+}
+.sectionIntro {
+  margin-top: 14px;
+  font-size: 17px;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  list-style: none;
+  margin-top: 30px;
+}
+.steps li {
+  border: 1px solid #29292e;
+  border-radius: 18px;
+  padding: 14px;
+  background: #101012;
+}
+.steps li > div {
+  display: flex;
+  align-items: center;
+  gap: 35px;
+  margin-bottom: 18px;
+}
+.steps li > div span {
+  font-size: 23px;
+}
+.steps h3 {
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+.steps p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.desktopPreview {
+  padding-top: 50px;
+}
+.desktopPreview > p {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #a1a1aa;
+  text-align: center;
+}
+.galleryBand {
+  background: #111113;
+  padding: 30px 0 64px;
+}
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 65px;
+}
+.gallery > figure {
+  margin: 0;
+}
+.gallery figcaption {
+  font-size: 15px;
+  line-height: 1.5;
+  padding: 20px 18px 0;
+}
+.gallery figcaption span {
+  display: block;
+  color: #a1a1aa;
+  font-size: 12px;
+  margin-top: 5px;
+}
+.featureRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 46px;
+  align-items: center;
+  min-height: 485px;
+  padding-block: 24px;
+  scroll-margin-top: 30px;
+}
+.featureMedia {
+  max-width: 455px;
+}
+.reversed .featureMedia {
+  order: 2;
+}
+.featureCopy h2 {
+  margin-bottom: 40px;
+}
+.lead {
+  font-size: 17px;
+  font-weight: 650;
+  margin-bottom: 23px;
+}
+.featureCopy ul,
+.tutorial ul {
+  list-style: disc;
+  padding-left: 20px;
+  font-size: 17px;
+}
+.featureCopy li,
+.tutorial li {
+  margin-bottom: 24px;
+  padding-left: 1px;
+}
+.tutorialBand {
+  background: #111113;
+}
+.tutorial {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 46px;
+  align-items: center;
+  min-height: 480px;
+  padding-block: 50px;
+}
+.tutorial h2 {
+  margin-bottom: 30px;
+}
+.mediaNote {
+  margin-top: 22px;
+  font-size: 16px;
+}
+.textLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 45px;
+  font-weight: 600;
+  color: #b4d2e7;
+}
+.textLinks a:hover,
+.pricingLink:hover {
+  text-decoration: underline;
+}
+.downloadBand {
+  background: #111113;
+  text-align: center;
+  padding: 35px 0 55px;
+}
+.downloadBand h2 {
+  font-size: 34px;
+}
+.downloadBand p {
+  margin-top: 25px;
+}
+.downloadButtons {
+  display: flex;
+  justify-content: center;
+  gap: 34px;
+  margin-top: 45px;
+}
+.downloadButtons a {
+  min-width: 215px;
+}
+.downloadBand .downloadNote {
+  margin-top: 20px;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+.license {
+  padding-block: 60px 35px;
+  text-align: center;
+}
+.license > p {
+  margin: 26px auto 36px;
+  max-width: 770px;
+}
+.tableWrap {
+  max-width: 770px;
+  margin-inline: auto;
+  border: 1px solid #55555d;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+.tableWrap th,
+.tableWrap td {
+  padding: 20px 15px;
+  border-bottom: 1px solid #28282d;
+}
+.tableWrap thead {
+  background: #1b1b23;
+}
+.tableWrap tbody th {
+  font-weight: 400;
+}
+.tableWrap tr:last-child td,
+.tableWrap tr:last-child th {
+  border-bottom: 0;
+}
+.pricingLink {
+  display: inline-block;
+  color: #b4d2e7;
+  margin-top: 22px;
+  font-size: 15px;
+}
+.faq {
+  padding-block: 45px 65px;
+}
+.faq > h2,
+.faq > p {
+  text-align: center;
+}
+.faq > p {
+  margin: 18px 0 35px;
+  font-size: 16px;
+}
+.faq > div {
+  max-width: 890px;
+  margin-inline: auto;
+}
+.faq details {
+  border-bottom: 1px solid #55555d;
+  padding: 17px 0;
+}
+.faq summary {
+  cursor: pointer;
+  font-size: 19px;
+  padding-right: 12px;
+}
+.faq details p {
+  font-size: 16px;
+  margin-top: 18px;
+  line-height: 1.65;
+  color: #d0d0d5;
+}
+@media (max-width: 1000px) and (min-width: 701px) {
+  .heroCopy h1 {
+    font-size: 38px;
+  }
+  .benefits {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .overview {
+    grid-template-columns: 1fr;
+  }
+  .desktopPreview {
+    max-width: 380px;
+    padding-top: 0;
+    margin: auto;
+  }
+  .featureRow {
+    gap: 28px;
+  }
+  .featureCopy h2 {
+    font-size: 32px;
+  }
+}
+@media (max-width: 700px) {
+  .home {
+    font-size: 16px;
+  }
+  .hero {
+    padding-top: 20px;
+  }
+  .heroGrid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    margin-top: 16px;
+  }
+  .heroCopy {
+    padding-top: 6px;
+  }
+  .heroCopy h1 {
+    font-size: 33px;
+    margin-bottom: 22px;
+  }
+  .heroCopy > p {
+    font-size: 16px;
+    margin-bottom: 24px;
+  }
+  .heroCopy .primaryButton {
+    width: 100%;
+    font-size: 16px;
+    padding-inline: 12px;
+  }
+  .platforms {
+    margin-top: 18px;
+  }
+  .benefits {
+    margin-top: 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 14px 12px;
+    gap: 12px 9px;
+    font-size: 12px;
+  }
+  .benefits li:last-child {
+    grid-column: 1 / -1;
+  }
+  .overview {
+    display: block;
+    padding-block: 40px;
+    min-height: 0;
+  }
+  .steps {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-top: 23px;
+  }
+  .steps li {
+    padding: 17px;
+  }
+  .steps li > div {
+    float: left;
+    width: 70px;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 15px 0 0;
+  }
+  .steps h3 {
+    margin-bottom: 6px;
+  }
+  .steps p {
+    font-size: 15px;
+  }
+  .desktopPreview {
+    max-width: 360px;
+    margin: auto;
+    padding-top: 26px;
+  }
+  .galleryBand {
+    padding-block: 28px 36px;
+  }
+  .gallery {
+    grid-template-columns: 1fr;
+    margin-top: 28px;
+    gap: 28px;
+  }
+  .gallery figcaption {
+    padding: 12px 0 0;
+  }
+  .featureRow {
+    grid-template-columns: 1fr;
+    gap: 25px;
+    padding-block: 32px;
+    min-height: 0;
+  }
+  .featureMedia {
+    max-width: none;
+  }
+  .reversed .featureMedia {
+    order: 0;
+  }
+  .featureCopy h2 {
+    font-size: 30px;
+    margin-bottom: 22px;
+  }
+  .lead {
+    font-size: 16px;
+    margin-bottom: 17px;
+  }
+  .featureCopy ul,
+  .tutorial ul {
+    font-size: 16px;
+  }
+  .featureCopy li,
+  .tutorial li {
+    margin-bottom: 14px;
+  }
+  .tutorial {
+    grid-template-columns: 1fr;
+    gap: 30px;
+    padding-block: 35px;
+    min-height: 0;
+  }
+  .home h2 {
+    font-size: 30px;
+  }
+  .sectionIntro {
+    font-size: 16px;
+  }
+  .downloadBand {
+    padding-block: 20px 40px;
+  }
+  .downloadButtons {
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 26px;
+  }
+  .license {
+    padding-top: 40px;
+  }
+  .tableWrap {
+    border-radius: 10px;
+  }
+  .tableWrap table {
+    font-size: 12px;
+    table-layout: fixed;
+  }
+  .tableWrap th,
+  .tableWrap td {
+    padding: 15px 8px;
+    overflow-wrap: anywhere;
+  }
+  .faq {
+    padding-block: 25px 45px;
+  }
+  .faq summary {
+    font-size: 16px;
+  }
+  .faq details p {
+    font-size: 15px;
+  }
+}
