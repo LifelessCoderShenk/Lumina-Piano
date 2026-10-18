@@ -33,7 +33,7 @@ export default function Showcase() {
       </header>
 
       <p className="mb-4 text-sm text-secondary">Recorded in Lumina Piano · Press play for piano audio</p>
-      <section aria-labelledby="concert-title">
+      <section id="performance-demo" aria-labelledby="concert-title">
         <MediaPreview media={homeMedia.performance} shape="hero" />
         <div className="mt-5 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -43,7 +43,7 @@ export default function Showcase() {
         </div>
       </section>
 
-      <div className="mt-12 grid gap-10 md:grid-cols-2">
+      <div id="visual-styles" className="mt-12 grid gap-10 md:grid-cols-2">
         {looks.map(({ media, title, description }) => (
           <section key={title} aria-label={title}>
             <MediaPreview media={media} />
@@ -60,7 +60,7 @@ export default function Showcase() {
 
       <ScoreProof />
 
-      <section className="mt-16 border-t border-white/10 pt-10 sm:mt-20 sm:pt-12" aria-labelledby="workspace-title">
+      <section id="workspace" className="mt-16 border-t border-white/10 pt-10 sm:mt-20 sm:pt-12" aria-labelledby="workspace-title">
         <div className="mb-8">
           <h2 id="workspace-title" className="text-3xl font-medium tracking-tight">Record. Edit. Export.</h2>
           <p className="mt-3 text-base leading-relaxed text-secondary">A closer look at the tools inside Lumina Piano.</p>

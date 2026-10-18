@@ -80,6 +80,9 @@ export default function Home() {
               <Download size={22} aria-hidden="true" />
               Download Lumina Piano
             </Link>
+            <div className={styles.textLinks}>
+              <Link href="/showcase#performance-demo" className="inline-flex min-h-11 items-center">Watch a performance <span aria-hidden="true" className="ml-2">→</span></Link>
+            </div>
             <div className={styles.platforms}>
               <span>Windows</span>
               <span>macOS</span>
