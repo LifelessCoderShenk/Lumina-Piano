@@ -1,0 +1,34 @@
+WEBVTT
+
+00:00.000 --> 00:04.000
+1. Import a piece with Add MIDI.
+A guided edit of real Lumina app captures.
+
+00:04.000 --> 00:07.000
+The original eight-bar miniature is loaded.
+
+00:07.000 --> 00:11.000
+2. Select the first melody note.
+F5 is a deliberate mistake in this example.
+
+00:11.000 --> 00:15.000
+Move it down one semitone to E5.
+Keep the rest of the performance.
+
+00:15.000 --> 00:20.000
+3. Choose a look and enable generated hands.
+Set the output to 16:9, 1080p, 30 fps.
+
+00:20.000 --> 00:24.000
+4. Export with Include Audio enabled.
+
+00:24.000 --> 00:27.000
+The export is complete.
+Next: the resulting piano video.
+
+00:27.000 --> 00:32.000
+[Piano music]
+Lumina-generated hands follow the corrected MIDI.
+
+00:32.000 --> 00:50.800
+[Piano music continues]

@@ -7,3 +7,4 @@ out/
 !.env.example
 npm-debug.log*
 .qa/
+capture/output/

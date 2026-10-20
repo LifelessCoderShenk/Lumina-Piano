@@ -224,14 +224,14 @@ export function MediaPreview({
               src={media.asset.src}
               alt={media.asset.alt}
               fill
-              sizes="(max-width: 700px) 100vw, 490px"
+              sizes={shape === "hero" ? "(max-width: 1152px) 100vw, 1056px" : "(max-width: 767px) 100vw, 528px"}
               className={styles.asset}
               priority={shape === "hero"}
             />
           ) : (
             <video
               controls
-              preload={shape === "hero" ? "metadata" : "none"}
+              preload="none"
               playsInline
               muted={!media.asset.hasAudio}
               loop={!media.asset.hasAudio}
@@ -239,8 +239,8 @@ export function MediaPreview({
               aria-label={media.asset.alt}
               className={styles.asset}
             >
-              <source src={media.asset.src.replace(/\.mp4$/, ".webm")} type="video/webm" />
               <source src={media.asset.src} type="video/mp4" />
+              {media.asset.webm && <source src={media.asset.webm} type="video/webm" />}
               {media.asset.captions && (
                 <track
                   kind="captions"

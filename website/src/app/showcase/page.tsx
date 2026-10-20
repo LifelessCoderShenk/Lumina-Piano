@@ -14,12 +14,7 @@ const looks = [
   { media: homeMedia.style, title: "Color and effects", description: "Give notes different colors and add crystal textures and floating particles." },
   { media: homeMedia.visualize, title: "A simpler look", description: "Use two contrasting colors to make the notes easier to follow." },
 ];
-const workflows = [
-  { media: homeMedia.edit, title: "Correct a wrong note", description: "Change a note’s pitch, timing, length, or volume without recording the whole performance again." },
-  { media: homeMedia.score, title: "Create sheet music", description: "Turn notes from a MIDI file or keyboard recording into a score you can review." },
-  { media: homeMedia.record, title: "Set up a recording", description: "Choose your keyboard, camera, and audio sources for a performance video." },
-  { media: homeMedia.exportPanel, title: "Save your score", description: "Export your sheet music as a PDF to print or share." },
-];
+
 
 export default function Showcase() {
   return (
@@ -34,11 +29,11 @@ export default function Showcase() {
 
       <p className="mb-4 text-sm text-secondary">Recorded in Lumina Piano · Press play for piano audio</p>
       <section id="performance-demo" aria-labelledby="concert-title">
-        <MediaPreview media={homeMedia.performance} shape="hero" />
+        <MediaPreview media={homeMedia.hands} shape="hero" />
         <div className="mt-5 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 id="concert-title" className="text-2xl font-medium tracking-tight">A complete phrase, from first note to last.</h2>
-            <p className="mt-2 text-sm leading-relaxed text-secondary">An original eight-bar MIDI miniature played through Lumina’s piano engine. The sound and falling notes are captured together.</p>
+            <h2 id="concert-title" className="text-2xl font-medium tracking-tight">Generated hands. Real piano sound.</h2>
+            <p className="mt-2 text-sm leading-relaxed text-secondary">An original eight-bar MIDI miniature with Lumina-generated hands, falling notes, and piano audio. The hands follow the MIDI; this is not camera footage.</p>
           </div>
         </div>
       </section>
@@ -61,20 +56,21 @@ export default function Showcase() {
       <ScoreProof />
 
       <section id="workspace" className="mt-16 border-t border-white/10 pt-10 sm:mt-20 sm:pt-12" aria-labelledby="workspace-title">
-        <div className="mb-8">
-          <h2 id="workspace-title" className="text-3xl font-medium tracking-tight">Record. Edit. Export.</h2>
-          <p className="mt-3 text-base leading-relaxed text-secondary">A closer look at the tools inside Lumina Piano.</p>
+        <div className="mb-6">
+          <h2 id="workspace-title" className="text-3xl font-medium tracking-tight">From MIDI to finished video.</h2>
+          <p className="mt-3 max-w-2xl leading-relaxed text-secondary">Import a piece, fix a note, choose your look, and export with piano audio. Follow the same piece through each step.</p>
         </div>
-        <div className="grid gap-x-10 gap-y-12 md:grid-cols-2">
-          {workflows.map(({ media, title, description }) => (
-            <section key={media.title}>
-              <MediaPreview media={media} />
-              <h3 className="mt-4 text-lg font-medium">{title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-secondary">{description}</p>
-            </section>
-          ))}
-        </div>
-        <p className="mt-6 text-xs text-secondary">Actual app screenshots. Recording setup shown without connected camera hardware.</p>
+        <MediaPreview media={homeMedia.workflow} shape="hero" />
+        <p className="mt-4 text-sm leading-relaxed text-secondary">A guided edit of actual app screenshots, followed by the exported performance. Captions explain each step; piano audio begins with the result.</p>
+        <details className="mt-5 border-t border-white/10 pt-4 text-sm">
+          <summary className="cursor-pointer py-2 font-medium">Read the walkthrough</summary>
+          <ol className="mt-3 max-w-2xl list-decimal space-y-3 pl-5 leading-relaxed text-secondary">
+            <li><strong className="text-primary">Import.</strong> Use Add MIDI to load the original eight-bar miniature.</li>
+            <li><strong className="text-primary">Correct.</strong> Select the first melody note, deliberately changed to F5 for this example, and move it down to E5. The rest of the piece stays intact.</li>
+            <li><strong className="text-primary">Style.</strong> Start with Clean Studio, enable generated hands, and choose 16:9 at 1080p and 30 fps.</li>
+            <li><strong className="text-primary">Export.</strong> Keep Include Audio enabled and render the video. The final segment plays the resulting file.</li>
+          </ol>
+        </details>
       </section>
     </Container>
   );

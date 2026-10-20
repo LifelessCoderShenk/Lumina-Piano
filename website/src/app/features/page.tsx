@@ -27,7 +27,7 @@ export default function Features() {
         {[
           { media: homeMedia.edit, title: "Refine the notes", href: "/showcase#note-correction", link: "Hear a note before and after correction", text: "Adjust pitch, timing, duration, and velocity. Quantize selected notes and undo edits while reviewing your performance." },
           { media: homeMedia.score, title: "Bring your playing onto the page", href: "/showcase#score-example", link: "Open a real score and its MIDI", text: "Generate sheet music from MIDI, review the notes, and export a printable PDF. Set the key, timing grid, and notation options in the same workspace." },
-          { media: homeMedia.style, title: "Choose your visual style", href: "/showcase#visual-styles", link: "Compare two visual styles", text: "Set note colors, choose a note style, and adjust glow and particles. Save your settings as a reusable visual preset." },
+          { media: homeMedia.style, title: "Choose your visual style", href: "/showcase#visual-styles", link: "Compare two visual styles", text: "Set note colors, glow, and particles. Add generated hands that follow loaded MIDI, and save your look as a reusable preset." },
           { media: homeMedia.record, title: "Set up your performance", href: "/showcase#workspace", link: "Explore the recording workspace", text: "Choose camera, MIDI, and audio inputs, or import existing footage. Position the visualization and align it with your keyboard." },
         ].map(({ media, title, text, href, link }) => (
           <section key={title} className="grid items-center gap-8 md:grid-cols-2">

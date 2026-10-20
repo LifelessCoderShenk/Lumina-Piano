@@ -66,3 +66,13 @@
 .notes {
   transform: none;
 }
+
+.asset::cue {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  color: #f5f5f7;
+  background: rgba(11, 11, 13, 0.9);
+}
+@media (min-width: 768px) {
+  .asset::cue { font-size: 18px; }
+}

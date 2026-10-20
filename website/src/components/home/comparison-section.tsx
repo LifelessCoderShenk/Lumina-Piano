@@ -19,7 +19,7 @@ const comparisonTopics = [
   {
     feature: "From playing to printed score",
     lumina: "Turn captured MIDI into sheet music, correct the notes, and export a printable PDF.",
-    others: "Displaying a score or importing MusicXML does not necessarily include score correction and PDF export.",
+    others: "Check for editable notation and printable PDF export, in addition to score display.",
   },
   {
     feature: "Bring camera and sound together",

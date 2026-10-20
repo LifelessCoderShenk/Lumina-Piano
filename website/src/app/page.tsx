@@ -129,8 +129,8 @@ export default function Home() {
           </ol>
         </div>
         <div className={styles.desktopPreview}>
-          <MediaPreview media={homeMedia.performance} shape="wide" />
-          <p>An original eight-bar MIDI piece. Press play to hear Lumina’s piano audio.</p>
+          <MediaPreview media={homeMedia.workflow} shape="wide" />
+          <p>Import, correct, style, export. A captioned guide using actual app captures and the finished video.</p>
         </div>
       </section>
 
