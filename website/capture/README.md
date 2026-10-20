@@ -43,3 +43,7 @@ Capture-only Vite transformation supplies CanvasArea's existing `keyboardHeightR
 `assemble-workflow.py` assembles seven real UI still captures (27 seconds) followed by the actual exported performance (23.8 seconds). This is explicitly an edited walkthrough, not a continuous screen recording. English WebVTT captions and an on-page text walkthrough explain the actions. The guide is 1280x720 to match source UI captures. The separate generated-hands video is the same export at native 1920x1080. Both have H.264/AAC faststart encoding for web playback. Hands are generated from MIDI, never described as camera footage or actual recorded fingering.
 
 `hands.html` / `hands.jsx` retain the initial realtime capture helper. The published hands video uses the deterministic export above. The seven UI source captures are retained in `capture/workflow-stills/`. Render intermediates remain in ignored `capture/output/`; keep that folder locally or rerun the capture to rebuild the edited guide.
+
+### Revised hand export
+
+render-hands.html re-exports the original miniature through the actual ExportEngine after the hand anatomy and motion changes. Both the standalone performance and the result portion of the walkthrough use this revised export. The walkthrough UI stills remain the original captures. Fingers now have clearer separation, a smaller palm, eased transitions and a curved lift between notes; nearby notes share a steadier wrist position. This remains procedural MIDI-inferred motion, not recorded human fingering.

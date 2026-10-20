@@ -1,16 +1,12 @@
 import { Color, Group, Mesh, PlaneGeometry, ShaderMaterial } from 'three'
 
-import type { FingerPose, GhostHandPose, GhostHandsPose, HandSpacePoint } from '../hands'
+import type { GhostHandPose, GhostHandsPose, HandSpacePoint } from '../hands'
 import type { PianoFinger, PianoHand } from '../midi/types'
 import { getWhiteKeyWidth } from './pianoMath'
 
 const FINGERS: readonly PianoFinger[] = [1, 2, 3, 4, 5]
-const SEGMENTS_PER_FINGER = 3
-const JOINTS_PER_FINGER = 4
-const HAND_LIFT_PROJECTION = 0.25
-const LEFT_HAND_COLOR = 0x70d7ff
-const RIGHT_HAND_COLOR = 0xb99aff
-const HAND_RENDER_Z = 14
+const HAND_RENDER_Z = 7 // In front of the keyboard, inside the camera at z=10.
+const BONE_COUNT = 16 // Fifteen finger bones and one wrist.
 
 export interface GhostHandsLayout {
   keyboardHeight: number
@@ -20,275 +16,214 @@ export interface GhostHandsLayout {
   viewportWidth: number
 }
 
-interface ScreenPoint {
-  x: number
-  y: number
-}
+interface ScreenPoint { x: number; y: number }
 
 interface RenderHandState {
-  contactMaterial: ShaderMaterial
-  contactNodes: Record<PianoFinger, Mesh<PlaneGeometry, ShaderMaterial>>
-  group: Group
-  jointNodes: Record<PianoFinger, Array<Mesh<PlaneGeometry, ShaderMaterial>>>
+  mesh: Mesh<PlaneGeometry, ShaderMaterial>
   material: ShaderMaterial
-  palm: Mesh<PlaneGeometry, ShaderMaterial>
-  segments: Record<PianoFinger, Array<Mesh<PlaneGeometry, ShaderMaterial>>>
-  wrist: Mesh<PlaneGeometry, ShaderMaterial>
+  bones: Float32Array
+  radii: Float32Array
+  nails: Float32Array
 }
 
+/** One continuous surface per hand: overlapping fingers do not accumulate alpha. */
 export class GhostHandsLayer {
   readonly group = new Group()
-
   private readonly hands: Record<PianoHand, RenderHandState>
 
-  constructor(private readonly geometry: PlaneGeometry) {
-    this.hands = {
-      left: this.createHand('left'),
-      right: this.createHand('right'),
-    }
-    this.group.add(this.hands.left.group, this.hands.right.group)
+  constructor(geometry: PlaneGeometry) {
+    this.hands = { left: createHand(geometry), right: createHand(geometry) }
+    this.group.add(this.hands.left.mesh, this.hands.right.mesh)
     this.group.visible = false
   }
 
   update(pose: GhostHandsPose, layout: GhostHandsLayout): void {
-    const opacity = clamp(layout.opacity, 0.1, 0.8)
     this.group.visible = pose.left.visible || pose.right.visible
-    this.updateHand(this.hands.left, pose.left, layout, opacity)
-    this.updateHand(this.hands.right, pose.right, layout, opacity)
+    for (const hand of ['left', 'right'] as const) updateHand(this.hands[hand], pose[hand], layout)
   }
 
   hide(): void {
     this.group.visible = false
-    this.hands.left.group.visible = false
-    this.hands.right.group.visible = false
+    this.hands.left.mesh.visible = false
+    this.hands.right.mesh.visible = false
   }
 
   dispose(): void {
-    for (const hand of Object.values(this.hands)) {
-      hand.material.dispose()
-      hand.contactMaterial.dispose()
-    }
-  }
-
-  private createHand(hand: PianoHand): RenderHandState {
-    const material = createGhostMaterial(hand === 'left' ? LEFT_HAND_COLOR : RIGHT_HAND_COLOR)
-    const contactMaterial = createGhostMaterial(0xffffff)
-    const group = new Group()
-    const palm = createPart(this.geometry, material, group)
-    const wrist = createPart(this.geometry, material, group)
-    const segments = {} as RenderHandState['segments']
-    const jointNodes = {} as RenderHandState['jointNodes']
-    const contactNodes = {} as RenderHandState['contactNodes']
-
-    for (const finger of FINGERS) {
-      segments[finger] = Array.from({ length: SEGMENTS_PER_FINGER }, () => (
-        createPart(this.geometry, material, group)
-      ))
-      jointNodes[finger] = Array.from({ length: JOINTS_PER_FINGER }, () => (
-        createPart(this.geometry, material, group)
-      ))
-      contactNodes[finger] = createPart(this.geometry, contactMaterial, group)
-      contactNodes[finger].visible = false
-    }
-
-    group.visible = false
-    return { contactMaterial, contactNodes, group, jointNodes, material, palm, segments, wrist }
-  }
-
-  private updateHand(
-    renderHand: RenderHandState,
-    pose: GhostHandPose,
-    layout: GhostHandsLayout,
-    opacity: number,
-  ): void {
-    renderHand.group.visible = pose.visible
-    if (!pose.visible) return
-
-    setMaterialOpacity(renderHand.material, opacity)
-    setMaterialOpacity(renderHand.contactMaterial, Math.min(0.95, opacity + 0.28))
-    const wrist = toScreenPoint(pose.wrist, layout)
-    const roots = FINGERS.map((finger) => toScreenPoint(pose.fingers[finger].joints[0], layout))
-    const averageRoot = averagePoint(roots)
-    const whiteKeyWidth = getWhiteKeyWidth(layout.viewportWidth)
-    const fingerThickness = getFingerThickness(layout)
-    const palmWidth = Math.max(
-      whiteKeyWidth * 4.3,
-      Math.max(...roots.map(({ x }) => x))
-        - Math.min(...roots.map(({ x }) => x))
-        + fingerThickness * 1.8,
-    )
-    const palmLength = Math.max(whiteKeyWidth * 2.7, distance(wrist, averageRoot) + fingerThickness * 2)
-    const palmCenter = containOval({
-      x: (wrist.x + averageRoot.x) / 2,
-      y: (wrist.y + averageRoot.y) / 2,
-    }, palmWidth, palmLength, layout)
-    setOval(
-      renderHand.palm,
-      palmCenter,
-      palmWidth,
-      palmLength,
-      -pose.yaw,
-      HAND_RENDER_Z,
-    )
-    setOval(
-      renderHand.wrist,
-      containOval(wrist, palmWidth * 0.58, whiteKeyWidth * 1.2, layout),
-      palmWidth * 0.58,
-      Math.max(fingerThickness * 2.2, whiteKeyWidth * 1.2),
-      -pose.yaw,
-      HAND_RENDER_Z + 0.01,
-    )
-
-    for (const finger of FINGERS) {
-      this.updateFinger(renderHand, pose.fingers[finger], layout, fingerThickness)
-    }
-  }
-
-  private updateFinger(
-    hand: RenderHandState,
-    fingerPose: FingerPose,
-    layout: GhostHandsLayout,
-    thickness: number,
-  ): void {
-    const joints = fingerPose.joints.map((point) => toScreenPoint(point, layout))
-    for (let index = 0; index < SEGMENTS_PER_FINGER; index += 1) {
-      setSegment(hand.segments[fingerPose.finger][index], joints[index], joints[index + 1], thickness, HAND_RENDER_Z + 0.02)
-    }
-    for (let index = 0; index < JOINTS_PER_FINGER; index += 1) {
-      const jointScale = index === JOINTS_PER_FINGER - 1 ? 0.88 : 1
-      setOval(
-        hand.jointNodes[fingerPose.finger][index],
-        joints[index],
-        thickness * jointScale,
-        thickness * jointScale,
-        0,
-        HAND_RENDER_Z + 0.03,
-      )
-    }
-
-    const contact = hand.contactNodes[fingerPose.finger]
-    contact.visible = fingerPose.pressed
-    if (fingerPose.pressed) {
-      const pulseSize = thickness * (1.15 + fingerPose.contactAmount * 0.32)
-      setOval(contact, joints[JOINTS_PER_FINGER - 1], pulseSize, pulseSize, 0, HAND_RENDER_Z + 0.05)
-    }
+    this.hands.left.material.dispose()
+    this.hands.right.material.dispose()
   }
 }
 
-function createGhostMaterial(color: number): ShaderMaterial {
+function createHand(geometry: PlaneGeometry): RenderHandState {
+  const bones = new Float32Array(BONE_COUNT * 4)
+  const radii = new Float32Array(BONE_COUNT * 2)
+  const nails = new Float32Array(5 * 4)
   const material = new ShaderMaterial({
     depthTest: false,
     depthWrite: false,
     transparent: true,
     uniforms: {
-      ghostColor: { value: new Color(color) },
+      ghostColor: { value: new Color(0xd1b6a2) },
       ghostOpacity: { value: 0.35 },
+      handOrigin: { value: new Float32Array(2) },
+      handSize: { value: new Float32Array(2) },
+      handPalm: { value: new Float32Array(4) },
+      handYaw: { value: 0 },
+      handBones: { value: bones },
+      handRadii: { value: radii },
+      handNails: { value: nails },
+      handKeyWidth: { value: 20 },
     },
     vertexShader: `
-varying vec2 vGhostUv;
-
+varying vec2 vHandUv;
 void main() {
-  vGhostUv = uv;
+  vHandUv = uv;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`,
     fragmentShader: `
 uniform vec3 ghostColor;
 uniform float ghostOpacity;
-varying vec2 vGhostUv;
+uniform vec2 handOrigin;
+uniform vec2 handSize;
+uniform vec4 handPalm;
+uniform float handYaw;
+uniform vec4 handBones[16];
+uniform vec2 handRadii[16];
+uniform vec4 handNails[5];
+uniform float handKeyWidth;
+varying vec2 vHandUv;
 
+float smoothUnion(float a, float b, float radius) {
+  float h = max(radius - abs(a - b), 0.0) / radius;
+  return min(a, b) - h * h * radius * 0.25;
+}
+vec2 rotatePoint(vec2 p, float angle) {
+  float c = cos(angle), s = sin(angle);
+  return vec2(c * p.x + s * p.y, -s * p.x + c * p.y);
+}
+float ellipseDistance(vec2 p, vec2 radii) {
+  return (length(p / radii) - 1.0) * min(radii.x, radii.y);
+}
+float boneDistance(vec2 p, vec4 bone, vec2 radii) {
+  vec2 delta = bone.zw - bone.xy;
+  float t = clamp(dot(p - bone.xy, delta) / max(dot(delta, delta), 0.01), 0.0, 1.0);
+  return length(p - bone.xy - delta * t) - mix(radii.x, radii.y, t);
+}
 void main() {
-  vec2 point = (vGhostUv - 0.5) * 2.0;
-  float roundedShape = pow(abs(point.x), 4.0) + pow(abs(point.y), 4.0);
-  float edge = 1.0 - smoothstep(0.76, 1.0, roundedShape);
-  float centerGlow = 1.0 - 0.18 * length(point);
-  gl_FragColor = vec4(ghostColor * centerGlow, ghostOpacity * edge);
+  vec2 p = handOrigin + vHandUv * handSize;
+  vec2 palmPoint = rotatePoint(p - handPalm.xy, handYaw);
+  // Rounded knuckles and a narrower heel, instead of a rectangular palm.
+  float taper = mix(0.70, 1.0, smoothstep(-0.8, 0.35, palmPoint.y / handPalm.w));
+  float distanceToHand = ellipseDistance(palmPoint, vec2(handPalm.z * taper, handPalm.w));
+  float surface = clamp(-distanceToHand / (handKeyWidth * 0.8), 0.0, 1.0);
+  for (int i = 0; i < 16; i++) {
+    float d = boneDistance(p, handBones[i], handRadii[i]);
+    distanceToHand = smoothUnion(distanceToHand, d, handKeyWidth * 0.065);
+    surface = max(surface, clamp(-d / max(handRadii[i].x, 0.1), 0.0, 1.0));
+  }
+  float coverage = 1.0 - smoothstep(-0.65, 0.65, distanceToHand);
+  if (coverage < 0.01) discard;
+  // Soft volume shading, with no illuminated joint markers or overlap seams.
+  float shade = 0.64 + 0.30 * sqrt(surface);
+  shade += 0.06 * clamp(-palmPoint.x / handPalm.z, -1.0, 1.0);
+  vec3 color = ghostColor * shade;
+  // Cylinder highlights and two short folds describe each articulated finger.
+  // Keep these inside the existing silhouette and alpha, so joints stay seamless.
+  for (int i = 0; i < 15; i++) {
+    vec4 bone = handBones[i];
+    vec2 axis = bone.zw - bone.xy;
+    float lengthSquared = max(dot(axis, axis), 0.01);
+    float t = clamp(dot(p - bone.xy, axis) / lengthSquared, 0.0, 1.0);
+    vec2 normal = vec2(-axis.y, axis.x) / sqrt(lengthSquared);
+    float radius = mix(handRadii[i].x, handRadii[i].y, t);
+    float across = dot(p - mix(bone.xy, bone.zw, t), normal) / max(radius, 0.1);
+    float mask = 1.0 - smoothstep(0.65, 1.0, abs(across));
+    float along = dot(p - bone.xy, axis) / sqrt(lengthSquared);
+    mask *= smoothstep(0.0, radius * 0.5, along);
+    mask *= 1.0 - smoothstep(sqrt(lengthSquared), sqrt(lengthSquared) + radius, along);
+    color += ghostColor * (0.075 - 0.08 * across) * mask;
+    if (i - (i / 3) * 3 < 2) {
+      vec2 fold = p - bone.zw;
+      float longitudinal = dot(fold, axis) / sqrt(lengthSquared);
+      float transverse = dot(fold, normal) / max(radius, 0.1);
+      float crease = exp(-pow((longitudinal + radius * 0.12 * transverse * transverse) / max(0.45, handKeyWidth * 0.025), 2.0));
+      crease *= 1.0 - smoothstep(0.45, 0.8, abs(transverse));
+      color *= 1.0 - crease * 0.17;
+    }
+  }
+  for (int i = 0; i < 5; i++) {
+    vec4 nail = handNails[i];
+    vec2 q = rotatePoint(p - nail.xy, nail.z);
+    float nailDistance = ellipseDistance(q, vec2(nail.w * 1.3, nail.w * 0.65));
+    float nailMask = 1.0 - smoothstep(-0.3, 0.6, nailDistance);
+    color = mix(color, mix(ghostColor, vec3(0.96, 0.83, 0.79), 0.55), nailMask * 0.6);
+  }
+  gl_FragColor = vec4(color, ghostOpacity * coverage);
 }`,
   })
   material.toneMapped = false
-  return material
-}
-
-function createPart(
-  geometry: PlaneGeometry,
-  material: ShaderMaterial,
-  group: Group,
-): Mesh<PlaneGeometry, ShaderMaterial> {
   const mesh = new Mesh(geometry, material)
-  mesh.renderOrder = Math.round(HAND_RENDER_Z * 10)
-  group.add(mesh)
-  return mesh
+  mesh.renderOrder = 140
+  mesh.visible = false
+  return { bones, radii, nails, material, mesh }
 }
 
-function setMaterialOpacity(material: ShaderMaterial, opacity: number): void {
-  material.uniforms.ghostOpacity.value = opacity
+function updateHand(hand: RenderHandState, pose: GhostHandPose, layout: GhostHandsLayout): void {
+  hand.mesh.visible = pose.visible
+  if (!pose.visible) return
+  const keyWidth = getWhiteKeyWidth(layout.viewportWidth)
+  const wrist = toScreenPoint(pose.wrist, layout)
+  const roots = FINGERS.slice(1).map((finger) => toScreenPoint(pose.fingers[finger].joints[0], layout))
+  const knuckles = averagePoint(roots)
+  const palmWidth = Math.max(keyWidth * 2.8, Math.max(...roots.map(p => p.x)) - Math.min(...roots.map(p => p.x)) + keyWidth * 0.8)
+  const palmHeight = Math.max(keyWidth * 1.8, Math.hypot(knuckles.x - wrist.x, knuckles.y - wrist.y) * 1.08)
+  const palm = { x: (wrist.x + knuckles.x) / 2, y: (wrist.y + knuckles.y) / 2 }
+  const points: ScreenPoint[] = [
+    { x: palm.x - palmWidth, y: palm.y - palmHeight },
+    { x: palm.x + palmWidth, y: palm.y + palmHeight },
+  ]
+  for (const finger of FINGERS) {
+    const joints = pose.fingers[finger].joints.map(point => toScreenPoint(point, layout))
+    points.push(...joints)
+    const width = keyWidth * (finger === 1 ? 0.58 : finger === 5 ? 0.39 : 0.46)
+    for (let index = 0; index < 3; index++) {
+      const bone = (finger - 1) * 3 + index
+      hand.bones.set([joints[index].x, joints[index].y, joints[index + 1].x, joints[index + 1].y], bone * 4)
+      hand.radii.set([width * (0.55 - index * 0.045), width * (0.505 - index * 0.045)], bone * 2)
+    }
+    const tip = joints[3], previous = joints[2]
+    const angle = Math.atan2(tip.y - previous.y, tip.x - previous.x)
+    hand.nails.set([tip.x - Math.cos(angle) * width * 0.3, tip.y - Math.sin(angle) * width * 0.3, angle, width * 0.28], (finger - 1) * 4)
+  }
+  const wristEnd = { x: wrist.x, y: wrist.y - keyWidth * 1.1 }
+  points.push(wristEnd)
+  hand.bones.set([wrist.x, wrist.y, wristEnd.x, wristEnd.y], 60)
+  hand.radii.set([palmWidth * 0.25, palmWidth * 0.22], 30)
+  const padding = keyWidth
+  const left = Math.min(...points.map(p => p.x)) - padding
+  const bottom = Math.min(...points.map(p => p.y)) - padding
+  const width = Math.max(...points.map(p => p.x)) + padding - left
+  const height = Math.max(...points.map(p => p.y)) + padding - bottom
+  hand.mesh.position.set(left + width / 2, bottom + height / 2, HAND_RENDER_Z)
+  hand.mesh.scale.set(width, height, 1)
+  hand.material.uniforms.handOrigin.value.set([left, bottom])
+  hand.material.uniforms.handSize.value.set([width, height])
+  hand.material.uniforms.handPalm.value.set([palm.x, palm.y, palmWidth / 2, palmHeight / 2])
+  hand.material.uniforms.handYaw.value = -pose.yaw
+  hand.material.uniforms.handKeyWidth.value = keyWidth
+  hand.material.uniforms.ghostOpacity.value = Math.min(0.8, Math.max(0.1, layout.opacity))
 }
 
 function toScreenPoint(point: HandSpacePoint, layout: GhostHandsLayout): ScreenPoint {
-  const topDownY = layout.keyboardY + (
-    point.depth - point.height * HAND_LIFT_PROJECTION
-  ) * layout.keyboardHeight
   return {
     x: point.x * layout.viewportWidth,
-    y: layout.viewportHeight - topDownY,
-  }
-}
-
-function setSegment(
-  mesh: Mesh<PlaneGeometry, ShaderMaterial>,
-  from: ScreenPoint,
-  to: ScreenPoint,
-  thickness: number,
-  z: number,
-): void {
-  const length = Math.max(thickness, distance(from, to) + thickness * 0.55)
-  mesh.position.set((from.x + to.x) / 2, (from.y + to.y) / 2, z)
-  mesh.rotation.z = Math.atan2(to.y - from.y, to.x - from.x)
-  mesh.scale.set(length, thickness, 1)
-  mesh.visible = true
-}
-
-function setOval(
-  mesh: Mesh<PlaneGeometry, ShaderMaterial>,
-  center: ScreenPoint,
-  width: number,
-  height: number,
-  rotation: number,
-  z: number,
-): void {
-  mesh.position.set(center.x, center.y, z)
-  mesh.rotation.z = rotation
-  mesh.scale.set(width, height, 1)
-  mesh.visible = true
-}
-
-function getFingerThickness(layout: GhostHandsLayout): number {
-  const whiteKeyWidth = getWhiteKeyWidth(layout.viewportWidth)
-  return clamp(whiteKeyWidth * 0.5, 4, Math.max(4, whiteKeyWidth * 0.62))
-}
-
-function containOval(
-  center: ScreenPoint,
-  width: number,
-  height: number,
-  layout: GhostHandsLayout,
-): ScreenPoint {
-  return {
-    x: clamp(center.x, width / 2, layout.viewportWidth - width / 2),
-    y: clamp(center.y, height / 2, layout.viewportHeight - height / 2),
+    y: layout.viewportHeight - layout.keyboardY - (point.depth - point.height * 0.25) * layout.keyboardHeight,
   }
 }
 
 function averagePoint(points: ScreenPoint[]): ScreenPoint {
   return {
-    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
-    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+    y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
   }
-}
-
-function distance(from: ScreenPoint, to: ScreenPoint): number {
-  return Math.hypot(to.x - from.x, to.y - from.y)
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
 }

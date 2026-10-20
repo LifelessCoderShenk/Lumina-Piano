@@ -204,18 +204,23 @@ function buildWristTargets(
     else group.push(event)
   }
 
+  let settledX: number | undefined
   return groups.map((group) => {
     const unique = [...new Map(group.map((event) => [event.pitch, event])).values()]
     const desiredWristX = unique.reduce((sum, event) => (
       sum + event.contact.x - fingerRestOffsetX(hand, event.finger)
     ), 0) / unique.length
+    // Let fingers reach neighboring keys instead of dragging the whole wrist
+    // after every arpeggio note. Move only when the comfortable span is exceeded.
+    const reach = 0.014
+    settledX = settledX == null ? desiredWristX : clamp(settledX, desiredWristX - reach, desiredWristX + reach)
     const pitches = unique.map(({ pitch }) => pitch)
     const span = Math.max(...pitches) - Math.min(...pitches)
     return {
       position: {
-        depth: 0.9,
+        depth: 1.06 + (unique.reduce((sum, event) => sum + event.contact.depth, 0) / unique.length - 0.54) * 0.2,
         height: 0.2 + Math.min(0.045, span * 0.003),
-        x: clamp(desiredWristX, 0.025, 0.975),
+        x: clamp(settledX, 0.025, 0.975),
       },
       prepareTick: Math.min(...group.map(({ prepareTick }) => prepareTick)),
       startTick: Math.min(...group.map(({ startTick }) => startTick)),
@@ -232,7 +237,7 @@ function sampleHand(
   const fingers = {} as Record<PianoFinger, FingerPose>
   for (const finger of FINGERS) {
     const target = sampleFingerTarget(track, finger, wristSample.position, tick)
-    const curl = target.pressed ? 0.28 : 0.52 - target.contactAmount * 0.18
+    const curl = 0.52 - target.contactAmount * 0.24
     fingers[finger] = {
       contactAmount: target.contactAmount,
       finger,
@@ -259,7 +264,7 @@ function sampleWrist(track: HandMotionTrack, tick: number): { position: HandSpac
   const next = targets[nextIndex]
   if (next != null && tick >= next.prepareTick) {
     const from = previous ?? next
-    const progress = easeInOut(normalize(tick, next.prepareTick, next.startTick))
+    const progress = easeInOut(normalize(tick, Math.max(next.prepareTick, previous?.startTick ?? next.prepareTick), next.startTick))
     return {
       position: interpolatePoint(from.position, next.position, progress),
       yaw: lerp(from.yaw, next.yaw, progress),
@@ -287,12 +292,15 @@ function sampleFingerTarget(
   }
   if (next != null && tick >= next.prepareTick) {
     const source = getApproachSource(track.hand, finger, wrist, previous, next.prepareTick)
-    const progress = easeInOut(normalize(tick, next.prepareTick, next.startTick))
+    const progress = easeInOut(normalize(tick, Math.max(next.prepareTick, previous?.endTick ?? next.prepareTick), next.startTick))
     return {
       contactAmount: progress,
       pressed: false,
       targetPitch: next.pitch,
-      tip: interpolatePoint(source, next.contact, progress),
+      tip: {
+        ...interpolatePoint(source, next.contact, progress),
+        height: lerp(source.height, next.contact.height, progress) + Math.sin(Math.PI * progress) * Math.min(0.06, 0.015 + Math.abs(source.x - next.contact.x) * 1.5),
+      },
     }
   }
   if (previous != null && tick < previous.releaseTick) {
@@ -328,9 +336,9 @@ function buildFingerJoints(
   curl: number,
 ): [HandSpacePoint, HandSpacePoint, HandSpacePoint, HandSpacePoint] {
   const root: HandSpacePoint = {
-    depth: wrist.depth - (finger === 1 ? 0.09 : 0.075),
+    depth: wrist.depth - ({ 1: 0.12, 2: 0.24, 3: 0.27, 4: 0.25, 5: 0.19 }[finger]),
     height: wrist.height - (finger === 1 ? 0.035 : 0.02),
-    x: wrist.x + fingerRestOffsetX(hand, finger) * 0.62,
+    x: wrist.x + fingerRestOffsetX(hand, finger) * (finger === 1 ? 0.92 : 0.9),
   }
   const control: HandSpacePoint = {
     depth: lerp(root.depth, tip.depth, 0.48) - 0.025 * curl,
@@ -342,7 +350,7 @@ function buildFingerJoints(
 
 function getRestTip(hand: PianoHand, finger: PianoFinger, wrist: HandSpacePoint): HandSpacePoint {
   return {
-    depth: wrist.depth - (finger === 1 ? 0.2 : 0.27),
+    depth: wrist.depth - ({ 1: 0.39, 2: 0.51, 3: 0.56, 4: 0.53, 5: 0.44 }[finger]),
     height: wrist.height - 0.075 + (finger === 1 || finger === 5 ? 0.018 : 0),
     x: wrist.x + fingerRestOffsetX(hand, finger),
   }
@@ -357,7 +365,7 @@ function getKeyContact(pitch: number): HandSpacePoint {
   const black = isBlackKey(pitch)
   const keyWidth = black ? getBlackKeyWidth(KEYBOARD_COORDINATE_WIDTH) : getWhiteKeyWidth(KEYBOARD_COORDINATE_WIDTH)
   return {
-    depth: black ? 0.43 : 0.64,
+    depth: black ? 0.32 : 0.54,
     height: black ? 0.055 : 0.008,
     x: (pitchToKeyX(pitch, KEYBOARD_COORDINATE_WIDTH) + keyWidth / 2) / KEYBOARD_COORDINATE_WIDTH,
   }
@@ -406,7 +414,7 @@ function normalize(value: number, start: number, end: number): number {
 }
 
 function easeInOut(value: number): number {
-  return value * value * (3 - 2 * value)
+  return value * value * value * (value * (value * 6 - 15) + 10)
 }
 
 function easeOut(value: number): number {

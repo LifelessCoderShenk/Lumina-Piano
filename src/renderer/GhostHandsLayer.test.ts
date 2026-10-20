@@ -1,4 +1,4 @@
-import { PlaneGeometry } from 'three'
+import { Mesh, type Object3D, OrthographicCamera, PlaneGeometry, Vector3 } from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { FingerPose, GhostHandPose, GhostHandsPose, HandSpacePoint } from '../hands'
@@ -14,68 +14,63 @@ const LAYOUT: GhostHandsLayout = {
 }
 
 describe('GhostHandsLayer', () => {
-  it('builds two complete five-finger hand rigs and hides them initially', () => {
+  it('draws one continuous translucent surface per hand inside the camera clipping planes', () => {
+    const camera = new OrthographicCamera(0, 1200, 600, 0, 0.1, 100)
+    camera.position.set(0, 0, 10)
+    camera.updateMatrixWorld(true)
     const layer = new GhostHandsLayer(new PlaneGeometry(1, 1))
-    const hands = getHands(layer)
-
     expect(layer.group.visible).toBe(false)
-    expect(Object.keys(hands.left.segments)).toHaveLength(5)
-    expect(Object.values(hands.left.segments).every((segments) => segments.length === 3)).toBe(true)
-    expect(Object.values(hands.right.jointNodes).every((joints) => joints.length === 4)).toBe(true)
+    layer.update(createHandsPose(false), LAYOUT)
+    layer.group.updateMatrixWorld(true)
+    let surfaces = 0
+    layer.group.traverseVisible((part: Object3D) => {
+      if (!(part instanceof Mesh)) return
+      const projected = part.getWorldPosition(new Vector3()).project(camera)
+      expect(projected.z).toBeGreaterThanOrEqual(-1)
+      expect(projected.z).toBeLessThanOrEqual(1)
+      expect(part.renderOrder).toBe(140)
+      surfaces++
+    })
+    // No per-joint transparent planes that would accumulate alpha at overlaps.
+    expect(surfaces).toBe(2)
+    layer.dispose()
   })
 
-  it('places articulated geometry from the sampled pose and emphasizes pressed fingertips', () => {
+  it('keeps every fingertip aligned and tapers the bones toward the tips', () => {
     const layer = new GhostHandsLayer(new PlaneGeometry(1, 1))
     const pose = createHandsPose(true)
     layer.update(pose, LAYOUT)
-    const right = getHands(layer).right
-    const firstSegment = right.segments[1][0]
-    const tipContact = right.contactNodes[1]
-
-    expect(layer.group.visible).toBe(true)
-    expect(right.group.visible).toBe(true)
-    expect(firstSegment.scale.x).toBeGreaterThan(firstSegment.scale.y)
-    expect(Number.isFinite(firstSegment.position.x)).toBe(true)
-    expect(Number.isFinite(firstSegment.position.y)).toBe(true)
-    expect(tipContact.visible).toBe(true)
-    expect(right.contactNodes[2].visible).toBe(false)
+    const right = layer.group.children[1] as Mesh
+    const bones = right.material.uniforms.handBones.value as Float32Array
+    const radii = right.material.uniforms.handRadii.value as Float32Array
+    expect(right.visible).toBe(true)
+    for (const finger of [1, 2, 3, 4, 5] as const) {
+      const lastBone = (finger - 1) * 3 + 2
+      expect(bones[lastBone * 4 + 2]).toBeCloseTo(pose.right.fingers[finger].tip.x * LAYOUT.viewportWidth, 3)
+      expect(bones[lastBone * 4 + 3]).toBeCloseTo(LAYOUT.viewportHeight - LAYOUT.keyboardY - (pose.right.fingers[finger].tip.depth - pose.right.fingers[finger].tip.height * 0.25) * LAYOUT.keyboardHeight, 3)
+      expect(radii[lastBone * 2 + 1]).toBeLessThan(radii[(finger - 1) * 6])
+    }
     expect(right.material.uniforms.ghostOpacity.value).toBeCloseTo(0.35)
-    expect(right.contactMaterial.uniforms.ghostOpacity.value).toBeCloseTo(0.63)
+    layer.dispose()
   })
 
-  it('clamps opacity, hides inactive hands, and disposes its materials', () => {
+  it('clamps opacity, hides inactive hands, and disposes both surfaces', () => {
     const layer = new GhostHandsLayer(new PlaneGeometry(1, 1))
-    const hands = getHands(layer)
-    const leftDispose = vi.spyOn(hands.left.material, 'dispose')
-    const rightDispose = vi.spyOn(hands.right.contactMaterial, 'dispose')
-
+    const left = layer.group.children[0] as Mesh
+    const right = layer.group.children[1] as Mesh
+    const leftDispose = vi.spyOn(left.material, 'dispose')
+    const rightDispose = vi.spyOn(right.material, 'dispose')
     layer.update(createHandsPose(true), { ...LAYOUT, opacity: 2 })
-    expect(hands.left.group.visible).toBe(false)
-    expect(hands.right.material.uniforms.ghostOpacity.value).toBe(0.8)
-
+    expect(left.visible).toBe(false)
+    expect(right.material.uniforms.ghostOpacity.value).toBe(0.8)
     layer.hide()
     expect(layer.group.visible).toBe(false)
+    expect(right.visible).toBe(false)
     layer.dispose()
     expect(leftDispose).toHaveBeenCalledOnce()
     expect(rightDispose).toHaveBeenCalledOnce()
   })
 })
-
-function getHands(layer: GhostHandsLayer) {
-  return (layer as unknown as {
-    hands: Record<PianoHand, {
-      contactMaterial: { dispose(): void; uniforms: Record<string, { value: number }> }
-      contactNodes: Record<PianoFinger, { visible: boolean }>
-      group: { visible: boolean }
-      jointNodes: Record<PianoFinger, unknown[]>
-      material: { dispose(): void; uniforms: Record<string, { value: number }> }
-      segments: Record<PianoFinger, Array<{
-        position: { x: number; y: number }
-        scale: { x: number; y: number }
-      }>>
-    }>
-  }).hands
-}
 
 function createHandsPose(hideLeft: boolean): GhostHandsPose {
   return {

@@ -102,6 +102,36 @@ describe('ghost hand pose sampling', () => {
     expect(first).toEqual(second)
   })
 
+  it('does not jump the finger when a short held note ends during preparation', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('first', 60, 240, 430, 'right', 2),
+      assignedNote('next', 62, 480, 600, 'right', 2),
+    ]))
+    const atRelease = sampleHandMotionTimeline(timeline, 430).right.fingers[2]
+    const afterRelease = sampleHandMotionTimeline(timeline, 430.001).right.fingers[2]
+    expect(distance(atRelease.tip, afterRelease.tip)).toBeLessThan(0.00001)
+  })
+
+  it('keeps all finger joints continuous as a prepared note makes contact', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('contact', 64, 480, 720, 'right', 3),
+    ]))
+    const before = sampleHandMotionTimeline(timeline, 479.999).right.fingers[3]
+    const atContact = sampleHandMotionTimeline(timeline, 480).right.fingers[3]
+    before.joints.forEach((joint, index) => {
+      expect(distance(joint, atContact.joints[index])).toBeLessThan(0.00001)
+    })
+  })
+
+  it('keeps the wrist stable when adjacent fingers cover neighboring notes', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('index', 60, 240, 350, 'right', 2),
+      assignedNote('middle', 62, 480, 590, 'right', 3),
+    ]))
+    const targets = timeline.hands.right.wristTargets
+    expect(targets[1].position.x).toBe(targets[0].position.x)
+  })
+
   it('automatically creates assignments when notes do not contain fingering metadata', () => {
     const project = createProject([
       plainNote('auto-1', 48, 0, 120),

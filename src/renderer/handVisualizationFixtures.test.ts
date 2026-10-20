@@ -5,7 +5,7 @@ import { Mesh, PlaneGeometry } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { buildHandMotionTimeline, sampleHandMotionTimeline } from '../hands'
-import type { PianoFinger, PianoHand } from '../midi/types'
+import type { PianoHand } from '../midi/types'
 import { parseMidi } from '../midi/parser'
 import { getWhiteKeyWidth } from './pianoMath'
 import { GhostHandsLayer, type GhostHandsLayout } from './GhostHandsLayer'
@@ -57,49 +57,28 @@ function assertHand(
   pose: ReturnType<typeof sampleHandMotionTimeline>[PianoHand],
   currentLayout: GhostHandsLayout,
 ): void {
-  const rendered = getHands(layer)[hand]
-  expect(rendered.group.visible).toBe(pose.visible)
+  const mesh = layer.group.children[hand === 'left' ? 0 : 1] as Mesh
+  expect(mesh.visible).toBe(pose.visible)
   if (!pose.visible) return
-
+  const bones = mesh.material.uniforms.handBones.value as Float32Array
+  const radii = mesh.material.uniforms.handRadii.value as Float32Array
   const whiteKeyWidth = getWhiteKeyWidth(currentLayout.viewportWidth)
-  const expectedThickness = Math.max(4, whiteKeyWidth * 0.5)
-  expect(rendered.segments[1][0].scale.y).toBeCloseTo(expectedThickness, 4)
-  expect(rendered.palm.scale.x / whiteKeyWidth).toBeGreaterThanOrEqual(4.29)
-  expect(rendered.palm.position.x - rendered.palm.scale.x / 2).toBeGreaterThanOrEqual(0)
-  expect(rendered.palm.position.x + rendered.palm.scale.x / 2).toBeLessThanOrEqual(currentLayout.viewportWidth)
-  expect(rendered.palm.position.y - rendered.palm.scale.y / 2).toBeGreaterThanOrEqual(0)
-  expect(rendered.palm.position.y + rendered.palm.scale.y / 2).toBeLessThanOrEqual(currentLayout.viewportHeight)
-
-  for (const mesh of rendered.group.children.filter((child): child is Mesh => (
-    child instanceof Mesh && child.visible
-  ))) {
-    expect([mesh.position.x, mesh.position.y, mesh.position.z, mesh.scale.x, mesh.scale.y].every(Number.isFinite)).toBe(true)
-    expect(mesh.scale.x).toBeGreaterThan(0)
-    expect(mesh.scale.y).toBeGreaterThan(0)
-    expect(mesh.position.x).toBeGreaterThanOrEqual(0)
-    expect(mesh.position.x).toBeLessThanOrEqual(currentLayout.viewportWidth)
-    expect(mesh.position.y).toBeGreaterThanOrEqual(0)
-    expect(mesh.position.y).toBeLessThanOrEqual(currentLayout.viewportHeight)
-  }
-
+  expect([...bones, ...radii].every(Number.isFinite)).toBe(true)
+  expect(mesh.scale.x).toBeGreaterThan(0)
+  expect(mesh.scale.y).toBeGreaterThan(0)
+  expect(Math.max(...radii)).toBeLessThan(whiteKeyWidth * 2)
   for (const finger of [1, 2, 3, 4, 5] as const) {
-    const contact = rendered.contactNodes[finger]
-    expect(contact.visible).toBe(pose.fingers[finger].pressed)
-    if (contact.visible) {
-      expect(contact.position.x).toBeCloseTo(pose.fingers[finger].tip.x * currentLayout.viewportWidth, 4)
-    }
+    const lastBone = (finger - 1) * 3 + 2
+    const x = bones[lastBone * 4 + 2]
+    const y = bones[lastBone * 4 + 3]
+    expect(x).toBeCloseTo(pose.fingers[finger].tip.x * currentLayout.viewportWidth, 3)
+    expect(y).toBeCloseTo(currentLayout.viewportHeight - currentLayout.keyboardY - (pose.fingers[finger].tip.depth - pose.fingers[finger].tip.height * 0.25) * currentLayout.keyboardHeight, 3)
+    // The hand quad must contain every fingertip, including wide chords.
+    expect(x).toBeGreaterThan(mesh.position.x - mesh.scale.x / 2)
+    expect(x).toBeLessThan(mesh.position.x + mesh.scale.x / 2)
+    expect(y).toBeGreaterThan(mesh.position.y - mesh.scale.y / 2)
+    expect(y).toBeLessThan(mesh.position.y + mesh.scale.y / 2)
   }
-}
-
-function getHands(layer: GhostHandsLayer) {
-  return (layer as unknown as {
-    hands: Record<PianoHand, {
-      contactNodes: Record<PianoFinger, Mesh>
-      group: { children: unknown[]; visible: boolean }
-      palm: Mesh
-      segments: Record<PianoFinger, Mesh[]>
-    }>
-  }).hands
 }
 
 function evenlySample(values: number[], count: number): number[] {
