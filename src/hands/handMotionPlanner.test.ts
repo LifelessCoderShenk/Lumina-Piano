@@ -110,6 +110,37 @@ describe('ghost hand pose sampling', () => {
     const atRelease = sampleHandMotionTimeline(timeline, 430).right.fingers[2]
     const afterRelease = sampleHandMotionTimeline(timeline, 430.001).right.fingers[2]
     expect(distance(atRelease.tip, afterRelease.tip)).toBeLessThan(0.00001)
+    atRelease.joints.forEach((joint, index) => {
+      expect(distance(joint, afterRelease.joints[index])).toBeLessThan(0.00001)
+    })
+  })
+
+  it('keeps finger curl continuous when preparation interrupts a release', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('first', 60, 240, 300, 'right', 2),
+      assignedNote('next', 62, 520, 650, 'right', 2),
+    ]))
+    const boundary = timeline.hands.right.fingerEvents[2][1].prepareTick
+    const before = sampleHandMotionTimeline(timeline, boundary - 0.001).right.fingers[2]
+    const after = sampleHandMotionTimeline(timeline, boundary).right.fingers[2]
+    before.joints.forEach((joint, index) => {
+      expect(distance(joint, after.joints[index])).toBeLessThan(0.00001)
+    })
+  })
+
+  it('raises crossing hands continuously instead of popping at the collision boundary', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('left', 48, 240, 1200, 'left', 3),
+      assignedNote('right', 72, 240, 1200, 'right', 3),
+    ]))
+    const left = timeline.hands.left.wristTargets[0]
+    const right = timeline.hands.right.wristTargets[0]
+    right.position.x = left.position.x + 0.100001
+    const outside = sampleHandMotionTimeline(timeline, 300)
+    right.position.x = left.position.x + 0.099999
+    const inside = sampleHandMotionTimeline(timeline, 300)
+    expect(distance(outside.right.wrist, inside.right.wrist)).toBeLessThan(0.00001)
+    expect(inside.right.fingers[3].tip).toEqual(outside.right.fingers[3].tip)
   })
 
   it('keeps all finger joints continuous as a prepared note makes contact', () => {

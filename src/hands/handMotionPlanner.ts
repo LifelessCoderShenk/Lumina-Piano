@@ -111,8 +111,10 @@ export function sampleHandMotionTimeline(timeline: HandMotionTimeline, tick: num
     && timeline.hands.right.wristTargets.length > 0
     && Math.abs(leftWrist.position.x - rightWrist.position.x) < HAND_COLLISION_DISTANCE
   ) {
-    leftWrist = { ...leftWrist, position: { ...leftWrist.position, height: leftWrist.position.height + 0.012 } }
-    rightWrist = { ...rightWrist, position: { ...rightWrist.position, height: rightWrist.position.height + 0.05 } }
+    const separation = Math.abs(leftWrist.position.x - rightWrist.position.x)
+    const overlap = easeInOut(normalize(HAND_COLLISION_DISTANCE - separation, 0, HAND_COLLISION_DISTANCE * 0.4))
+    leftWrist = { ...leftWrist, position: { ...leftWrist.position, height: leftWrist.position.height + 0.012 * overlap } }
+    rightWrist = { ...rightWrist, position: { ...rightWrist.position, height: rightWrist.position.height + 0.05 * overlap } }
   }
 
   return {
@@ -294,12 +296,14 @@ function sampleFingerTarget(
     const source = getApproachSource(track.hand, finger, wrist, previous, next.prepareTick)
     const progress = easeInOut(normalize(tick, Math.max(next.prepareTick, previous?.endTick ?? next.prepareTick), next.startTick))
     return {
-      contactAmount: progress,
+      // Preserve the departing pose, curl during the lift, then extend into
+      // the next key. Resetting this to zero made the knuckles snap.
+      contactAmount: lerp(source.contactAmount, 1, progress) - source.contactAmount * Math.sin(Math.PI * progress),
       pressed: false,
       targetPitch: next.pitch,
       tip: {
-        ...interpolatePoint(source, next.contact, progress),
-        height: lerp(source.height, next.contact.height, progress) + Math.sin(Math.PI * progress) * Math.min(0.06, 0.015 + Math.abs(source.x - next.contact.x) * 1.5),
+        ...interpolatePoint(source.tip, next.contact, progress),
+        height: lerp(source.tip.height, next.contact.height, progress) + Math.sin(Math.PI * progress) * Math.min(0.06, 0.015 + Math.abs(source.tip.x - next.contact.x) * 1.5),
       },
     }
   }
@@ -321,11 +325,11 @@ function getApproachSource(
   wrist: HandSpacePoint,
   previous: FingerMotionEvent | undefined,
   prepareTick: number,
-): HandSpacePoint {
+): Pick<SampledFingerTarget, 'tip' | 'contactAmount'> {
   const rest = getRestTip(hand, finger, wrist)
-  if (previous == null || prepareTick >= previous.releaseTick) return rest
+  if (previous == null || prepareTick >= previous.releaseTick) return { tip: rest, contactAmount: 0 }
   const releaseProgress = easeOut(normalize(prepareTick, previous.endTick, previous.releaseTick))
-  return interpolatePoint(previous.contact, rest, releaseProgress)
+  return { tip: interpolatePoint(previous.contact, rest, releaseProgress), contactAmount: 1 - releaseProgress }
 }
 
 function buildFingerJoints(
