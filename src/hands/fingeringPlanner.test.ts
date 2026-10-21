@@ -4,6 +4,14 @@ import type { Note, ProjectData } from '../midi/types'
 import { applyFingeringPlan, planPianoFingerings } from './fingeringPlanner'
 
 describe('piano fingering planner', () => {
+  it('does not reuse a held finger even when the overlap is very short', () => {
+    const held = [60, 62, 64, 65, 67].map((pitch, index) => ({
+      ...note(`held-${index}`, pitch, 0, 241),
+      fingering: { hand: 'right' as const, finger: (index + 1) as 1 | 2 | 3 | 4 | 5, source: 'manual' as const },
+    }))
+    const plan = planPianoFingerings(createProject([...held, note('new', 69, 240, 120)]))
+    expect(plan.assignments.new.hand).toBe('left')
+  })
   it('uses all five right-hand fingers for an ascending five-note scale', () => {
     const project = createProject([60, 62, 64, 65, 67].map((pitch, index) => note(`n${index}`, pitch, index * 120)))
     const plan = planPianoFingerings(project)

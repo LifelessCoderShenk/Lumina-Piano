@@ -316,11 +316,38 @@ function evaluateTransition(
     const prior = occupied[slot]
     if (prior != null && prior.pitch !== event.pitch) {
       const overlap = (prior.endTick - candidate.group.startTick) / options.ticksPerQuarter
-      cost += Math.max(0, overlap) * 4
+      // Even a one-tick overlap asks one finger to occupy two different keys.
+      // Prefer an available finger/hand before weighing duration or travel.
+      cost += 12 + Math.max(0, overlap) * 4
     }
     occupied[slot] = { endTick: Math.max(...event.notes.map((note) => note.endTick)), pitch: event.pitch }
   }
+  cost += scoreHeldHandShape(occupied)
   return { cost, occupied }
+}
+
+function scoreHeldHandShape(occupied: Record<string, OccupiedFinger>): number {
+  let cost = 0
+  for (const hand of ['left', 'right'] as const) {
+    const notes = Object.entries(occupied)
+      .filter(([slot]) => slot.startsWith(`${hand}:`))
+      .map(([slot, note]) => ({ finger: Number(slot.split(':')[1]), pitch: note.pitch }))
+      .sort((a, b) => a.pitch - b.pitch)
+    for (let i = 1; i < notes.length; i++) {
+      const pitchGap = notes[i].pitch - notes[i - 1].pitch
+      const fingerGap = (notes[i].finger - notes[i - 1].finger) * (hand === 'right' ? 1 : -1)
+      // A thumb turn between released notes is fine; crossing fingers that
+      // are simultaneously held forces a twisted pose.
+      if (pitchGap > 0 && fingerGap <= 0) cost += 8
+      const excess = Math.max(0, pitchGap - (Math.abs(fingerGap) * 2.4 + 1))
+      cost += excess * excess * 0.3
+    }
+    if (notes.length > 1) {
+      const excessSpan = Math.max(0, notes[notes.length - 1].pitch - notes[0].pitch - 12)
+      cost += excessSpan * excessSpan * 0.5
+    }
+  }
+  return cost
 }
 
 function scoreMotion(previous: Candidate, current: Candidate, options: NormalizedPlannerOptions): number {
