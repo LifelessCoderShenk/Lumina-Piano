@@ -385,13 +385,57 @@ function buildFingerJoints(
     height: wrist.height - (finger === 1 ? 0.035 : 0.02),
     x: wrist.x + fingerRestOffsetX(hand, finger) * (finger === 1 ? 0.92 : 0.9),
   }
-  const control: HandSpacePoint = {
-    depth: lerp(root.depth, tip.depth, 0.48) - 0.025 * curl,
-    height: Math.max(root.height, tip.height) + 0.045 + 0.055 * curl,
-    // The thumb bends from the side of the palm, unlike the four long fingers.
-    x: lerp(root.x, tip.x, 0.48) + (finger === 1 ? (hand === 'right' ? -1 : 1) * 0.008 * curl : 0),
+  return articulateFinger(root, tip, finger, hand, curl)
+}
+
+/** Solve three phalanges in a bending plane with fixed length ratios. Convert
+ * keyboard-width coordinates into the same approximate scale as key depth first.
+ * Unreachable MIDI assignments extend proportionally rather than losing contact. */
+function articulateFinger(
+  root: HandSpacePoint, tip: HandSpacePoint, finger: PianoFinger, hand: PianoHand, curl: number,
+): [HandSpacePoint, HandSpacePoint, HandSpacePoint, HandSpacePoint] {
+  const dx = (tip.x - root.x) * 8
+  const dy = tip.depth - root.depth
+  const dz = tip.height - root.height
+  const distance = Math.max(0.000001, Math.hypot(dx, dy, dz))
+  const direction = [dx / distance, dy / distance, dz / distance]
+  const preferred = [finger === 1 ? (hand === 'right' ? -1 : 1) * (0.4 + curl) : 0, 0, 1]
+  const projection = preferred.reduce((sum, value, i) => sum + value * direction[i], 0)
+  let normal = preferred.map((value, i) => value - projection * direction[i])
+  let normalLength = Math.hypot(...normal)
+  if (normalLength < 0.00001) {
+    normal = [-direction[1], direction[0], 0]
+    normalLength = Math.hypot(...normal)
+    if (normalLength < 0.00001) { normal = [1, 0, 0]; normalLength = 1 }
   }
-  return [root, quadraticPoint(root, control, tip, 0.38), quadraticPoint(root, control, tip, 0.72), { ...tip }]
+  normal = normal.map(value => value / normalLength)
+  const length = { 1: 0.44, 2: 0.46, 3: 0.48, 4: 0.46, 5: 0.39 }[finger]
+  const lengths = [length * 0.45, length * 0.32, length * 0.23]
+  const resultant = (bend: number) => ({
+    along: (lengths[0] + lengths[2]) * Math.cos(bend) + lengths[1],
+    across: (lengths[0] - lengths[2]) * Math.sin(bend),
+  })
+  let low = 0, high = 1.65
+  for (let i = 0; i < 24; i++) {
+    const middle = (low + high) / 2
+    const vector = resultant(middle)
+    if (Math.hypot(vector.along, vector.across) > distance) low = middle
+    else high = middle
+  }
+  const bend = (low + high) / 2
+  const vector = resultant(bend)
+  const rotation = Math.atan2(vector.across, vector.along)
+  const scale = distance / Math.hypot(vector.along, vector.across)
+  const joints: HandSpacePoint[] = [{ ...root }]
+  let point = [root.x * 8, root.depth, root.height]
+  for (let i = 0; i < 2; i++) {
+    const angle = (1 - i) * bend - rotation
+    point = point.map((value, axis) => value + lengths[i] * scale * (
+      direction[axis] * Math.cos(angle) + normal[axis] * Math.sin(angle)
+    ))
+    joints.push({ x: point[0] / 8, depth: point[1], height: point[2] })
+  }
+  return [joints[0], joints[1], joints[2], { ...tip }]
 }
 
 function getRestTip(hand: PianoHand, finger: PianoFinger, wrist: HandSpacePoint): HandSpacePoint {
@@ -437,15 +481,6 @@ function firstIndexAfter<T>(values: T[], tick: number, getTick: (value: T) => nu
     else high = middle
   }
   return low
-}
-
-function quadraticPoint(start: HandSpacePoint, control: HandSpacePoint, end: HandSpacePoint, t: number): HandSpacePoint {
-  const inverse = 1 - t
-  return {
-    depth: inverse * inverse * start.depth + 2 * inverse * t * control.depth + t * t * end.depth,
-    height: inverse * inverse * start.height + 2 * inverse * t * control.height + t * t * end.height,
-    x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
-  }
 }
 
 function interpolatePoint(from: HandSpacePoint, to: HandSpacePoint, progress: number): HandSpacePoint {

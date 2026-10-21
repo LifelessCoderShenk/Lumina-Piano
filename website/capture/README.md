@@ -46,4 +46,6 @@ Capture-only Vite transformation supplies CanvasArea's existing `keyboardHeightR
 
 ### Revised hand export
 
+The finger rig uses three articulated segments with fixed length ratios, solving joint bends in a hand-specific plane. Reachable poses preserve segment lengths through rest, press and release. Impossible MIDI assignments still use proportional extension to preserve key contact; this is not a fully anatomical or collision-constrained rig.
+
 render-hands.html re-exports the original miniature through the actual ExportEngine after the hand anatomy and motion changes. Both the standalone performance and the result portion of the walkthrough use this revised export. The walkthrough UI stills remain the original captures. Fingers now have clearer separation, a smaller palm, eased transitions and a curved lift between notes; nearby notes share a steadier wrist position. Idle fingers use a tucked resting pose with subtle neighbor movement. Wrist targets include sustained notes, and releases ease gently toward rest. Thumbs bend toward the side of each palm. This remains procedural MIDI-inferred motion, not recorded human fingering.

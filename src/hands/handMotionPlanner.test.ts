@@ -5,6 +5,24 @@ import { buildTempoMap, tickToSeconds } from '../tempo/tempoMap'
 import { buildHandMotionTimeline, sampleHandMotionTimeline } from './handMotionPlanner'
 
 describe('ghost hand motion planner', () => {
+  it.each([1, 2, 3, 4, 5] as const)('preserves finger %i bone lengths through a reachable press and release', (finger) => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('motion', 64, 480, 720, 'right', finger),
+    ]))
+    const measure = (tick: number) => {
+      const joints = sampleHandMotionTimeline(timeline, tick).right.fingers[finger].joints
+      return joints.slice(1).map((point, i) => Math.hypot(
+        (point.x - joints[i].x) * 8, point.depth - joints[i].depth, point.height - joints[i].height,
+      ))
+    }
+    const baseline = measure(480)
+    for (const tick of [0, 360, 420, 479, 600, 721, 780, 950]) {
+      measure(tick).forEach((length, i) => expect(length).toBeCloseTo(baseline[i], 5))
+    }
+    expect(baseline[0]).toBeGreaterThan(baseline[1])
+    expect(baseline[1]).toBeGreaterThan(baseline[2])
+  })
+
   it('eases out of a held note instead of recoiling immediately toward rest', () => {
     const timeline = buildHandMotionTimeline(createProject([
       assignedNote('release', 64, 480, 720, 'right', 3),
