@@ -5,6 +5,31 @@ import { buildTempoMap, tickToSeconds } from '../tempo/tempoMap'
 import { buildHandMotionTimeline, sampleHandMotionTimeline } from './handMotionPlanner'
 
 describe('ghost hand motion planner', () => {
+  it('eases out of a held note instead of recoiling immediately toward rest', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('release', 64, 480, 720, 'right', 3),
+    ]))
+    const event = timeline.hands.right.fingerEvents[3][0]
+    const delta = (event.releaseTick - event.endTick) * 0.01
+    const held = sampleHandMotionTimeline(timeline, event.endTick).right.fingers[3]
+    const justReleased = sampleHandMotionTimeline(timeline, event.endTick + delta).right.fingers[3]
+    const rest = sampleHandMotionTimeline(timeline, event.releaseTick).right.fingers[3]
+    expect(distance(held.tip, justReleased.tip) / distance(held.tip, rest.tip)).toBeLessThan(0.001)
+    expect(justReleased.pressed).toBe(false)
+  })
+
+  it('curves each thumb from the side of its palm without shifting key contact', () => {
+    for (const hand of ['left', 'right'] as const) {
+      const timeline = buildHandMotionTimeline(createProject([
+        assignedNote('thumb', 60, 480, 720, hand, 1),
+      ]))
+      const thumb = sampleHandMotionTimeline(timeline, 480)[hand].fingers[1]
+      const linearX = thumb.joints[0].x + (thumb.tip.x - thumb.joints[0].x) * 0.38
+      expect((thumb.joints[1].x - linearX) * (hand === 'right' ? -1 : 1)).toBeGreaterThan(0)
+      expect(thumb.tip).toEqual(timeline.hands[hand].fingerEvents[1][0].contact)
+    }
+  })
+
   it('places the assigned fingertip exactly on its key throughout a held note', () => {
     const project = createProject([
       assignedNote('held', 60, 480, 960, 'right', 1),

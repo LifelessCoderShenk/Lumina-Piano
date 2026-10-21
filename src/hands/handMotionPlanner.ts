@@ -6,7 +6,7 @@ import { planPianoFingerings, type FingeringPlan } from './fingeringPlanner'
 const FINGERS: readonly PianoFinger[] = [1, 2, 3, 4, 5]
 const KEYBOARD_COORDINATE_WIDTH = 5200
 const CHORD_GROUP_DIVISOR = 24
-const RELEASE_SECONDS = 0.11
+const RELEASE_SECONDS = 0.18
 const HAND_COLLISION_DISTANCE = 0.1
 const MOTION_PLANNER_BEAM_WIDTH = 16
 
@@ -349,7 +349,7 @@ function sampleFingerTarget(
     }
   }
   if (previous != null && tick < previous.releaseTick) {
-    const progress = easeOut(normalize(tick, previous.endTick, previous.releaseTick))
+    const progress = easeInOut(normalize(tick, previous.endTick, previous.releaseTick))
     return {
       contactAmount: 1 - progress,
       pressed: false,
@@ -369,7 +369,7 @@ function getApproachSource(
 ): Pick<SampledFingerTarget, 'tip' | 'contactAmount'> {
   const rest = getRestTip(hand, finger, wrist)
   if (previous == null || prepareTick >= previous.releaseTick) return { tip: rest, contactAmount: 0 }
-  const releaseProgress = easeOut(normalize(prepareTick, previous.endTick, previous.releaseTick))
+  const releaseProgress = easeInOut(normalize(prepareTick, previous.endTick, previous.releaseTick))
   return { tip: interpolatePoint(previous.contact, rest, releaseProgress), contactAmount: 1 - releaseProgress }
 }
 
@@ -388,7 +388,8 @@ function buildFingerJoints(
   const control: HandSpacePoint = {
     depth: lerp(root.depth, tip.depth, 0.48) - 0.025 * curl,
     height: Math.max(root.height, tip.height) + 0.045 + 0.055 * curl,
-    x: lerp(root.x, tip.x, 0.48),
+    // The thumb bends from the side of the palm, unlike the four long fingers.
+    x: lerp(root.x, tip.x, 0.48) + (finger === 1 ? (hand === 'right' ? -1 : 1) * 0.008 * curl : 0),
   }
   return [root, quadraticPoint(root, control, tip, 0.38), quadraticPoint(root, control, tip, 0.72), { ...tip }]
 }
@@ -462,10 +463,6 @@ function normalize(value: number, start: number, end: number): number {
 
 function easeInOut(value: number): number {
   return value * value * value * (value * (value * 6 - 15) + 10)
-}
-
-function easeOut(value: number): number {
-  return 1 - (1 - value) * (1 - value)
 }
 
 function lerp(from: number, to: number, progress: number): number {
