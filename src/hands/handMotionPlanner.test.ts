@@ -61,6 +61,47 @@ describe('ghost hand motion planner', () => {
 })
 
 describe('ghost hand pose sampling', () => {
+  it('keeps a sustained thumb in the wrist support span when the little finger reaches', () => {
+    const held = buildHandMotionTimeline(createProject([
+      assignedNote('thumb', 60, 240, 900, 'right', 1),
+      assignedNote('reach', 76, 480, 720, 'right', 5),
+    ]))
+    const released = buildHandMotionTimeline(createProject([
+      assignedNote('thumb', 60, 240, 350, 'right', 1),
+      assignedNote('reach', 76, 480, 720, 'right', 5),
+    ]))
+    expect(held.hands.right.wristTargets[1].position.x)
+      .toBeLessThan(released.hands.right.wristTargets[1].position.x)
+    expect(sampleHandMotionTimeline(held, 600).right.fingers[1].tip)
+      .toEqual(held.hands.right.fingerEvents[1][0].contact)
+  })
+
+  it('lets a resting ring finger follow a middle-finger press without moving held fingertips', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('middle', 64, 480, 720, 'right', 3),
+    ]))
+    const event = timeline.hands.right.fingerEvents[3][0]
+    const resting = sampleHandMotionTimeline(timeline, event.prepareTick).right
+    const pressing = sampleHandMotionTimeline(timeline, event.startTick).right
+    expect(pressing.fingers[4].tip.height).toBeLessThan(resting.fingers[4].tip.height)
+    expect(pressing.fingers[4].pressed).toBe(false)
+    expect(pressing.fingers[3].tip).toEqual(event.contact)
+    expect(pressing.fingers[1].tip).toEqual(resting.fingers[1].tip)
+    const before = sampleHandMotionTimeline(timeline, event.startTick - 0.001).right
+    expect(distance(before.fingers[4].tip, pressing.fingers[4].tip)).toBeLessThan(0.00001)
+  })
+
+  it('keeps relaxed fingertips tucked inside their knuckle spread', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('middle', 64, 480, 720, 'right', 3),
+    ]))
+    const pose = sampleHandMotionTimeline(timeline, 0).right
+    for (const finger of [1, 2, 4, 5] as const) {
+      expect(Math.abs(pose.fingers[finger].tip.x - pose.wrist.x))
+        .toBeLessThan(Math.abs(pose.fingers[finger].joints[0].x - pose.wrist.x))
+    }
+  })
+
   it('keeps close wrists vertically separated while both fingertips stay in contact', () => {
     const project = createProject([
       assignedNote('left', 59, 240, 480, 'left', 1),

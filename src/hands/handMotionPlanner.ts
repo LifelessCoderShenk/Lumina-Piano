@@ -207,8 +207,14 @@ function buildWristTargets(
   }
 
   let settledX: number | undefined
+  let held: FingerMotionEvent[] = []
   return groups.map((group) => {
-    const unique = [...new Map(group.map((event) => [event.pitch, event])).values()]
+    const onset = group[0].startTick
+    // Keep sustained fingers in the hand's support span when a new note arrives.
+    // Otherwise the wrist follows the new note and stretches the held fingers.
+    held = held.filter(event => event.endTick > onset)
+    const unique = [...new Map([...held, ...group].map((event) => [event.pitch, event])).values()]
+    held.push(...group)
     const desiredWristX = unique.reduce((sum, event) => (
       sum + event.contact.x - fingerRestOffsetX(hand, event.finger)
     ), 0) / unique.length
@@ -236,17 +242,22 @@ function sampleHand(
   wristSample: { position: HandSpacePoint; yaw: number },
   tick: number,
 ): GhostHandPose {
+  const targets = {} as Record<PianoFinger, SampledFingerTarget>
+  for (const finger of FINGERS) {
+    targets[finger] = sampleFingerTarget(track, finger, wristSample.position, tick)
+  }
   const fingers = {} as Record<PianoFinger, FingerPose>
   for (const finger of FINGERS) {
-    const target = sampleFingerTarget(track, finger, wristSample.position, tick)
+    const target = targets[finger]
+    const tip = followNeighboringFingers(track.hand, finger, wristSample.position, targets)
     const curl = 0.52 - target.contactAmount * 0.24
     fingers[finger] = {
       contactAmount: target.contactAmount,
       finger,
-      joints: buildFingerJoints(track.hand, finger, wristSample.position, target.tip, curl),
+      joints: buildFingerJoints(track.hand, finger, wristSample.position, tip, curl),
       pressed: target.pressed,
       targetPitch: target.targetPitch,
-      tip: target.tip,
+      tip,
     }
   }
   return {
@@ -255,6 +266,36 @@ function sampleHand(
     visible: track.wristTargets.length > 0,
     wrist: wristSample.position,
     yaw: wristSample.yaw,
+  }
+}
+
+/** Relaxed fingers move slightly with their neighbors, rather than staying splayed
+ * in a fixed fan. Contacted fingertips remain pinned to the keyboard. */
+function followNeighboringFingers(
+  hand: PianoHand,
+  finger: PianoFinger,
+  wrist: HandSpacePoint,
+  targets: Record<PianoFinger, SampledFingerTarget>,
+): HandSpacePoint {
+  const target = targets[finger]
+  if (finger === 1 || target.contactAmount >= 1) return target.tip
+  let depth = 0
+  let height = 0
+  for (const neighbor of FINGERS) {
+    if (neighbor === 1 || Math.abs(neighbor - finger) !== 1) continue
+    const other = targets[neighbor]
+    const rest = getRestTip(hand, neighbor, wrist)
+    // Ring and middle fingers share more motion than the independent index.
+    const coupling = finger === 4 || neighbor === 4 ? 0.24 : 0.12
+    const influence = other.contactAmount * coupling
+    depth += clamp(other.tip.depth - rest.depth, -0.12, 0.12) * influence
+    height += clamp(other.tip.height - rest.height, -0.1, 0.1) * influence
+  }
+  const freedom = 1 - target.contactAmount
+  return {
+    ...target.tip,
+    depth: target.tip.depth + depth * freedom,
+    height: target.tip.height + height * freedom,
   }
 }
 
@@ -354,9 +395,11 @@ function buildFingerJoints(
 
 function getRestTip(hand: PianoHand, finger: PianoFinger, wrist: HandSpacePoint): HandSpacePoint {
   return {
-    depth: wrist.depth - ({ 1: 0.39, 2: 0.51, 3: 0.56, 4: 0.53, 5: 0.44 }[finger]),
-    height: wrist.height - 0.075 + (finger === 1 || finger === 5 ? 0.018 : 0),
-    x: wrist.x + fingerRestOffsetX(hand, finger),
+    // A relaxed arch: long fingers flex toward the palm, the little finger
+    // stays shorter, and the thumb rests beside the index instead of flaring.
+    depth: wrist.depth - ({ 1: 0.31, 2: 0.43, 3: 0.46, 4: 0.43, 5: 0.35 }[finger]),
+    height: wrist.height - ({ 1: 0.085, 2: 0.11, 3: 0.12, 4: 0.115, 5: 0.10 }[finger]),
+    x: wrist.x + fingerRestOffsetX(hand, finger) * (finger === 1 ? 0.80 : 0.86),
   }
 }
 
