@@ -230,6 +230,7 @@ export function MediaPreview({
             />
           ) : (
             <video
+              key={media.asset.src}
               controls
               preload="none"
               playsInline
