@@ -46,6 +46,8 @@ Capture-only Vite transformation supplies CanvasArea's existing `keyboardHeightR
 
 ### Revised hand export
 
+Wrist reference study: SeeMusic's homepage was inspected visually and describes synchronized player footage (https://www.seemusicapp.com/). Schott Music's circular/lateral wrist lesson (https://www.youtube.com/watch?v=yvYXgUANfEQ) was found via search, but the embedded player returned error 153; it was not watched. Lumina now rotates finger roots and relaxed tips with the wrist, and uses a small lift/turn/settle arc during lateral travel. These are original procedural approximations, not extracted motion capture.
+
 The finger rig uses three articulated segments with fixed length ratios, solving joint bends in a hand-specific plane. Reachable poses preserve segment lengths through rest, press and release. Impossible MIDI assignments still use proportional extension to preserve key contact; this is not a fully anatomical or collision-constrained rig.
 
 Automatic fingering also scores sustained notes across onsets: occupied-finger reuse, crossed held fingers and excessive spans carry penalties. Manual fingering remains authoritative. These are planning preferences, not guarantees that arbitrary MIDI is physically playable.

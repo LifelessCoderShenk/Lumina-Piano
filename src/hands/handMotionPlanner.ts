@@ -249,12 +249,13 @@ function sampleHand(
   const fingers = {} as Record<PianoFinger, FingerPose>
   for (const finger of FINGERS) {
     const target = targets[finger]
-    const tip = followNeighboringFingers(track.hand, finger, wristSample.position, targets)
+    const restingTip = followNeighboringFingers(track.hand, finger, wristSample.position, targets)
+    const tip = rotateAroundWrist(restingTip, wristSample.position, wristSample.yaw * (1 - target.contactAmount))
     const curl = 0.52 - target.contactAmount * 0.24
     fingers[finger] = {
       contactAmount: target.contactAmount,
       finger,
-      joints: buildFingerJoints(track.hand, finger, wristSample.position, tip, curl),
+      joints: buildFingerJoints(track.hand, finger, wristSample.position, tip, curl, wristSample.yaw),
       pressed: target.pressed,
       targetPitch: target.targetPitch,
       tip,
@@ -308,9 +309,12 @@ function sampleWrist(track: HandMotionTrack, tick: number): { position: HandSpac
   if (next != null && tick >= next.prepareTick) {
     const from = previous ?? next
     const progress = easeInOut(normalize(tick, Math.max(next.prepareTick, previous?.startTick ?? next.prepareTick), next.startTick))
+    const travel = clamp(Math.abs(next.position.x - from.position.x) / 0.08, 0, 1)
+    const lift = Math.sin(Math.PI * progress) * travel
+    const position = interpolatePoint(from.position, next.position, progress)
     return {
-      position: interpolatePoint(from.position, next.position, progress),
-      yaw: lerp(from.yaw, next.yaw, progress),
+      position: { ...position, height: position.height + lift * 0.045, depth: position.depth - lift * 0.025 },
+      yaw: lerp(from.yaw, next.yaw, progress) + Math.sign(next.position.x - from.position.x) * lift * 0.12,
     }
   }
   const selected = previous ?? next ?? targets[0]
@@ -379,13 +383,21 @@ function buildFingerJoints(
   wrist: HandSpacePoint,
   tip: HandSpacePoint,
   curl: number,
+  yaw: number,
 ): [HandSpacePoint, HandSpacePoint, HandSpacePoint, HandSpacePoint] {
-  const root: HandSpacePoint = {
+  const root = rotateAroundWrist({
     depth: wrist.depth - ({ 1: 0.12, 2: 0.24, 3: 0.27, 4: 0.25, 5: 0.19 }[finger]),
     height: wrist.height - (finger === 1 ? 0.035 : 0.02),
     x: wrist.x + fingerRestOffsetX(hand, finger) * (finger === 1 ? 0.92 : 0.9),
-  }
+  }, wrist, yaw)
   return articulateFinger(root, tip, finger, hand, curl)
+}
+
+function rotateAroundWrist(point: HandSpacePoint, wrist: HandSpacePoint, angle: number): HandSpacePoint {
+  const x = (point.x - wrist.x) * 8
+  const depth = point.depth - wrist.depth
+  const c = Math.cos(angle), s = Math.sin(angle)
+  return { ...point, x: wrist.x + (x * c - depth * s) / 8, depth: wrist.depth + x * s + depth * c }
 }
 
 /** Solve three phalanges in a bending plane with fixed length ratios. Convert

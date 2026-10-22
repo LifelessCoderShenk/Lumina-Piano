@@ -5,6 +5,29 @@ import { buildTempoMap, tickToSeconds } from '../tempo/tempoMap'
 import { buildHandMotionTimeline, sampleHandMotionTimeline } from './handMotionPlanner'
 
 describe('ghost hand motion planner', () => {
+  it('rotates knuckles with the wrist while held fingertips stay on their keys', () => {
+    const timeline = buildHandMotionTimeline(createProject([assignedNote('held', 64, 480, 720, 'right', 3)]))
+    timeline.hands.right.wristTargets[0].yaw = 0
+    const straight = sampleHandMotionTimeline(timeline, 600).right
+    timeline.hands.right.wristTargets[0].yaw = 0.2
+    const turned = sampleHandMotionTimeline(timeline, 600).right
+    expect(turned.fingers[3].tip).toEqual(straight.fingers[3].tip)
+    expect(distance(turned.fingers[3].joints[0], straight.fingers[3].joints[0])).toBeGreaterThan(0.005)
+    expect(distance(turned.fingers[2].tip, straight.fingers[2].tip)).toBeGreaterThan(0.005)
+  })
+
+  it('lifts and turns the wrist during a lateral move, then settles at arrival', () => {
+    const timeline = buildHandMotionTimeline(createProject([
+      assignedNote('low', 60, 240, 360, 'right', 3),
+      assignedNote('high', 84, 960, 1080, 'right', 3),
+    ]))
+    const [from, to] = timeline.hands.right.wristTargets
+    const middle = sampleHandMotionTimeline(timeline, (to.prepareTick + to.startTick) / 2).right
+    expect(middle.wrist.height).toBeGreaterThan(Math.max(from.position.height, to.position.height))
+    expect(middle.yaw).toBeGreaterThan(Math.max(from.yaw, to.yaw))
+    expect(sampleHandMotionTimeline(timeline, to.startTick).right.wrist).toEqual(to.position)
+  })
+
   it.each([1, 2, 3, 4, 5] as const)('preserves finger %i bone lengths through a reachable press and release', (finger) => {
     const timeline = buildHandMotionTimeline(createProject([
       assignedNote('motion', 64, 480, 720, 'right', finger),
@@ -138,6 +161,8 @@ describe('ghost hand pose sampling', () => {
     const timeline = buildHandMotionTimeline(createProject([
       assignedNote('middle', 64, 480, 720, 'right', 3),
     ]))
+    // Measure spread in the neutral hand frame, not after a wrist rotation.
+    timeline.hands.right.wristTargets[0].yaw = 0
     const pose = sampleHandMotionTimeline(timeline, 0).right
     for (const finger of [1, 2, 4, 5] as const) {
       expect(Math.abs(pose.fingers[finger].tip.x - pose.wrist.x))
