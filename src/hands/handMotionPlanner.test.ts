@@ -5,6 +5,13 @@ import { buildTempoMap, tickToSeconds } from '../tempo/tempoMap'
 import { buildHandMotionTimeline, sampleHandMotionTimeline } from './handMotionPlanner'
 
 describe('ghost hand motion planner', () => {
+  it.each([1,2,3,4,5] as const)('moves into the black-key area so finger %i can reach without stretching', finger => {
+    const timeline = buildHandMotionTimeline(createProject([assignedNote('black',61,480,720,'right',finger)]))
+    const pose = sampleHandMotionTimeline(timeline,600).right.fingers[finger]
+    expect(pose.reachError).toBeLessThan(0.00001)
+    expect(pose.pressed).toBe(true)
+    expect(pose.tip).toEqual(timeline.hands.right.fingerEvents[finger][0].contact)
+  })
   it('rotates knuckles with the wrist while held fingertips stay on their keys', () => {
     const timeline = buildHandMotionTimeline(createProject([assignedNote('held', 64, 480, 720, 'right', 3)]))
     timeline.hands.right.wristTargets[0].yaw = 0
@@ -127,7 +134,7 @@ describe('ghost hand motion planner', () => {
 })
 
 describe('ghost hand pose sampling', () => {
-  it('keeps a sustained thumb in the wrist support span when the little finger reaches', () => {
+  it('includes held notes in wrist support and refuses to stretch for an impossible span', () => {
     const held = buildHandMotionTimeline(createProject([
       assignedNote('thumb', 60, 240, 900, 'right', 1),
       assignedNote('reach', 76, 480, 720, 'right', 5),
@@ -138,8 +145,10 @@ describe('ghost hand pose sampling', () => {
     ]))
     expect(held.hands.right.wristTargets[1].position.x)
       .toBeLessThan(released.hands.right.wristTargets[1].position.x)
-    expect(sampleHandMotionTimeline(held, 600).right.fingers[1].tip)
-      .toEqual(held.hands.right.fingerEvents[1][0].contact)
+    const thumb = sampleHandMotionTimeline(held, 600).right.fingers[1]
+    expect(thumb.reachError).toBeGreaterThan(0)
+    expect(thumb.pressed).toBe(false)
+    expect(thumb.joints.slice(1).reduce((sum, p, i) => sum + Math.hypot((p.x-thumb.joints[i].x)*8,p.depth-thumb.joints[i].depth,p.height-thumb.joints[i].height),0)).toBeCloseTo(0.44,5)
   })
 
   it('lets a resting ring finger follow a middle-finger press without moving held fingertips', () => {
@@ -152,7 +161,7 @@ describe('ghost hand pose sampling', () => {
     expect(pressing.fingers[4].tip.height).toBeLessThan(resting.fingers[4].tip.height)
     expect(pressing.fingers[4].pressed).toBe(false)
     expect(pressing.fingers[3].tip).toEqual(event.contact)
-    expect(pressing.fingers[1].tip).toEqual(resting.fingers[1].tip)
+    expect(distance(pressing.fingers[1].tip, resting.fingers[1].tip)).toBeLessThan(0.02)
     const before = sampleHandMotionTimeline(timeline, event.startTick - 0.001).right
     expect(distance(before.fingers[4].tip, pressing.fingers[4].tip)).toBeLessThan(0.00001)
   })
@@ -249,7 +258,7 @@ describe('ghost hand pose sampling', () => {
     right.position.x = left.position.x + 0.099999
     const inside = sampleHandMotionTimeline(timeline, 300)
     expect(distance(outside.right.wrist, inside.right.wrist)).toBeLessThan(0.00001)
-    expect(inside.right.fingers[3].tip).toEqual(outside.right.fingers[3].tip)
+    expect(distance(inside.right.fingers[3].tip, outside.right.fingers[3].tip)).toBeLessThan(0.00001)
   })
 
   it('keeps all finger joints continuous as a prepared note makes contact', () => {

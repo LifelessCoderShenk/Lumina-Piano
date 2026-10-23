@@ -37,6 +37,7 @@ const mockResizeObserverCallback = vi.hoisted(() => ({ current: null as null | R
 const mockWindowMaximize = vi.hoisted(() => vi.fn(async () => undefined))
 const mockClientSize = vi.hoisted(() => ({ height: 600, width: 800 }))
 const mockStoreState = vi.hoisted(() => ({
+  handVisualization: {enabled:false,opacity:65},
   appMode: 'create' as 'create' | 'createCamera' | 'createRecord',
   currentTick: 0,
   isPlaying: false,
@@ -154,6 +155,7 @@ describe('CanvasArea', () => {
     mockCameraIsInitialized.mockReset()
     mockCameraIsInitialized.mockReturnValue(false)
     mockCameraSetViewportSize.mockReset()
+    mockStoreState.handVisualization.enabled = false
     mockStoreState.appMode = 'create'
     mockStoreState.isPlaying = false
     mockStoreState.precomputedTempoMap = null
@@ -358,14 +360,14 @@ describe('CanvasArea', () => {
 
     await waitFor(() => {
       expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600, {
-        layoutContext: { keyboardHeightRatio: 0.5, preserveKeyboardHeightRatio: true },
+        layoutContext: { keyboardBottomInsetRatio: 0, keyboardHeightRatio: 0.5, preserveKeyboardHeightRatio: true },
       })
     })
 
     view.rerender(<CanvasArea engine="three" keyboardHeightRatio={0.4} />)
     await waitFor(() => {
       expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600, {
-        layoutContext: { keyboardHeightRatio: 0.4, preserveKeyboardHeightRatio: true },
+        layoutContext: { keyboardBottomInsetRatio: 0, keyboardHeightRatio: 0.4, preserveKeyboardHeightRatio: true },
       })
     })
   })
@@ -437,6 +439,15 @@ describe('CanvasArea', () => {
     })
   })
 
+  it('reserves wrist space only while generated hands are enabled', async () => {
+    mockStoreState.handVisualization.enabled = true
+    const view = render(<CanvasArea engine="three" />)
+    await waitFor(() => expect(mockThreeRendererResize).toHaveBeenCalledWith(800,600,{layoutContext:{keyboardBottomInsetRatio:0.12}}))
+    mockStoreState.handVisualization.enabled = false
+    view.rerender(<CanvasArea engine="three" />)
+    await waitFor(() => expect(mockThreeRendererResize).toHaveBeenLastCalledWith(800,600,{layoutContext:{keyboardBottomInsetRatio:0}}))
+  })
+
   it('drives the three renderer when engine is set to three', async () => {
     render(<CanvasArea engine="three" />)
 
@@ -446,7 +457,7 @@ describe('CanvasArea', () => {
 
     expect(mockPixiRendererInit).not.toHaveBeenCalled()
     expect(mockThreeRendererDestroy).toHaveBeenCalledTimes(1)
-    expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600)
+    expect(mockThreeRendererResize).toHaveBeenCalledWith(800, 600, {layoutContext:{keyboardBottomInsetRatio:0}})
     expect(mockThreeRendererCanvas.current).toBeInstanceOf(HTMLCanvasElement)
     expect(getActiveVisualizerRenderer()?.setKeyboardOpacity).toBe(mockThreeRendererSetKeyboardOpacity)
   })

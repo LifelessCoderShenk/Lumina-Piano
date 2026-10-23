@@ -1,13 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { Mesh, PlaneGeometry } from 'three'
+import { SkinnedMesh, PlaneGeometry, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { buildHandMotionTimeline, sampleHandMotionTimeline } from '../hands'
 import type { PianoHand } from '../midi/types'
 import { parseMidi } from '../midi/parser'
-import { getWhiteKeyWidth } from './pianoMath'
 import { GhostHandsLayer, type GhostHandsLayout } from './GhostHandsLayer'
 
 const PIECES = [
@@ -57,27 +56,16 @@ function assertHand(
   pose: ReturnType<typeof sampleHandMotionTimeline>[PianoHand],
   currentLayout: GhostHandsLayout,
 ): void {
-  const mesh = layer.group.children[hand === 'left' ? 0 : 1] as Mesh
-  expect(mesh.visible).toBe(pose.visible)
+  const group = layer.group.children[hand === 'left' ? 0 : 1]
+  const mesh = group.children[1] as SkinnedMesh
+  expect(group.visible).toBe(pose.visible)
   if (!pose.visible) return
-  const bones = mesh.material.uniforms.handBones.value as Float32Array
-  const radii = mesh.material.uniforms.handRadii.value as Float32Array
-  const whiteKeyWidth = getWhiteKeyWidth(currentLayout.viewportWidth)
-  expect([...bones, ...radii].every(Number.isFinite)).toBe(true)
-  expect(mesh.scale.x).toBeGreaterThan(0)
-  expect(mesh.scale.y).toBeGreaterThan(0)
-  expect(Math.max(...radii)).toBeLessThan(whiteKeyWidth * 2)
   for (const finger of [1, 2, 3, 4, 5] as const) {
-    const lastBone = (finger - 1) * 3 + 2
-    const x = bones[lastBone * 4 + 2]
-    const y = bones[lastBone * 4 + 3]
-    expect(x).toBeCloseTo(pose.fingers[finger].tip.x * currentLayout.viewportWidth, 3)
-    expect(y).toBeCloseTo(currentLayout.viewportHeight - currentLayout.keyboardY - (pose.fingers[finger].tip.depth - pose.fingers[finger].tip.height * 0.25) * currentLayout.keyboardHeight, 3)
-    // The hand quad must contain every fingertip, including wide chords.
-    expect(x).toBeGreaterThan(mesh.position.x - mesh.scale.x / 2)
-    expect(x).toBeLessThan(mesh.position.x + mesh.scale.x / 2)
-    expect(y).toBeGreaterThan(mesh.position.y - mesh.scale.y / 2)
-    expect(y).toBeLessThan(mesh.position.y + mesh.scale.y / 2)
+    const tip = mesh.skeleton.bones.find(b => b.name === `finger-${finger}-3`)!.getWorldPosition(new Vector3())
+    expect([tip.x, tip.y, tip.z].every(Number.isFinite)).toBe(true)
+    expect(tip.x / 8 * currentLayout.viewportWidth).toBeCloseTo(pose.fingers[finger].tip.x * currentLayout.viewportWidth, 3)
+    expect(-tip.y).toBeCloseTo(pose.fingers[finger].tip.depth, 6)
+    expect(tip.z).toBeCloseTo(pose.fingers[finger].tip.height, 6)
   }
 }
 

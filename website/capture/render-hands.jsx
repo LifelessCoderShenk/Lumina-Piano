@@ -34,6 +34,8 @@ button.onclick=async()=>{
    s.handVisualization={enabled:true,opacity:65}
    s.visualizerSettings={...s.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:30}
   })
+  // Let React apply the generated-hand layout before taking the export snapshot.
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
   const engine=new ExportEngine()
   engine.onProgress(p=>{button.textContent=`Rendering ${Math.round(p.progress*100)}%`})
   await engine.export({outputPath:'/capture/workflow-performance.mp4',includeAudio:true})

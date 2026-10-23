@@ -48,6 +48,8 @@ export interface HandMotionTimeline {
 
 export interface FingerPose {
   contactAmount: number
+  /** Distance from requested contact in planner units; nonzero when anatomically unreachable. */
+  reachError?: number
   finger: PianoFinger
   joints: [HandSpacePoint, HandSpacePoint, HandSpacePoint, HandSpacePoint]
   pressed: boolean
@@ -59,6 +61,9 @@ export interface GhostHandPose {
   fingers: Record<PianoFinger, FingerPose>
   hand: PianoHand
   visible: boolean
+  /** Wrist flexion and forearm rotation in radians. */
+  pitch?: number
+  roll?: number
   wrist: HandSpacePoint
   yaw: number
 }
@@ -226,7 +231,7 @@ function buildWristTargets(
     const span = Math.max(...pitches) - Math.min(...pitches)
     return {
       position: {
-        depth: 1.06 + (unique.reduce((sum, event) => sum + event.contact.depth, 0) / unique.length - 0.54) * 0.2,
+        depth: 1.06 + (unique.reduce((sum, event) => sum + event.contact.depth, 0) / unique.length - 0.54),
         height: 0.2 + Math.min(0.045, span * 0.003),
         x: clamp(settledX, 0.025, 0.975),
       },
@@ -246,25 +251,32 @@ function sampleHand(
   for (const finger of FINGERS) {
     targets[finger] = sampleFingerTarget(track, finger, wristSample.position, tick)
   }
+  const support = FINGERS.reduce((sum, finger) => sum + targets[finger].contactAmount * (finger - 3), 0)
+  const pitch = (wristSample.position.height - 0.2) * 0.8
+  const roll = clamp(support * 0.018, -0.07, 0.07) * (track.hand === 'right' ? 1 : -1)
   const fingers = {} as Record<PianoFinger, FingerPose>
   for (const finger of FINGERS) {
     const target = targets[finger]
     const restingTip = followNeighboringFingers(track.hand, finger, wristSample.position, targets)
-    const tip = rotateAroundWrist(restingTip, wristSample.position, wristSample.yaw * (1 - target.contactAmount))
+    const tip = rotateAroundWrist(restingTip, wristSample.position, wristSample.yaw * (1 - target.contactAmount), pitch * (1 - target.contactAmount), roll * (1 - target.contactAmount))
     const curl = 0.52 - target.contactAmount * 0.24
+    const joints = buildFingerJoints(track.hand, finger, wristSample.position, tip, curl, wristSample.yaw, pitch, roll)
     fingers[finger] = {
+      reachError: Math.hypot((joints[3].x - tip.x) * 8, joints[3].depth - tip.depth, joints[3].height - tip.height),
       contactAmount: target.contactAmount,
       finger,
-      joints: buildFingerJoints(track.hand, finger, wristSample.position, tip, curl, wristSample.yaw),
-      pressed: target.pressed,
+      joints,
+      pressed: target.pressed && Math.hypot((joints[3].x - tip.x) * 8, joints[3].depth - tip.depth, joints[3].height - tip.height) < 0.001,
       targetPitch: target.targetPitch,
-      tip,
+      tip: joints[3],
     }
   }
   return {
     fingers,
     hand: track.hand,
     visible: track.wristTargets.length > 0,
+    pitch,
+    roll,
     wrist: wristSample.position,
     yaw: wristSample.yaw,
   }
@@ -384,25 +396,32 @@ function buildFingerJoints(
   tip: HandSpacePoint,
   curl: number,
   yaw: number,
+  pitch: number,
+  roll: number,
 ): [HandSpacePoint, HandSpacePoint, HandSpacePoint, HandSpacePoint] {
   const root = rotateAroundWrist({
     depth: wrist.depth - ({ 1: 0.12, 2: 0.24, 3: 0.27, 4: 0.25, 5: 0.19 }[finger]),
     height: wrist.height - (finger === 1 ? 0.035 : 0.02),
     x: wrist.x + fingerRestOffsetX(hand, finger) * (finger === 1 ? 0.92 : 0.9),
-  }, wrist, yaw)
+  }, wrist, yaw, pitch, roll)
   return articulateFinger(root, tip, finger, hand, curl)
 }
 
-function rotateAroundWrist(point: HandSpacePoint, wrist: HandSpacePoint, angle: number): HandSpacePoint {
-  const x = (point.x - wrist.x) * 8
-  const depth = point.depth - wrist.depth
-  const c = Math.cos(angle), s = Math.sin(angle)
-  return { ...point, x: wrist.x + (x * c - depth * s) / 8, depth: wrist.depth + x * s + depth * c }
+function rotateAroundWrist(point: HandSpacePoint, wrist: HandSpacePoint, angle: number, pitch = 0, roll = 0): HandSpacePoint {
+  if (angle === 0 && pitch === 0 && roll === 0) return { ...point }
+  // Same rotation order as the render skeleton, using y = -depth.
+  const x = (point.x - wrist.x) * 8, y = wrist.depth - point.depth, z = point.height - wrist.height
+  const rx = x * Math.cos(roll) + z * Math.sin(roll)
+  const rz = -x * Math.sin(roll) + z * Math.cos(roll)
+  const py = y * Math.cos(pitch) - rz * Math.sin(pitch)
+  const pz = y * Math.sin(pitch) + rz * Math.cos(pitch)
+  return { x: wrist.x + (rx * Math.cos(angle) + py * Math.sin(angle)) / 8,
+    depth: wrist.depth - (-rx * Math.sin(angle) + py * Math.cos(angle)), height: wrist.height + pz }
 }
 
 /** Solve three phalanges in a bending plane with fixed length ratios. Convert
  * keyboard-width coordinates into the same approximate scale as key depth first.
- * Unreachable MIDI assignments extend proportionally rather than losing contact. */
+ * Unreachable assignments stop at the anatomical limit rather than stretching bones. */
 function articulateFinger(
   root: HandSpacePoint, tip: HandSpacePoint, finger: PianoFinger, hand: PianoHand, curl: number,
 ): [HandSpacePoint, HandSpacePoint, HandSpacePoint, HandSpacePoint] {
@@ -411,7 +430,7 @@ function articulateFinger(
   const dz = tip.height - root.height
   const distance = Math.max(0.000001, Math.hypot(dx, dy, dz))
   const direction = [dx / distance, dy / distance, dz / distance]
-  const preferred = [finger === 1 ? (hand === 'right' ? -1 : 1) * (0.4 + curl) : 0, 0, 1]
+  const preferred = [finger === 1 ? (hand === 'right' ? -1 : 1) * (0.10 + curl * 0.12) : 0, 0, 1]
   const projection = preferred.reduce((sum, value, i) => sum + value * direction[i], 0)
   let normal = preferred.map((value, i) => value - projection * direction[i])
   let normalLength = Math.hypot(...normal)
@@ -427,7 +446,7 @@ function articulateFinger(
     along: (lengths[0] + lengths[2]) * Math.cos(bend) + lengths[1],
     across: (lengths[0] - lengths[2]) * Math.sin(bend),
   })
-  let low = 0, high = 1.65
+  let low = 0, high = finger === 1 ? 1.35 : 1.6
   for (let i = 0; i < 24; i++) {
     const middle = (low + high) / 2
     const vector = resultant(middle)
@@ -437,24 +456,29 @@ function articulateFinger(
   const bend = (low + high) / 2
   const vector = resultant(bend)
   const rotation = Math.atan2(vector.across, vector.along)
-  const scale = distance / Math.hypot(vector.along, vector.across)
+  const reach = Math.hypot(vector.along, vector.across)
   const joints: HandSpacePoint[] = [{ ...root }]
   let point = [root.x * 8, root.depth, root.height]
   for (let i = 0; i < 2; i++) {
     const angle = (1 - i) * bend - rotation
-    point = point.map((value, axis) => value + lengths[i] * scale * (
+    point = point.map((value, axis) => value + lengths[i] * (
       direction[axis] * Math.cos(angle) + normal[axis] * Math.sin(angle)
     ))
     joints.push({ x: point[0] / 8, depth: point[1], height: point[2] })
   }
-  return [joints[0], joints[1], joints[2], { ...tip }]
+  const reachableTip = Math.abs(reach - distance) < 0.000001 ? { ...tip } : {
+    x: root.x + direction[0] * reach / 8,
+    depth: root.depth + direction[1] * reach,
+    height: root.height + direction[2] * reach,
+  }
+  return [joints[0], joints[1], joints[2], reachableTip]
 }
 
 function getRestTip(hand: PianoHand, finger: PianoFinger, wrist: HandSpacePoint): HandSpacePoint {
   return {
     // A relaxed arch: long fingers flex toward the palm, the little finger
     // stays shorter, and the thumb rests beside the index instead of flaring.
-    depth: wrist.depth - ({ 1: 0.31, 2: 0.43, 3: 0.46, 4: 0.43, 5: 0.35 }[finger]),
+    depth: wrist.depth - ({ 1: 0.43, 2: 0.43, 3: 0.46, 4: 0.43, 5: 0.35 }[finger]),
     height: wrist.height - ({ 1: 0.085, 2: 0.11, 3: 0.12, 4: 0.115, 5: 0.10 }[finger]),
     x: wrist.x + fingerRestOffsetX(hand, finger) * (finger === 1 ? 0.80 : 0.86),
   }

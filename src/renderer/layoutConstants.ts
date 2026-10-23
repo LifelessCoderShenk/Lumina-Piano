@@ -35,6 +35,8 @@ export interface KeyboardLayoutMetrics {
 
 export interface RenderLayoutContext {
   keyboardHeightRatio: number
+  /** Space below the keyboard for the generated wrists and forearms. */
+  keyboardBottomInsetRatio?: number
   /** Offline export preserves the live frame proportion instead of the live-height cap. */
   preserveKeyboardHeightRatio?: boolean
   /**
@@ -57,6 +59,8 @@ export function normalizeRenderLayoutContext(
     keyboardHeightRatio: Number.isFinite(keyboardHeightRatio)
       ? Math.min(0.8, Math.max(0.1, keyboardHeightRatio as number))
       : DEFAULT_KEYBOARD_HEIGHT_RATIO,
+    keyboardBottomInsetRatio: Number.isFinite(context?.keyboardBottomInsetRatio)
+      ? Math.min(0.2, Math.max(0, context!.keyboardBottomInsetRatio!)) : 0,
     preserveKeyboardHeightRatio: context?.preserveKeyboardHeightRatio === true,
     noteFieldTravelSeconds: Number.isFinite(context?.noteFieldTravelSeconds)
       ? Math.min(20, Math.max(0.25, context?.noteFieldTravelSeconds as number))
@@ -69,7 +73,7 @@ export function getKeyboardLayoutMetrics(
   layoutContext: Partial<RenderLayoutContext> = DEFAULT_RENDER_LAYOUT_CONTEXT,
 ): KeyboardLayoutMetrics {
   const safeCanvasHeight = Number.isFinite(canvasHeight) ? Math.max(0, Math.round(canvasHeight)) : 0
-  const { keyboardHeightRatio, preserveKeyboardHeightRatio } = normalizeRenderLayoutContext(layoutContext)
+  const { keyboardHeightRatio, preserveKeyboardHeightRatio, keyboardBottomInsetRatio } = normalizeRenderLayoutContext(layoutContext)
   const ratioHeight = Math.round(safeCanvasHeight * keyboardHeightRatio)
   // Normal interactive canvases retain the original compact keyboard height.
   // Export supplies an explicit layout snapshot and preserves its proportion.
@@ -77,7 +81,7 @@ export function getKeyboardLayoutMetrics(
     preserveKeyboardHeightRatio ? ratioHeight : Math.min(KEYBOARD_HEIGHT, ratioHeight),
     safeCanvasHeight,
   )
-  const keyboardY = Math.max(0, safeCanvasHeight - keyboardHeight)
+  const keyboardY = Math.max(0, safeCanvasHeight - keyboardHeight - Math.round(safeCanvasHeight * (keyboardBottomInsetRatio ?? 0)))
 
   return {
     keyboardHeight,

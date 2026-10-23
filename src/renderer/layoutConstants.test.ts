@@ -7,6 +7,14 @@ import {
 } from './layoutConstants'
 
 describe('Create render layout context', () => {
+  it('reserves wrist space without stretching keys and preserves it during export', () => {
+    const context = {keyboardHeightRatio:0.22,keyboardBottomInsetRatio:0.12,preserveKeyboardHeightRatio:true}
+    const normal = getKeyboardLayoutMetrics(1080,{...context,keyboardBottomInsetRatio:0})
+    const hands = getKeyboardLayoutMetrics(1080,context)
+    expect(hands.keyboardHeight).toBe(normal.keyboardHeight)
+    expect(normal.keyboardY-hands.keyboardY).toBe(130)
+    expect(getKeyboardLayoutMetrics(2160,context).keyboardY).toBe(1426)
+  })
   it.each([
     [720, 270],
     [1080, 270],

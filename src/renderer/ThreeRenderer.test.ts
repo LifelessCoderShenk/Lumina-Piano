@@ -53,7 +53,8 @@ const mockPlaybackEngineOff = vi.hoisted(() => vi.fn())
 const mockPlaybackSeekListeners = vi.hoisted(() => new Set<(tick: number) => void>())
 const createdMeshMaterials = vi.hoisted(() => [] as Array<{ map?: unknown; opacity: number }>)
 
-vi.mock('three', () => {
+vi.mock('three', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('three')>()
   const ACESFilmicToneMapping = 'ACESFilmicToneMapping'
   const AdditiveBlending = 'AdditiveBlending'
   const LinearFilter = 'LinearFilter'
@@ -93,23 +94,8 @@ vi.mock('three', () => {
     ) {}
   }
 
-  class BufferGeometry {
-    attributes: Record<string, BufferAttribute> = {}
-    drawRange = {
-      count: 0,
-      start: 0,
-    }
-
+  class BufferGeometry extends actual.BufferGeometry {
     dispose = mockBufferGeometryDispose
-
-    setAttribute(name: string, attribute: BufferAttribute) {
-      this.attributes[name] = attribute
-      return this
-    }
-
-    setDrawRange(start: number, count: number) {
-      this.drawRange = { count, start }
-    }
   }
 
   class Color {
@@ -262,25 +248,7 @@ vi.mock('three', () => {
     dispose = mockSpriteMaterialDispose
   }
 
-  class ShaderMaterial {
-    fragmentShader: string
-    needsUpdate = false
-    transparent: boolean
-    uniforms: Record<string, { value: unknown }>
-    vertexShader: string
-
-    constructor(options: {
-      fragmentShader?: string
-      transparent?: boolean
-      uniforms?: Record<string, { value: unknown }>
-      vertexShader?: string
-    }) {
-      this.fragmentShader = options.fragmentShader ?? ''
-      this.transparent = options.transparent ?? false
-      this.uniforms = options.uniforms ?? {}
-      this.vertexShader = options.vertexShader ?? ''
-    }
-
+  class ShaderMaterial extends actual.ShaderMaterial {
     dispose = mockShaderMaterialDispose
   }
 
@@ -403,11 +371,13 @@ vi.mock('three', () => {
   }
 
   return {
+    ...actual,
     ACESFilmicToneMapping,
     AdditiveBlending,
     AmbientLight,
     BufferAttribute,
     BufferGeometry,
+    // GhostHandsLayer geometry is tested separately with real Three.js.
     CanvasTexture,
     Color,
     Group,
@@ -1177,7 +1147,7 @@ describe('ThreeRenderer', () => {
 
     const layer = (renderer as any).ghostHandsLayer
     expect(layer.group.visible).toBe(true)
-    expect(layer.hands.right.group.visible).toBe(true)
+    expect(layer.hands.right.mesh.visible).toBe(true)
     expect(layer.hands.right.material.uniforms.ghostOpacity.value).toBeCloseTo(0.42)
 
     renderer.setKeyboardOnly(true)
@@ -1202,43 +1172,32 @@ describe('ThreeRenderer', () => {
     Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
     await renderer.init(canvas)
     const layer = (renderer as any).ghostHandsLayer
-    const visibleContacts = () => ['left', 'right'].flatMap((hand) => (
-      Object.values(layer.hands[hand].contactNodes) as Array<{
-        position: { x: number; y: number }
-        visible: boolean
-      }>
-    )).filter(({ visible }) => visible)
-
+    const handGeometry = () => ['left', 'right'].map(hand => [...layer.hands[hand].rig.skeleton.boneMatrices])
     renderer.renderFrame(240)
-    const loopContact = visibleContacts()[0]
-    expect(loopContact).toBeDefined()
-    const initialLoopPosition = { x: loopContact.position.x, y: loopContact.position.y }
-
+    const initialGeometry = handGeometry()
     renderer.renderFrame(700)
-    expect(visibleContacts()).toHaveLength(0)
+    expect(handGeometry()).not.toEqual(initialGeometry)
     renderer.renderFrame(240)
-    expect(visibleContacts()[0]?.position).toMatchObject(initialLoopPosition)
+    expect(handGeometry()).toEqual(initialGeometry)
 
     renderer.setReviewTimelineTick(960)
-    expect(visibleContacts()).toHaveLength(1)
-    expect(visibleContacts()[0].position.x).not.toBe(initialLoopPosition.x)
+    expect(handGeometry()).not.toEqual(initialGeometry)
     renderer.setReviewTimelineTick(null)
-    expect(visibleContacts()[0]?.position).toMatchObject(initialLoopPosition)
+    expect(handGeometry()).toEqual(initialGeometry)
 
     renderer.beginOfflineRender()
     renderer.resize(1_080, 1_920, { layoutContext: { keyboardHeightRatio: 0.375 } })
     renderer.renderFrame(240, { animationTimeSeconds: 0 })
-    const portraitPalm = layer.hands.left.group.visible
-      ? layer.hands.left.palm
-      : layer.hands.right.palm
-    expect(portraitPalm.position.x - portraitPalm.scale.x / 2).toBeGreaterThanOrEqual(0)
-    expect(portraitPalm.position.x + portraitPalm.scale.x / 2).toBeLessThanOrEqual(1_080)
+    for (const hand of ['left', 'right']) {
+      if (!layer.hands[hand].mesh.visible) continue
+      expect(layer.hands[hand].material.uniforms.layoutScale.value.x).toBe(1_080 / 8)
+    }
 
     useAppStore.getState().setHandVisualization({ enabled: false })
     expect(layer.group.visible).toBe(false)
     useAppStore.getState().setHandVisualization({ enabled: true })
     expect(layer.group.visible).toBe(true)
-    expect(visibleContacts()).toHaveLength(1)
+    expect(handGeometry().flat().every(Number.isFinite)).toBe(true)
     renderer.endOfflineRender()
   })
 
@@ -2704,10 +2663,10 @@ void main() {
 
     expect(mockGroupRemove).toHaveBeenCalled()
     expect(mockCanvasTextureDispose).toHaveBeenCalledTimes(15)
-    expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(1)
+    expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(3) // Particle geometry and two owned hand meshes.
     expect(mockMeshBasicMaterialDispose).toHaveBeenCalled()
     expect(mockMeshLambertMaterialDispose).toHaveBeenCalled()
-    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(282)
+    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(282) // Includes both hand depth prepasses.
     expect(mockSpriteMaterialDispose).toHaveBeenCalledTimes(88)
     expect(mockUnrealBloomPassDispose).toHaveBeenCalledTimes(1)
     expect(mockOutputPassDispose).toHaveBeenCalledTimes(1)

@@ -968,6 +968,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       this.effectivePixelRatio === nextEffectivePixelRatio &&
       this.postprocessScale === nextPostprocessScale &&
       this.layoutContext.keyboardHeightRatio === nextLayoutContext.keyboardHeightRatio &&
+      this.layoutContext.keyboardBottomInsetRatio === nextLayoutContext.keyboardBottomInsetRatio &&
       this.layoutContext.preserveKeyboardHeightRatio === nextLayoutContext.preserveKeyboardHeightRatio &&
       this.layoutContext.noteFieldTravelSeconds === nextLayoutContext.noteFieldTravelSeconds
     ) {
@@ -1082,6 +1083,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       keyboardHeightRatio: keyboardHeight / Math.max(1, this.viewportHeight),
       preserveKeyboardHeightRatio: true,
       noteFieldTravelSeconds: this.layoutContext.noteFieldTravelSeconds,
+      keyboardBottomInsetRatio: this.layoutContext.keyboardBottomInsetRatio,
     }
   }
 

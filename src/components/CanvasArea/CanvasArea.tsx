@@ -121,6 +121,8 @@ export function CanvasArea({
   const heldPointerKeyRef = useRef<HeldPointerKey | null>(null)
   const [frameSize, setFrameSize] = useState<CanvasDimensions>({ width: 0, height: 0 })
   const appMode = useAppStore((state) => state.appMode)
+  const showGeneratedHands = useAppStore((state) => state.handVisualization.enabled)
+  const handBottomInset = engine === 'three' && appMode === 'create' && showGeneratedHands ? 0.12 : 0
   const storedAspectRatio = useAppStore((state) => state.visualizerSettings.aspectRatio)
   const aspectRatio = aspectRatioOverride ?? storedAspectRatio
   const isPlaybackRunning = useAppStore((state) => state.isPlaying)
@@ -133,9 +135,10 @@ export function CanvasArea({
   const isPointerKeyboardEnabled = keyboardPointerEnabled ?? appMode === 'create'
   const activeRenderer: ActiveVisualizerRenderer = engine === 'three' ? threeRenderer : renderer
 
-  layoutContextRef.current = keyboardHeightRatio == null && noteFieldTravelSeconds == null
+  layoutContextRef.current = keyboardHeightRatio == null && noteFieldTravelSeconds == null && engine !== 'three'
     ? null
     : {
+        keyboardBottomInsetRatio: handBottomInset,
         ...(keyboardHeightRatio == null ? {} : { keyboardHeightRatio, preserveKeyboardHeightRatio: true }),
         ...(noteFieldTravelSeconds == null ? {} : { noteFieldTravelSeconds }),
       }
@@ -630,7 +633,7 @@ export function CanvasArea({
         cancelAnimationFrame(resizeInnerFrameId)
       }
     }
-  }, [activeRenderer, aspectRatio, keyboardHeightRatio, noteFieldTravelSeconds])
+  }, [activeRenderer, aspectRatio, keyboardHeightRatio, noteFieldTravelSeconds, handBottomInset])
 
   useEffect(() => {
     const size = lastAppliedRenderSizeRef.current
@@ -642,7 +645,7 @@ export function CanvasArea({
     } else {
       activeRenderer.resize(size.width, size.height, { layoutContext })
     }
-  }, [activeRenderer, keyboardHeightRatio, noteFieldTravelSeconds])
+  }, [activeRenderer, keyboardHeightRatio, noteFieldTravelSeconds, handBottomInset])
 
   const handleWindowExpand = async () => {
     const maximizeWindow = window.electronAPI?.window?.maximize
