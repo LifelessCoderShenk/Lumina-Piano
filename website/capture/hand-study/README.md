@@ -7,7 +7,11 @@ npx vite --config website/capture/vite.config.mjs --host 127.0.0.1 --port 5176 -
 ```
 
 Open http://127.0.0.1:5176/website/capture/hand-study/index.html.
-Playback is silent, starts paused, and stops at ten seconds. Select scales,
+The default mode now plays both hands on the first six seconds of the existing
+original `website/public/media/lumina-miniature.mid`. Playback is silent.
+The second performance mode transposes the same notes up two semitones to
+exercise black-key reach. Gold highlights identify left-hand notes, blue right.
+Playback is silent, starts paused, and stops at the end of the selected exercise. Select scales,
 chords or thumb crossings, scrub the timeline, change viewing angle, and enable
 contact targets. **Check all exercises** samples held fingertip contact errors
 at 60 samples per second. It is a diagnostic, not a realism certification.
@@ -31,7 +35,7 @@ until near release rather than dragging a held fingertip across the keyboard.
 
 This is a generic hand asset with authored motion, not pianist motion capture.
 It is deliberately not integrated with the app renderer or Showcase videos.
-It currently covers one right hand and three fixed white-key exercises.
+It covers the original three right-hand exercises and a fixed two-hand MIDI excerpt.
 There is no forearm, finger collision solver, key depression, or learned
 fingering. Joint bounds are prototype parameters, not a validated anatomical
 model. Smooth contacts do not guarantee natural poses or velocity.
@@ -57,10 +61,48 @@ fixed, checks finite poses, tests out-of-order scrubbing, and checks that the
 resting thumb stays below the wrist and beside the palm. These tolerances cover
 these three exercises only; they do not certify arbitrary MIDI or realism.
 
-Production integration still requires general MIDI phrase planning, both hands,
+Production integration still requires general MIDI phrase planning,
 collision handling and visual review of a wider repertoire. No Showcase video
 was replaced by this isolated study.
 
 Checks: ESLint for study.js and the motion modules; standalone Vite production build (esnext target).
 The build bundles the GLB and warns about the Three.js bundle exceeding 500 kB.
 No dependency was added.
+
+## Two-hand MIDI study (2026-10-25)
+
+`midi-performance.ts` uses the app's MIDI parser, tempo map and fingering planner
+as a seed. The excerpt's non-overlapping bass/melody registers define the hands;
+the parser merges source tracks sharing a channel, so track index is not used.
+A bounded beam search refines finger choices for this mesh, reserving held
+fingers and penalizing wrist travel and incompatible simultaneous reach.
+No MIDI note is dropped, shortened or delayed: 16 accompaniment and 8 melody
+notes retain their original timing, with a one-second lead-in.
+
+The left hand mirrors the licensed right-hand asset in a dedicated group. Its
+solver uses reflected key coordinates, then the group is reflected for display.
+The regression check verifies the actual reflected fingertip coordinates.
+Pose anchors include note-on and note-off boundaries, preserving overlapping
+notes rather than treating each onset as an isolated gesture.
+
+Measured maximum contact error over 60 Hz playback:
+
+| Version | Left | Right |
+| --- | ---: | ---: |
+| Original excerpt | 8.45 mm | 0.002 mm |
+| Transposed +2 | 10.46 mm | 0.135 mm |
+
+The wider left-hand changes are still outside the original exercise's 3 mm
+target. This exposes a remaining reach/pose-planning limitation; it is not a
+production-quality gate passing. Finger collisions and forearms are not yet
+implemented, and the Showcase renderer remains unchanged.
+
+Run the MIDI checks from the repository root (uses existing esbuild):
+
+```powershell
+node node_modules/esbuild/bin/esbuild website/capture/hand-study/check-performance.ts --bundle --platform=node --format=esm --external:three --external:three/* --outfile=.tmp/check-performance.mjs
+node .tmp/check-performance.mjs
+```
+
+These checks verify note count, non-conflicting finger occupancy, finite poses
+and left/right reflection, and report contact error and maximum wrist step.

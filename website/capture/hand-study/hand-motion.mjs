@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export function createHandMotion(model, scene, keys) {
+export function createHandMotion(model, scene, keys, options = {}) {
   const targets = Array.from({ length: 5 }, () => {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.003, 10, 8),
@@ -110,8 +110,8 @@ export function createHandMotion(model, scene, keys) {
           rest: bone.quaternion.clone(),
           axis: new THREE.Vector3(0, 1, 0).applyQuaternion(inv),
           angle: 0,
-          min: i === 0 ? -0.8 : -0.24,
-          max: i === 0 ? 0.8 : 0.24,
+          min: i === 0 ? -1.1 : -0.45,
+          max: i === 0 ? 1.1 : 0.45,
           restAngle: 0,
         });
       if (i === 0 && j === 0)
@@ -145,6 +145,7 @@ export function createHandMotion(model, scene, keys) {
   };
   const clamp = THREE.MathUtils.clamp;
   function sequence(exercise) {
+    if (options.sequences?.[exercise]) return options.sequences[exercise];
     if (exercise === "chords")
       return [
         [60, 64, 67],
@@ -182,8 +183,8 @@ export function createHandMotion(model, scene, keys) {
       key.black ? -0.09 : [-0.012, -0.055, -0.065, -0.055, -0.035][finger],
     );
   }
-  function solve(spec, target, weight) {
-    for (let iter = 0; iter < 28; iter++) {
+  function solve(spec, target, weight, iterations = 28) {
+    for (let iter = 0; iter < iterations; iter++) {
       for (const d of spec.dofs) {
         const old = d.angle,
           tip = spec.tip.getWorldPosition(new THREE.Vector3()),
@@ -244,6 +245,20 @@ export function createHandMotion(model, scene, keys) {
         break;
       }
     }
+    if (options.sequences?.[exercise]) {
+      const active = events.filter((e) => t >= e.start && t < e.end);
+      const group = active.length
+        ? active
+        : [events.find((e) => e.start > t) ?? events.at(-1)];
+      x =
+        group.reduce(
+          (sum, e) =>
+            sum +
+            keyContact(e.pitch).x -
+            [-0.025, -0.024, 0, 0.028, 0.05][e.finger],
+          0,
+        ) / group.length;
+    }
     model.position.x = x - wristBind.x;
     model.position.y = 0.047 - wristBind.y;
     model.position.z = 0.052 - wristBind.z;
@@ -290,11 +305,13 @@ export function createHandMotion(model, scene, keys) {
         let target = rest,
           weight = 0,
           active = false;
-        const upcoming = events
-          .filter(
-            (e) => e.finger === i && t >= e.start - 0.3 && t <= e.end + 0.26,
-          )
-          .at(-1);
+        const upcoming =
+          events.find((e) => e.finger === i && t >= e.start && t < e.end) ??
+          events
+            .filter(
+              (e) => e.finger === i && t >= e.start - 0.3 && t <= e.end + 0.26,
+            )
+            .at(-1);
         if (upcoming) {
           active = t >= upcoming.start && t <= upcoming.end;
           weight =
@@ -357,6 +374,24 @@ export function createHandMotion(model, scene, keys) {
   function getClip(exercise) {
     if (clips.has(exercise)) return clips.get(exercise);
     const events = sequence(exercise);
+    if (options.sequences?.[exercise]) {
+      const boundaries = [
+        ...new Set(events.flatMap((e) => [e.start, e.end])),
+      ].sort((a, b) => a - b);
+      const groups = boundaries.slice(0, -1).map((start, i) => ({
+        start,
+        end: boundaries[i + 1],
+        pose: capture((start + boundaries[i + 1]) / 2, exercise),
+      }));
+      const clip = {
+        groups,
+        restStart: capture(0, exercise),
+        restEnd: capture(boundaries.at(-1) + 0.5, exercise),
+        performance: true,
+      };
+      clips.set(exercise, clip);
+      return clip;
+    }
     const groups = [...new Set(events.map((event) => event.start))].map(
       (start) => {
         const notes = events.filter((event) => event.start === start);
@@ -381,7 +416,25 @@ export function createHandMotion(model, scene, keys) {
     let from = clip.restStart,
       to = groups[0].pose,
       blend = ease((t - (groups[0].start - 0.3)) / 0.3);
-    for (let i = 0; i < groups.length; i++) {
+    if (clip.performance) {
+      const anchors = [
+        { time: groups[0].start - 0.25, pose: clip.restStart },
+        ...groups.map((g) => ({ time: (g.start + g.end) / 2, pose: g.pose })),
+        { time: groups.at(-1).end, pose: groups.at(-1).pose },
+        { time: groups.at(-1).end + 0.35, pose: clip.restEnd },
+      ];
+      let index = anchors.findIndex((anchor) => anchor.time >= t);
+      if (index < 0) index = anchors.length - 1;
+      const before = anchors[Math.max(0, index - 1)],
+        after = anchors[index];
+      from = before.pose;
+      to = after.pose;
+      blend =
+        before === after
+          ? 0
+          : ease((t - before.time) / (after.time - before.time));
+    }
+    for (let i = 0; !clip.performance && i < groups.length; i++) {
       const group = groups[i];
       if (t >= group.start + 0.05 && t <= group.end - 0.05) {
         from = to = group.pose;
@@ -413,6 +466,49 @@ export function createHandMotion(model, scene, keys) {
       }),
     );
     model.updateMatrixWorld(true);
+    if (clip.performance) {
+      const base = model.position.clone();
+      for (let pass = 0; pass < 8; pass++) {
+        const correction = new THREE.Vector3();
+        let total = 0;
+        for (let finger = 0; finger < 5; finger++) {
+          const event =
+            sequence(exercise).find(
+              (e) => e.finger === finger && t >= e.start && t < e.end,
+            ) ??
+            sequence(exercise).find(
+              (e) =>
+                e.finger === finger && t >= e.start - 0.12 && t < e.end + 0.12,
+            );
+          if (!event) continue;
+          const weight =
+            t < event.start
+              ? ease((t - event.start + 0.12) / 0.12)
+              : t >= event.end
+                ? 1 - ease((t - event.end) / 0.12)
+                : 1;
+          const tip = specs[finger].tip.getWorldPosition(new THREE.Vector3());
+          const target = tip
+            .clone()
+            .lerp(keyContact(event.pitch, finger), weight);
+          solve(specs[finger], target, 1, 12);
+          correction.add(
+            target
+              .sub(specs[finger].tip.getWorldPosition(new THREE.Vector3()))
+              .multiplyScalar(weight),
+          );
+          total += weight;
+        }
+        if (total && pass < 7) {
+          model.position.add(
+            correction.multiplyScalar(0.7 / Math.max(1, total)),
+          );
+          const delta = model.position.clone().sub(base).clampLength(0, 0.03);
+          model.position.copy(base).add(delta);
+          model.updateMatrixWorld(true);
+        }
+      }
+    }
     mesh.skeleton.update();
     for (const { mesh: keyMesh, black } of keys.values())
       keyMesh.material.color.setHex(black ? 0x141619 : 0xe5e3dd);

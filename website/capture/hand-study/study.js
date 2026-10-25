@@ -2,6 +2,7 @@ import { createHandMotion } from "./hand-motion.mjs";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { planStudyPerformance } from "./midi-performance";
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#101115");
@@ -14,7 +15,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const viewport = document.querySelector("#viewport");
 viewport.append(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(36, 1, 0.005, 5);
-camera.position.set(0.22, 0.43, 0.38);
+camera.position.set(0.22, 0.6, 0.54);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, -0.025);
 controls.enableDamping = true;
@@ -35,10 +36,10 @@ light.shadow.bias = -0.0001;
 scene.add(light);
 const keys = new Map();
 const whitePitches = [];
-for (let pitch = 48; pitch <= 83; pitch++)
+for (let pitch = 36; pitch <= 95; pitch++)
   if (![1, 3, 6, 8, 10].includes(pitch % 12)) whitePitches.push(pitch);
 const keyWidth = 0.0235;
-for (let pitch = 48; pitch <= 83; pitch++) {
+for (let pitch = 36; pitch <= 95; pitch++) {
   const black = [1, 3, 6, 8, 10].includes(pitch % 12);
   const index = whitePitches.filter((p) => p < pitch).length;
   const x =
@@ -63,7 +64,40 @@ for (let pitch = 48; pitch <= 83; pitch++) {
 const loaded = await new GLTFLoader().loadAsync(
   new URL("./right.glb", import.meta.url).href,
 );
-const motion = createHandMotion(loaded.scene, scene, keys);
+const midiResponse = await fetch(
+  new URL("../../public/media/lumina-miniature.mid", import.meta.url),
+);
+if (!midiResponse.ok)
+  throw new Error("Could not load the original Lumina MIDI");
+const midiBytes = new Uint8Array(await midiResponse.arrayBuffer());
+const performances = {
+  performance: planStudyPerformance(midiBytes),
+  blackkeys: planStudyPerformance(midiBytes, 2),
+};
+const sequencesFor = (hand) =>
+  Object.fromEntries(
+    Object.entries(performances).map(([name, performance]) => [
+      name,
+      performance.events.filter((event) => event.hand === hand),
+    ]),
+  );
+const motion = createHandMotion(loaded.scene, scene, keys, {
+  sequences: sequencesFor("right"),
+});
+const leftAsset = await new GLTFLoader().loadAsync(
+  new URL("./right.glb", import.meta.url).href,
+);
+const leftRoot = new THREE.Group();
+scene.add(leftRoot);
+// Mirror the same licensed mesh and solve in its unmirrored coordinate frame.
+const leftKeys = new Map(
+  [...keys].map(([pitch, key]) => [pitch, { ...key, x: -key.x }]),
+);
+const leftMotion = createHandMotion(leftAsset.scene, leftRoot, leftKeys, {
+  sequences: sequencesFor("left"),
+});
+leftRoot.visible = false;
+const durationFor = (exercise) => performances[exercise]?.duration ?? 10;
 let time = 0,
   playing = false,
   previous = performance.now(),
@@ -74,6 +108,30 @@ function sample(t, exercise = document.querySelector("#exercise").value) {
     exercise,
     document.querySelector("#targets").checked,
   );
+  const performance = performances[exercise];
+  leftRoot.visible = !!performance;
+  if (performance) {
+    leftRoot.scale.x = 1;
+    leftRoot.updateMatrixWorld(true);
+    const left = leftMotion.sample(
+      t,
+      exercise,
+      document.querySelector("#targets").checked,
+    );
+    leftRoot.scale.x = -1;
+    leftRoot.updateMatrixWorld(true);
+    result.worst = Math.max(result.worst, left.worst);
+    result.held += left.held;
+    for (const { mesh, black } of keys.values())
+      mesh.material.color.setHex(black ? 0x141619 : 0xe5e3dd);
+    for (const event of performance.events)
+      if (t >= event.start && t < event.end)
+        keys
+          .get(event.pitch)
+          .mesh.material.color.setHex(
+            event.hand === "left" ? 0xd5ad80 : 0x8faec4,
+          );
+  }
   document.querySelector("#error").textContent = result.held
     ? `Contact error: ${(result.worst * 1000).toFixed(1)} mm`
     : "Rest / transition";
@@ -81,6 +139,9 @@ function sample(t, exercise = document.querySelector("#exercise").value) {
 }
 
 document.querySelector("#status").textContent = "Prototype · not production";
+document.querySelector("#time").max = String(
+  durationFor(document.querySelector("#exercise").value),
+);
 let auditing = false;
 document.querySelector("#audit").onclick = async () => {
   auditing = true;
@@ -93,17 +154,24 @@ document.querySelector("#audit").onclick = async () => {
   const report = document.querySelector("#audit-result");
   const results = [];
   try {
-    for (const exercise of ["scale", "chords", "crossing"]) {
+    for (const exercise of [
+      "scale",
+      "chords",
+      "crossing",
+      "performance",
+      "blackkeys",
+    ]) {
       let maximum = 0;
       let worstTime = 0;
-      for (let frame = 0; frame <= 600; frame++) {
+      const frames = Math.ceil(durationFor(exercise) * 60);
+      for (let frame = 0; frame <= frames; frame++) {
         const result = sample(frame / 60, exercise);
         if (result.worst > maximum) {
           maximum = result.worst;
           worstTime = frame / 60;
         }
         if (frame % 60 === 0) {
-          report.textContent = `Checking ${exercise}: ${Math.round(frame / 6)}%`;
+          report.textContent = `Checking ${exercise}: ${Math.round((frame / frames) * 100)}%`;
           await new Promise((resolve) => requestAnimationFrame(resolve));
         }
       }
@@ -121,7 +189,7 @@ document.querySelector("#audit").onclick = async () => {
   }
 };
 document.querySelector("#play").onclick = () => {
-  if (time === 10) time = 0;
+  if (time >= durationFor(document.querySelector("#exercise").value)) time = 0;
   playing = !playing;
   document.querySelector("#play").textContent = playing ? "Pause" : "Play";
 };
@@ -132,10 +200,13 @@ document.querySelector("#time").oninput = (e) => {
 };
 document.querySelector("#exercise").onchange = () => {
   time = 0;
+  document.querySelector("#time").max = String(
+    durationFor(document.querySelector("#exercise").value),
+  );
 };
 document.querySelector("#view").onclick = () => {
   top = !top;
-  camera.position.set(...(top ? [0, 0.65, 0.001] : [0.22, 0.43, 0.38]));
+  camera.position.set(...(top ? [0, 0.92, 0.001] : [0.22, 0.6, 0.54]));
   document.querySelector("#view").textContent = top
     ? "Angled view"
     : "Top view";
@@ -156,10 +227,10 @@ renderer.setAnimationLoop((now) => {
   if (auditing) return;
   if (playing) {
     time = Math.min(
-      10,
+      durationFor(document.querySelector("#exercise").value),
       time + dt * Number(document.querySelector("#speed").value),
     );
-    if (time === 10) {
+    if (time >= durationFor(document.querySelector("#exercise").value)) {
       playing = false;
       document.querySelector("#play").textContent = "Play";
     }

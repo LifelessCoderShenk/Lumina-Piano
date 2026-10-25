@@ -72,6 +72,10 @@
       <button id="play">Play</button
       ><select id="exercise" aria-label="Exercise">
         <option value="scale">C major scale</option>
+        <option value="performance" selected>
+          Lumina miniature · both hands
+        </option>
+        <option value="blackkeys">Lumina miniature · transposed +2</option>
         <option value="chords">Chord changes</option>
         <option value="crossing">Thumb crossing</option></select
       ><label
@@ -99,6 +103,9 @@
     <p class="note">
       Evaluation only. Motion is authored and solved from key targets, not
       captured from a pianist. Showcase and the app renderer are unchanged.
+      Both-hand modes use the first six seconds of the existing Lumina miniature
+      MIDI, with app-seeded fingering refined for hand reach. Gold keys: left
+      hand. Blue keys: right hand.
     </p>
     <script type="module" src="./study.js"></script>
   </body>
