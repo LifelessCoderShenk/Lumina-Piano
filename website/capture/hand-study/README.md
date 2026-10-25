@@ -10,7 +10,7 @@ Open http://127.0.0.1:5176/website/capture/hand-study/index.html.
 Playback is silent, starts paused, and stops at ten seconds. Select scales,
 chords or thumb crossings, scrub the timeline, change viewing angle, and enable
 contact targets. **Check all exercises** samples held fingertip contact errors
-every 0.1 seconds. It is a diagnostic, not a realism certification.
+at 60 samples per second. It is a diagnostic, not a realism certification.
 
 ## Model provenance
 
@@ -36,18 +36,31 @@ There is no forearm, finger collision solver, key depression, or learned
 fingering. Joint bounds are prototype parameters, not a validated anatomical
 model. Smooth contacts do not guarantee natural poses or velocity.
 
-Browser sweep on 2026-10-24, maximum held-contact error:
+The thumb now uses a lowered rest target beside the palm. Exercise poses are
+solved once and cached. Playback interpolates those poses with eased wrist
+translations and quaternion interpolation; held fingers receive contact
+correction during the 50 ms anticipation/release windows. Scrubbing produces
+the same pose as forward playback, without an accumulated simulation state.
+
+Regression sweep on 2026-10-24 at 60 Hz, maximum held-contact error:
 
 | Exercise | Maximum | Time |
 | --- | ---: | ---: |
-| Scale | 2.2 mm | 4.1 s |
-| Chords | 7.8 mm | 1.0 s |
-| Thumb crossing | 3.2 mm | 4.1 s |
+| Scale | 1.4 mm | 3.30 s |
+| Chords | 1.0 mm | 8.30 s |
+| Thumb crossing | 2.1 mm | 1.67 s |
 
-Chord fit, thumb posture, non-playing finger posture, and wrist velocity need
-further work before production integration. The 0.1-second sample interval can
-miss short transients; visually review slow playback and contact boundaries.
+Run `node website/capture/hand-study/check-motion.mjs` from the repository root.
+The regression check covers 1,803 frames, bounds held contact error below 3 mm,
+bounds wrist travel below 8 mm per 60 Hz frame, verifies bone offsets remain
+fixed, checks finite poses, tests out-of-order scrubbing, and checks that the
+resting thumb stays below the wrist and beside the palm. These tolerances cover
+these three exercises only; they do not certify arbitrary MIDI or realism.
 
-Checks: ESLint for study.js; standalone Vite production build (esnext target).
+Production integration still requires general MIDI phrase planning, both hands,
+collision handling and visual review of a wider repertoire. No Showcase video
+was replaced by this isolated study.
+
+Checks: ESLint for study.js and the motion modules; standalone Vite production build (esnext target).
 The build bundles the GLB and warns about the Three.js bundle exceeding 500 kB.
 No dependency was added.
