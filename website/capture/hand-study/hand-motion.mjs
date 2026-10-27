@@ -215,7 +215,7 @@ export function createHandMotion(model, scene, keys, options = {}) {
     // A continuous phrase path anticipates the next position. Key presses do not
     // independently drag the palm; thumb-under uses the thumb's own opposition.
     const centers = [];
-    for (const event of events) {
+    for (const event of options.sequences?.[exercise] ? [] : events) {
       const group = events.filter((e) => e.start === event.start);
       if (centers.some((c) => c.t === event.start - 0.05)) continue;
       centers.push({
@@ -231,7 +231,7 @@ export function createHandMotion(model, scene, keys, options = {}) {
           ) / group.length,
       });
     }
-    let x = centers[0].x;
+    let x = centers[0]?.x ?? 0;
     for (let i = 1; i < centers.length; i++) {
       if (t >= centers[i].t) x = centers[i].x;
       else {
@@ -378,10 +378,21 @@ export function createHandMotion(model, scene, keys, options = {}) {
       const boundaries = [
         ...new Set(events.flatMap((e) => [e.start, e.end])),
       ].sort((a, b) => a - b);
+      const poseCache = new Map();
+      const poseAt = (t) => {
+        if (!poseCache.has(t)) {
+          poseCache.set(t, capture(t, exercise));
+          if (poseCache.size > 64)
+            poseCache.delete(poseCache.keys().next().value);
+        }
+        return poseCache.get(t);
+      };
       const groups = boundaries.slice(0, -1).map((start, i) => ({
         start,
         end: boundaries[i + 1],
-        pose: capture((start + boundaries[i + 1]) / 2, exercise),
+        get pose() {
+          return poseAt((start + boundaries[i + 1]) / 2);
+        },
       }));
       const clip = {
         groups,
@@ -411,6 +422,19 @@ export function createHandMotion(model, scene, keys, options = {}) {
     return clip;
   }
   function playback(t, exercise = "scale", showTargets = false) {
+    if (!sequence(exercise).length) {
+      model.visible = false;
+      targets.forEach((target) => {
+        target.visible = false;
+      });
+      return {
+        worst: 0,
+        held: 0,
+        wristPosition: new THREE.Vector3(),
+        tips: [],
+      };
+    }
+    model.visible = true;
     const clip = getClip(exercise),
       groups = clip.groups;
     let from = clip.restStart,
@@ -419,8 +443,18 @@ export function createHandMotion(model, scene, keys, options = {}) {
     if (clip.performance) {
       const anchors = [
         { time: groups[0].start - 0.25, pose: clip.restStart },
-        ...groups.map((g) => ({ time: (g.start + g.end) / 2, pose: g.pose })),
-        { time: groups.at(-1).end, pose: groups.at(-1).pose },
+        ...groups.map((g) => ({
+          time: (g.start + g.end) / 2,
+          get pose() {
+            return g.pose;
+          },
+        })),
+        {
+          time: groups.at(-1).end,
+          get pose() {
+            return groups.at(-1).pose;
+          },
+        },
         { time: groups.at(-1).end + 0.35, pose: clip.restEnd },
       ];
       let index = anchors.findIndex((anchor) => anchor.time >= t);
@@ -540,5 +574,12 @@ export function createHandMotion(model, scene, keys, options = {}) {
       tips: specs.map((spec) => spec.tip.getWorldPosition(new THREE.Vector3())),
     };
   }
-  return { sample: playback };
+  return {
+    sample: playback,
+    setSequence(name, events) {
+      options.sequences ??= {};
+      options.sequences[name] = events;
+      clips.delete(name);
+    },
+  };
 }

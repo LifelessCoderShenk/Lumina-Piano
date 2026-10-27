@@ -4,16 +4,59 @@ import { buildTempoMap, tickToSeconds } from "../../../src/tempo/tempoMap";
 
 /** Six seconds of the existing original Lumina miniature, with a one-second lead-in. */
 export function planStudyPerformance(bytes: Uint8Array, transpose = 0) {
+  return planMidiPerformance(bytes, {
+    transpose,
+    excerptSeconds: 6,
+    splitPitch: 67 + transpose,
+    handMode: "split",
+  });
+}
+
+export interface MidiStudyOptions {
+  transpose?: number;
+  excerptSeconds?: number;
+  splitPitch?: number;
+  handMode?: "auto" | "split";
+}
+
+export function planMidiPerformance(
+  bytes: Uint8Array,
+  options: MidiStudyOptions = {},
+) {
+  const transpose = options.transpose ?? 0;
+  const splitPitch = options.splitPitch ?? 60;
+  if (bytes.byteLength > 10 * 1024 * 1024)
+    throw new Error("Choose a MIDI file smaller than 10 MB.");
   const project = parseMidi(bytes);
   const tempo = buildTempoMap(project.tempoMap, project.ticksPerQuarter);
   for (const track of project.tracks) {
     track.notes = track.notes.filter(
-      (note) => tickToSeconds(note.startTick, tempo) < 6,
+      (note) =>
+        tickToSeconds(note.startTick, tempo) <
+        (options.excerptSeconds ?? Infinity),
     );
     for (const note of track.notes) note.pitch += transpose;
   }
+  const notes = project.tracks.flatMap((track) => track.notes);
+  if (!notes.length) throw new Error("This MIDI contains no playable notes.");
+  if (notes.length > 4000)
+    throw new Error(
+      "This hand-study preview currently supports up to 4,000 notes. Choose a shorter MIDI.",
+    );
+  if (notes.some((note) => note.pitch < 21 || note.pitch > 108))
+    throw new Error(
+      "This MIDI contains notes outside the 88-key piano range (A0–C8).",
+    );
+  if (notes.some((note) => tickToSeconds(note.endTick, tempo) > 1800))
+    throw new Error(
+      "This hand-study preview supports MIDI performances up to 30 minutes.",
+    );
   // The miniature's accompaniment tops out at E4 and melody starts above it.
-  const plan = planPianoFingerings(project, { splitPitch: 67 + transpose });
+  const plan = planPianoFingerings(project, { splitPitch });
+  if (plan.issues.length)
+    throw new Error(
+      `The fingering planner found ${plan.issues.length} unplayable or conflicting note groups. Try a piano arrangement with fewer simultaneous notes.`,
+    );
   const events = project.tracks
     .flatMap((track) =>
       track.notes.map((note) => {
@@ -23,7 +66,12 @@ export function planStudyPerformance(bytes: Uint8Array, transpose = 0) {
           id: note.id,
           pitch: note.pitch,
           finger: assignment.finger - 1,
-          hand: note.pitch < 67 + transpose ? "left" : "right",
+          hand:
+            options.handMode === "split"
+              ? note.pitch < splitPitch
+                ? "left"
+                : "right"
+              : assignment.hand,
           start: 1 + tickToSeconds(note.startTick, tempo),
           end: 1 + tickToSeconds(note.endTick, tempo),
           velocity: note.velocity,
@@ -42,13 +90,14 @@ export function planStudyPerformance(bytes: Uint8Array, transpose = 0) {
       ];
       return sign * (Math.floor(pitch / 12) * 7 + semitone) * 0.0235;
     };
+    type Path = { finger: number; previous: Path | null };
     type State = {
       cost: number;
       wrist: number;
-      chosen: number[];
+      path: Path | null;
       active: { finger: number; end: number; anchor: number; pitch: number }[];
     };
-    let beam: State[] = [{ cost: 0, wrist: 0, chosen: [], active: [] }];
+    let beam: State[] = [{ cost: 0, wrist: 0, path: null, active: [] }];
     for (const note of notes) {
       const next: State[] = [];
       for (const state of beam)
@@ -69,7 +118,7 @@ export function planStudyPerformance(bytes: Uint8Array, transpose = 0) {
           const anchors = [anchor, ...active.map((a) => a.anchor)];
           const wrist = anchors.reduce((a, b) => a + b, 0) / anchors.length;
           const spread = anchors.reduce((sum, a) => sum + (a - wrist) ** 2, 0);
-          const travel = state.chosen.length ? (wrist - state.wrist) ** 2 : 0;
+          const travel = state.path ? (wrist - state.wrist) ** 2 : 0;
           const cost =
             state.cost +
             travel * 2000 +
@@ -78,7 +127,7 @@ export function planStudyPerformance(bytes: Uint8Array, transpose = 0) {
           next.push({
             cost,
             wrist,
-            chosen: [...state.chosen, finger],
+            path: { finger, previous: state.path },
             active: [
               ...active,
               { finger, end: note.end, anchor, pitch: note.pitch },
@@ -87,10 +136,16 @@ export function planStudyPerformance(bytes: Uint8Array, transpose = 0) {
         }
       beam = next.sort((a, b) => a.cost - b.cost).slice(0, 48);
       if (!beam.length)
-        throw new Error("No non-conflicting fingering for the MIDI excerpt");
+        throw new Error(
+          `Cannot assign non-conflicting fingers to the ${hand} hand at ${(note.start - 1).toFixed(2)} s. Try another hand split or a simpler piano arrangement.`,
+        );
     }
+    const chosen: number[] = [];
+    for (let path = beam[0].path; path; path = path.previous)
+      chosen.push(path.finger);
+    chosen.reverse();
     notes.forEach((note, index) => {
-      note.finger = beam[0].chosen[index];
+      note.finger = chosen[index];
     });
   }
   return {

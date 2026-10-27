@@ -1,5 +1,38 @@
 # Hand motion study — isolated prototype
 
+## MIDI import (2026-10-26)
+
+Use **Open MIDI** to load a local `.mid` or `.midi`, or **Load full Lumina MIDI**
+to test the complete bundled 89-note performance. Choose Automatic hands or
+Split by pitch before loading; the split value is a MIDI note number (60 = C4).
+Imported performances retain all notes, note-off times and tempo changes, with
+a one-second lead-in and a 0.75-second ending. The timeline covers their full
+duration. Playback is silent and file contents never leave the browser.
+
+Planning runs in a cancellable worker. Failed or cancelled imports preserve the
+previous preview; choosing a newer file invalidates any older pending read or
+worker result. Empty, malformed, unplayable and out-of-range files report errors
+rather than dropping notes. Current preview limits: 10 MB, 4,000 notes,
+30 minutes and the 88-key piano range A0–C8. This targets piano arrangements,
+not arbitrary orchestral MIDI. Finger collisions/reach remain experimental.
+
+Motion poses are solved on demand with a bounded 64-pose cache per hand rather
+than solving a whole song before playback. An unused hand is hidden. This is
+still the isolated study, not a replacement for the production renderer.
+
+Validation: local browser file-picker import of the full 89-note MIDI; full
+timeline and late-performance scrubbing; 1,803-frame original motion regression;
+parser checks for tempo changes, one-hand files, invalid/empty/out-of-range/dense
+input and finger occupancy; ESLint; standalone Vite build including its worker.
+Vite reports the existing large Three.js bundle warning.
+
+```powershell
+node node_modules/esbuild/bin/esbuild website/capture/hand-study/check-midi-import.ts --bundle --platform=node --format=esm --outfile=.tmp/check-midi-import.mjs
+node .tmp/check-midi-import.mjs
+```
+
+## Earlier study stages
+
 Run from the repository root:
 
 ```powershell

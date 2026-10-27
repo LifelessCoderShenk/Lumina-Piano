@@ -15,7 +15,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const viewport = document.querySelector("#viewport");
 viewport.append(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(36, 1, 0.005, 5);
-camera.position.set(0.22, 0.6, 0.54);
+camera.position.set(0.22, 0.82, 0.74);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, -0.025);
 controls.enableDamping = true;
@@ -36,10 +36,10 @@ light.shadow.bias = -0.0001;
 scene.add(light);
 const keys = new Map();
 const whitePitches = [];
-for (let pitch = 36; pitch <= 95; pitch++)
+for (let pitch = 21; pitch <= 108; pitch++)
   if (![1, 3, 6, 8, 10].includes(pitch % 12)) whitePitches.push(pitch);
 const keyWidth = 0.0235;
-for (let pitch = 36; pitch <= 95; pitch++) {
+for (let pitch = 21; pitch <= 108; pitch++) {
   const black = [1, 3, 6, 8, 10].includes(pitch % 12);
   const index = whitePitches.filter((p) => p < pitch).length;
   const x =
@@ -206,7 +206,7 @@ document.querySelector("#exercise").onchange = () => {
 };
 document.querySelector("#view").onclick = () => {
   top = !top;
-  camera.position.set(...(top ? [0, 0.92, 0.001] : [0.22, 0.6, 0.54]));
+  camera.position.set(...(top ? [0, 1.24, 0.001] : [0.22, 0.82, 0.74]));
   document.querySelector("#view").textContent = top
     ? "Angled view"
     : "Top view";
@@ -221,6 +221,125 @@ function resize() {
 addEventListener("resize", resize);
 resize();
 let lastSample = "";
+let importWorker = null;
+let importTimer = null;
+let fileReadVersion = 0;
+const importStatus = document.querySelector("#import-status");
+function stopImport() {
+  importWorker?.terminate();
+  importWorker = null;
+  clearTimeout(importTimer);
+  importTimer = null;
+  document.querySelector("#cancel-import").hidden = true;
+}
+function importMidi(bytes, name) {
+  stopImport();
+  if (bytes.byteLength > 10 * 1024 * 1024) {
+    importStatus.textContent = "Choose a MIDI file smaller than 10 MB.";
+    return;
+  }
+  const splitPitch = Number(document.querySelector("#split-pitch").value);
+  if (!Number.isInteger(splitPitch) || splitPitch < 21 || splitPitch > 108) {
+    importStatus.textContent =
+      "Split note must be a whole MIDI pitch from 21 to 108.";
+    return;
+  }
+  playing = false;
+  document.querySelector("#play").textContent = "Play";
+  importStatus.textContent = `Planning ${name}… Current preview is preserved until this succeeds.`;
+  document.querySelector("#cancel-import").hidden = false;
+  const worker = new Worker(new URL("./midi-worker.ts", import.meta.url), {
+    type: "module",
+  });
+  importWorker = worker;
+  worker.onmessage = ({ data }) => {
+    if (worker !== importWorker) return;
+    stopImport();
+    if (data.error) {
+      importStatus.textContent = data.error;
+      return;
+    }
+    const result = data.result;
+    performances.imported = result;
+    motion.setSequence(
+      "imported",
+      result.events.filter((e) => e.hand === "right"),
+    );
+    leftMotion.setSequence(
+      "imported",
+      result.events.filter((e) => e.hand === "left"),
+    );
+    let option = document.querySelector('#exercise option[value="imported"]');
+    if (!option) {
+      option = document.createElement("option");
+      option.value = "imported";
+      document.querySelector("#exercise").append(option);
+    }
+    option.textContent = `MIDI · ${name}`;
+    document.querySelector("#exercise").value = "imported";
+    document.querySelector("#time").max = String(result.duration);
+    time = 0;
+    lastSample = "";
+    importStatus.textContent = `Loaded ${name}: ${result.events.length} notes, full performance. One-second lead-in; MIDI tempo changes preserved. Hand reach is still experimental.`;
+  };
+  worker.onerror = () => {
+    if (worker !== importWorker) return;
+    stopImport();
+    importStatus.textContent =
+      "MIDI planning failed. The previous preview is still available.";
+  };
+  importTimer = setTimeout(() => {
+    if (worker !== importWorker) return;
+    stopImport();
+    importStatus.textContent =
+      "Planning exceeded one minute. Try a shorter MIDI or a different hand split.";
+  }, 60000);
+  worker.postMessage(
+    {
+      bytes,
+      options: {
+        handMode: document.querySelector("#hand-mode").value,
+        splitPitch,
+      },
+    },
+    [bytes],
+  );
+}
+document.querySelector("#midi-file").onchange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const version = ++fileReadVersion;
+  stopImport();
+  if (file.size > 10 * 1024 * 1024) {
+    importStatus.textContent = "Choose a MIDI file smaller than 10 MB.";
+    event.target.value = "";
+    return;
+  }
+  try {
+    const bytes = await file.arrayBuffer();
+    if (version !== fileReadVersion) return;
+    importMidi(bytes, file.name);
+  } catch {
+    if (version !== fileReadVersion) return;
+    importStatus.textContent =
+      "Could not read this file. Please select it again.";
+  }
+  event.target.value = "";
+};
+document.querySelector("#full-demo").onclick = () => {
+  fileReadVersion++;
+  importMidi(midiBytes.slice().buffer, "Lumina miniature");
+};
+document.querySelector("#cancel-import").onclick = () => {
+  fileReadVersion++;
+  stopImport();
+  importStatus.textContent =
+    "Import cancelled. The previous preview is preserved.";
+};
+const formatTime = (seconds) =>
+  `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0")}`;
 renderer.setAnimationLoop((now) => {
   const dt = Math.min(0.05, (now - previous) / 1000);
   previous = now;
@@ -236,6 +355,8 @@ renderer.setAnimationLoop((now) => {
     }
   }
   document.querySelector("#time").value = String(time);
+  document.querySelector("#clock").textContent =
+    `${formatTime(time)} / ${formatTime(durationFor(document.querySelector("#exercise").value))}`;
   const sampleKey = `${time}:${document.querySelector("#exercise").value}:${document.querySelector("#targets").checked}`;
   if (sampleKey !== lastSample) {
     sample(time);
