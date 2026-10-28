@@ -102,7 +102,7 @@ export function createHandMotion(model, scene, keys, options = {}) {
         angle: 0,
         min: i === 0 ? -1.1 : -1.55,
         max: i === 0 ? 0.4 : 0.12,
-        restAngle: i === 0 ? -0.25 : j === 1 ? -0.4 : -0.52,
+        restAngle: i === 0 ? -0.25 : j === 1 ? -0.32 : -0.38,
       });
       if (j === (i === 0 ? 0 : 1))
         dofs.push({
@@ -502,32 +502,39 @@ export function createHandMotion(model, scene, keys, options = {}) {
     model.updateMatrixWorld(true);
     if (clip.performance) {
       const base = model.position.clone();
+      // Freeze eased targets before IK iterations. Re-easing from each newly
+      // solved tip compounds the weight and makes release/approach motion snap.
+      const contacts = [];
+      for (let finger = 0; finger < 5; finger++) {
+        const event =
+          sequence(exercise).find(
+            (e) => e.finger === finger && t >= e.start && t < e.end,
+          ) ??
+          sequence(exercise).find(
+            (e) =>
+              e.finger === finger && t >= e.start - 0.12 && t < e.end + 0.12,
+          );
+        if (!event) continue;
+        const weight =
+          t < event.start
+            ? ease((t - event.start + 0.12) / 0.12)
+            : t >= event.end
+              ? 1 - ease((t - event.end) / 0.12)
+              : 1;
+        const tip = specs[finger].tip.getWorldPosition(new THREE.Vector3());
+        const target = tip
+          .clone()
+          .lerp(keyContact(event.pitch, finger), weight);
+        contacts.push({ finger, weight, target });
+      }
       for (let pass = 0; pass < 8; pass++) {
         const correction = new THREE.Vector3();
         let total = 0;
-        for (let finger = 0; finger < 5; finger++) {
-          const event =
-            sequence(exercise).find(
-              (e) => e.finger === finger && t >= e.start && t < e.end,
-            ) ??
-            sequence(exercise).find(
-              (e) =>
-                e.finger === finger && t >= e.start - 0.12 && t < e.end + 0.12,
-            );
-          if (!event) continue;
-          const weight =
-            t < event.start
-              ? ease((t - event.start + 0.12) / 0.12)
-              : t >= event.end
-                ? 1 - ease((t - event.end) / 0.12)
-                : 1;
-          const tip = specs[finger].tip.getWorldPosition(new THREE.Vector3());
-          const target = tip
-            .clone()
-            .lerp(keyContact(event.pitch, finger), weight);
+        for (const { finger, weight, target } of contacts) {
           solve(specs[finger], target, 1, 12);
           correction.add(
             target
+              .clone()
               .sub(specs[finger].tip.getWorldPosition(new THREE.Vector3()))
               .multiplyScalar(weight),
           );
@@ -552,7 +559,7 @@ export function createHandMotion(model, scene, keys, options = {}) {
     let worst = 0,
       held = 0;
     for (const event of sequence(exercise)) {
-      if (t < event.start || t > event.end) continue;
+      if (t < event.start || t >= event.end) continue;
       const target = keyContact(event.pitch, event.finger);
       solve(specs[event.finger], target, 1);
       worst = Math.max(
