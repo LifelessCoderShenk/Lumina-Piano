@@ -23,7 +23,7 @@ import { renderer } from '../../renderer/Renderer'
 import { threeRenderer } from '../../renderer/ThreeRenderer'
 import type { VisualizerEngine } from '../../renderer/VisualizerRenderer'
 import { getKeyAtCanvasPoint } from '../../renderer/pianoMath'
-import type { RenderLayoutContext } from '../../renderer/layoutConstants'
+import { HAND_KEYBOARD_ASPECT_RATIO, type RenderLayoutContext } from '../../renderer/layoutConstants'
 import { getAppState, useAppStore } from '../../store/store'
 import type { VisualizerSettings } from '../../store/types'
 import styles from './CanvasArea.module.css'
@@ -139,6 +139,7 @@ export function CanvasArea({
     ? null
     : {
         keyboardBottomInsetRatio: handBottomInset,
+        ...(handBottomInset ? { keyboardAspectRatio: HAND_KEYBOARD_ASPECT_RATIO } : {}),
         ...(keyboardHeightRatio == null ? {} : { keyboardHeightRatio, preserveKeyboardHeightRatio: true }),
         ...(noteFieldTravelSeconds == null ? {} : { noteFieldTravelSeconds }),
       }

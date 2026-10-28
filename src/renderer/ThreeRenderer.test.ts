@@ -9,6 +9,18 @@ import { CREATE_PITCH_CLASS_PALETTES } from '../store/createNoteColorPalettes'
 import { getAppState, resetStore, useAppStore } from '../store/store'
 import { spatialIndex } from '../spatial/SpatialIndex'
 
+vi.mock('./AnatomicalHandsLayer', async () => {
+  const { Group } = await import('three')
+  return { AnatomicalHandsLayer: class {
+    group = new Group()
+    initialize = vi.fn(async () => {})
+    assertAvailable = vi.fn()
+    updateProject = vi.fn((_project, _tick, _layout) => { this.group.visible = true })
+    hide() { this.group.visible = false }
+    dispose = vi.fn()
+  } }
+})
+
 const mockBufferGeometryDispose = vi.hoisted(() => vi.fn())
 const mockCanvasTextureDispose = vi.hoisted(() => vi.fn())
 const mockCanvasFillRect = vi.hoisted(() => vi.fn())
@@ -1147,8 +1159,10 @@ describe('ThreeRenderer', () => {
 
     const layer = (renderer as any).ghostHandsLayer
     expect(layer.group.visible).toBe(true)
-    expect(layer.hands.right.mesh.visible).toBe(true)
-    expect(layer.hands.right.material.uniforms.ghostOpacity.value).toBeCloseTo(0.42)
+    expect(layer.initialize).toHaveBeenCalledOnce()
+    expect(layer.updateProject).toHaveBeenLastCalledWith(
+      useAppStore.getState().projectData, 240, expect.objectContaining({ opacity: 0.42 }),
+    )
 
     renderer.setKeyboardOnly(true)
     expect(layer.group.visible).toBe(false)
@@ -1160,7 +1174,7 @@ describe('ThreeRenderer', () => {
     expect(layer.group.visible).toBe(false)
   })
 
-  it('keeps ghost hands deterministic through seeking, loop-back, portrait export, and live toggles', async () => {
+  it('passes seek, loop-back, portrait export, and live toggles to the shared hand layer', async () => {
     loadProjectWithNotes([
       { endTick: 480, id: 'loop-hand', pitch: 48, startTick: 240, velocity: 100, visualEndTick: 480 },
       { endTick: 1_200, id: 'seek-hand', pitch: 84, startTick: 960, velocity: 100, visualEndTick: 1_200 },
@@ -1172,32 +1186,32 @@ describe('ThreeRenderer', () => {
     Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
     await renderer.init(canvas)
     const layer = (renderer as any).ghostHandsLayer
-    const handGeometry = () => ['left', 'right'].map(hand => [...layer.hands[hand].rig.skeleton.boneMatrices])
+    const handTick = () => layer.updateProject.mock.lastCall[1]
     renderer.renderFrame(240)
-    const initialGeometry = handGeometry()
+    const initialTick = handTick()
     renderer.renderFrame(700)
-    expect(handGeometry()).not.toEqual(initialGeometry)
+    expect(handTick()).not.toEqual(initialTick)
     renderer.renderFrame(240)
-    expect(handGeometry()).toEqual(initialGeometry)
+    expect(handTick()).toEqual(initialTick)
 
     renderer.setReviewTimelineTick(960)
-    expect(handGeometry()).not.toEqual(initialGeometry)
+    expect(handTick()).not.toEqual(initialTick)
     renderer.setReviewTimelineTick(null)
-    expect(handGeometry()).toEqual(initialGeometry)
+    expect(handTick()).toEqual(initialTick)
 
     renderer.beginOfflineRender()
     renderer.resize(1_080, 1_920, { layoutContext: { keyboardHeightRatio: 0.375 } })
     renderer.renderFrame(240, { animationTimeSeconds: 0 })
-    for (const hand of ['left', 'right']) {
-      if (!layer.hands[hand].mesh.visible) continue
-      expect(layer.hands[hand].material.uniforms.layoutScale.value.x).toBe(1_080 / 8)
-    }
+    expect(layer.updateProject).toHaveBeenLastCalledWith(
+      useAppStore.getState().projectData, 240,
+      expect.objectContaining({ viewportWidth: 1080, viewportHeight: 1920 }),
+    )
 
     useAppStore.getState().setHandVisualization({ enabled: false })
     expect(layer.group.visible).toBe(false)
     useAppStore.getState().setHandVisualization({ enabled: true })
     expect(layer.group.visible).toBe(true)
-    expect(handGeometry().flat().every(Number.isFinite)).toBe(true)
+    expect(handTick()).toBe(240)
     renderer.endOfflineRender()
   })
 
@@ -2663,10 +2677,10 @@ void main() {
 
     expect(mockGroupRemove).toHaveBeenCalled()
     expect(mockCanvasTextureDispose).toHaveBeenCalledTimes(15)
-    expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(3) // Particle geometry and two owned hand meshes.
+    expect(mockBufferGeometryDispose).toHaveBeenCalledTimes(1) // Particle geometry; hand resources are tested with the real asset.
     expect(mockMeshBasicMaterialDispose).toHaveBeenCalled()
     expect(mockMeshLambertMaterialDispose).toHaveBeenCalled()
-    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(282) // Includes both hand depth prepasses.
+    expect(mockShaderMaterialDispose).toHaveBeenCalledTimes(278) // Hand materials belong to the separately tested layer.
     expect(mockSpriteMaterialDispose).toHaveBeenCalledTimes(88)
     expect(mockUnrealBloomPassDispose).toHaveBeenCalledTimes(1)
     expect(mockOutputPassDispose).toHaveBeenCalledTimes(1)

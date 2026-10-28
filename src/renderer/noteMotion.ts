@@ -134,7 +134,7 @@ function getBaseNoteScreenRect(
     tempoMap,
     worldZoom,
   } = options
-  const { keyboardY } = getKeyboardLayoutMetrics(canvasHeight, options.layoutContext)
+  const { keyboardY } = getKeyboardLayoutMetrics(canvasHeight, options.layoutContext, canvasWidth)
   const pixelsPerSecond = getEffectivePixelsPerSecond(worldZoom, keyboardY, options.layoutContext)
   const startSeconds = tickToSeconds(note.startTick, tempoMap)
   const endSeconds = tickToSeconds(effectiveVisualEndTick, tempoMap)

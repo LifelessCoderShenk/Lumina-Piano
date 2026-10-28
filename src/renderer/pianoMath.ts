@@ -71,8 +71,8 @@ export function getKeyAtCanvasPoint(
   }
 
   // Keep the hit area in lockstep with the keyboard's renderer geometry.
-  const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(canvasHeight, layoutContext)
-  if (y < keyboardY || y >= canvasHeight) {
+  const { keyboardHeight, keyboardY } = getKeyboardLayoutMetrics(canvasHeight, layoutContext, canvasWidth)
+  if (y < keyboardY || y >= keyboardY + keyboardHeight) {
     return null
   }
 

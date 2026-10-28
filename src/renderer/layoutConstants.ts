@@ -1,4 +1,6 @@
 export const KEYBOARD_HEIGHT = 270
+/** 52 white keys, 23.5 mm wide, with 150 mm visible depth. */
+export const HAND_KEYBOARD_ASPECT_RATIO = 52 * 0.0235 / 0.15
 export const HIT_LINE_HEIGHT = 8
 /** The original Create keyboard was designed against a 720px viewport. */
 export const DEFAULT_KEYBOARD_HEIGHT_RATIO = KEYBOARD_HEIGHT / 720
@@ -35,6 +37,8 @@ export interface KeyboardLayoutMetrics {
 
 export interface RenderLayoutContext {
   keyboardHeightRatio: number
+  /** Keep the keyboard physically proportioned for articulated hand contact. */
+  keyboardAspectRatio?: number
   /** Space below the keyboard for the generated wrists and forearms. */
   keyboardBottomInsetRatio?: number
   /** Offline export preserves the live frame proportion instead of the live-height cap. */
@@ -62,6 +66,8 @@ export function normalizeRenderLayoutContext(
     keyboardBottomInsetRatio: Number.isFinite(context?.keyboardBottomInsetRatio)
       ? Math.min(0.2, Math.max(0, context!.keyboardBottomInsetRatio!)) : 0,
     preserveKeyboardHeightRatio: context?.preserveKeyboardHeightRatio === true,
+    ...(Number.isFinite(context?.keyboardAspectRatio) && context!.keyboardAspectRatio! > 0
+      ? { keyboardAspectRatio: context!.keyboardAspectRatio } : {}),
     noteFieldTravelSeconds: Number.isFinite(context?.noteFieldTravelSeconds)
       ? Math.min(20, Math.max(0.25, context?.noteFieldTravelSeconds as number))
       : undefined,
@@ -71,14 +77,17 @@ export function normalizeRenderLayoutContext(
 export function getKeyboardLayoutMetrics(
   canvasHeight: number,
   layoutContext: Partial<RenderLayoutContext> = DEFAULT_RENDER_LAYOUT_CONTEXT,
+  canvasWidth?: number,
 ): KeyboardLayoutMetrics {
   const safeCanvasHeight = Number.isFinite(canvasHeight) ? Math.max(0, Math.round(canvasHeight)) : 0
-  const { keyboardHeightRatio, preserveKeyboardHeightRatio, keyboardBottomInsetRatio } = normalizeRenderLayoutContext(layoutContext)
+  const { keyboardHeightRatio, preserveKeyboardHeightRatio, keyboardBottomInsetRatio, keyboardAspectRatio } = normalizeRenderLayoutContext(layoutContext)
   const ratioHeight = Math.round(safeCanvasHeight * keyboardHeightRatio)
   // Normal interactive canvases retain the original compact keyboard height.
   // Export supplies an explicit layout snapshot and preserves its proportion.
   const keyboardHeight = Math.min(
-    preserveKeyboardHeightRatio ? ratioHeight : Math.min(KEYBOARD_HEIGHT, ratioHeight),
+    keyboardAspectRatio && Number.isFinite(canvasWidth) && canvasWidth! > 0
+      ? Math.round(canvasWidth! / keyboardAspectRatio)
+      : preserveKeyboardHeightRatio ? ratioHeight : Math.min(KEYBOARD_HEIGHT, ratioHeight),
     safeCanvasHeight,
   )
   const keyboardY = Math.max(0, safeCanvasHeight - keyboardHeight - Math.round(safeCanvasHeight * (keyboardBottomInsetRatio ?? 0)))

@@ -442,7 +442,7 @@ describe('CanvasArea', () => {
   it('reserves wrist space only while generated hands are enabled', async () => {
     mockStoreState.handVisualization.enabled = true
     const view = render(<CanvasArea engine="three" />)
-    await waitFor(() => expect(mockThreeRendererResize).toHaveBeenCalledWith(800,600,{layoutContext:{keyboardBottomInsetRatio:0.12}}))
+    await waitFor(() => expect(mockThreeRendererResize).toHaveBeenCalledWith(800,600,{layoutContext:{keyboardBottomInsetRatio:0.12,keyboardAspectRatio:52 * .0235 / .15}}))
     mockStoreState.handVisualization.enabled = false
     view.rerender(<CanvasArea engine="three" />)
     await waitFor(() => expect(mockThreeRendererResize).toHaveBeenLastCalledWith(800,600,{layoutContext:{keyboardBottomInsetRatio:0}}))

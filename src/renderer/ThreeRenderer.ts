@@ -29,18 +29,13 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
-import {
-  buildHandMotionTimeline,
-  sampleHandMotionTimeline,
-  type HandMotionTimeline,
-} from '../hands'
 import type { Note } from '../midi/types'
 import { type PlaybackEventMap, playbackEngine } from '../playback/PlaybackEngine'
 import { type IndexedNote, spatialIndex } from '../spatial/SpatialIndex'
-import { getAppState, subscribeToStore } from '../store/store'
+import { getAppState, subscribeToStore, useAppStore } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
 import { hexToPixi, resolveCreateModeNoteColor } from './colorUtils'
-import { GhostHandsLayer } from './GhostHandsLayer'
+import { AnatomicalHandsLayer } from './AnatomicalHandsLayer'
 import { ReactiveLightingLayer } from './ReactiveLightingLayer'
 import {
   BLACK_KEY_ACTIVE_ALPHA,
@@ -540,10 +535,9 @@ export class ThreeRenderer implements VisualizerRenderer {
   private noteGroup: Group | null = null
   private particleGroup: Group | null = null
   private waveGroup: Group | null = null
-  private ghostHandsLayer: GhostHandsLayer | null = null
+  private ghostHandsLayer: AnatomicalHandsLayer | null = null
+  private initializationComplete = false
   private reactiveLightingLayer: ReactiveLightingLayer | null = null
-  private handMotionTimeline: HandMotionTimeline | null = null
-  private lastHandProjectData: AppState['projectData'] | null = null
   private staticResources: Array<{ dispose(): void }> = []
   private persistentResources: Array<{ dispose(): void }> = []
   private keyboardMaterialStates: KeyboardMaterialState[] = []
@@ -734,7 +728,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.noteGroup = new Group()
     this.particleGroup = new Group()
     this.waveGroup = new Group()
-    this.ghostHandsLayer = new GhostHandsLayer(this.rectGeometry)
+    this.ghostHandsLayer = new AnatomicalHandsLayer(message => useAppStore.getState().setErrorMessage(message))
     this.reactiveLightingLayer = new ReactiveLightingLayer(this.rectGeometry)
     this.ambientLight = new AmbientLight(NOTE_AMBIENT_LIGHT_COLOR, NOTE_AMBIENT_LIGHT_INTENSITY)
 
@@ -758,7 +752,12 @@ export class ThreeRenderer implements VisualizerRenderer {
       Math.max(1, canvas.clientHeight || canvas.height || 1),
     )
 
+    const hands = this.ghostHandsLayer
+    await hands.initialize()
+    // A canvas can unmount while its local hand asset is loading.
+    if (this.ghostHandsLayer !== hands) return
     this.initPostprocessing()
+    this.initializationComplete = true
     playbackEngine.on('onSeek', this.handlePlaybackSeek)
     this.storeUnsubscribe = subscribeToStore(this.handleStoreChange)
     this.attachAnimationLoop()
@@ -766,6 +765,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   }
 
   async destroy(): Promise<void> {
+    this.initializationComplete = false
     this.backgroundImageLoadId += 1
     playbackEngine.off('onSeek', this.handlePlaybackSeek)
     this.storeUnsubscribe?.()
@@ -842,8 +842,6 @@ export class ThreeRenderer implements VisualizerRenderer {
     this.waveGroup = null
     this.ghostHandsLayer = null
     this.reactiveLightingLayer = null
-    this.handMotionTimeline = null
-    this.lastHandProjectData = null
     this.rectGeometry = null
     this.camera = null
     this.ambientLight = null
@@ -911,7 +909,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   }
 
   isReady(): boolean {
-    return this.canvas != null && this.renderer != null && this.scene != null && this.camera != null
+    return this.initializationComplete && this.canvas != null && this.renderer != null && this.scene != null && this.camera != null
   }
 
   beginOfflineRender(): void {
@@ -968,6 +966,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       this.effectivePixelRatio === nextEffectivePixelRatio &&
       this.postprocessScale === nextPostprocessScale &&
       this.layoutContext.keyboardHeightRatio === nextLayoutContext.keyboardHeightRatio &&
+      this.layoutContext.keyboardAspectRatio === nextLayoutContext.keyboardAspectRatio &&
       this.layoutContext.keyboardBottomInsetRatio === nextLayoutContext.keyboardBottomInsetRatio &&
       this.layoutContext.preserveKeyboardHeightRatio === nextLayoutContext.preserveKeyboardHeightRatio &&
       this.layoutContext.noteFieldTravelSeconds === nextLayoutContext.noteFieldTravelSeconds
@@ -1084,6 +1083,7 @@ export class ThreeRenderer implements VisualizerRenderer {
       preserveKeyboardHeightRatio: true,
       noteFieldTravelSeconds: this.layoutContext.noteFieldTravelSeconds,
       keyboardBottomInsetRatio: this.layoutContext.keyboardBottomInsetRatio,
+      ...(this.layoutContext.keyboardAspectRatio ? { keyboardAspectRatio: this.layoutContext.keyboardAspectRatio } : {}),
     }
   }
 
@@ -1108,7 +1108,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   }
 
   private getKeyboardMetrics() {
-    return getKeyboardLayoutMetrics(this.viewportHeight, this.layoutContext)
+    return getKeyboardLayoutMetrics(this.viewportHeight, this.layoutContext, this.viewportWidth)
   }
 
   private updateGhostHands(tick: number, state = getAppState()): void {
@@ -1125,19 +1125,15 @@ export class ThreeRenderer implements VisualizerRenderer {
       return
     }
 
-    if (this.lastHandProjectData !== project || this.handMotionTimeline == null) {
-      this.handMotionTimeline = buildHandMotionTimeline(project)
-      this.lastHandProjectData = project
-    }
-
     const { keyboardHeight, keyboardY } = this.getKeyboardMetrics()
-    layer.update(sampleHandMotionTimeline(this.handMotionTimeline, tick), {
+    layer.updateProject(project, tick, {
       keyboardHeight,
       keyboardY,
       opacity: state.handVisualization.opacity / 100,
       viewportHeight: this.viewportHeight,
       viewportWidth: this.viewportWidth,
     })
+    if (this.isOfflineRendering) layer.assertAvailable()
   }
 
   private updateReactiveLighting(state = getAppState()): void {
