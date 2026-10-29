@@ -137,7 +137,9 @@ export function createHandMotion(model, scene, keys, options = {}) {
       d.bone.quaternion.multiply(
         new THREE.Quaternion().setFromAxisAngle(d.axis, d.angle),
       );
-    wrist.updateMatrixWorld(true);
+    // Only this finger changed. Updating the whole wrist hierarchy for every
+    // finite-difference step multiplied IK cost by all five fingers.
+    spec.chain[0].updateMatrixWorld(true);
   }
   const ease = (t) => {
     t = THREE.MathUtils.clamp(t, 0, 1);
@@ -185,6 +187,8 @@ export function createHandMotion(model, scene, keys, options = {}) {
   }
   function solve(spec, target, weight, iterations = 28) {
     for (let iter = 0; iter < iterations; iter++) {
+      // Stop below 0.01 mm; further iterations are invisible at export resolution.
+      if (spec.tip.getWorldPosition(new THREE.Vector3()).distanceToSquared(target) < 1e-10) break;
       for (const d of spec.dofs) {
         const old = d.angle,
           tip = spec.tip.getWorldPosition(new THREE.Vector3()),

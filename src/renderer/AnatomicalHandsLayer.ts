@@ -74,6 +74,7 @@ export class AnatomicalHandsLayer {
   private project: ProjectData | null = null
   private tempo: PrecomputedTempoMap | null = null
   private disposed = false
+  private lastPoseTick = Number.NaN
   private failure: string | null = null
 
   private loadFailure: string | null = null
@@ -198,6 +199,7 @@ export class AnatomicalHandsLayer {
     }
     if (this.project !== project) {
       this.project = project
+      this.lastPoseTick = Number.NaN
       this.failure = null
       this.reportedFailure = null
       try {
@@ -223,11 +225,13 @@ export class AnatomicalHandsLayer {
     this.group.visible = true
     for (const hand of ['left', 'right'] as const) {
       const actor = this.actors[hand]!
-      actor.root.scale.x = 1
-      actor.root.updateMatrixWorld(true)
-      actor.motion.sample(tickToSeconds(tick, this.tempo), 'project')
-      actor.root.scale.x = hand === 'left' ? -1 : 1
-      actor.root.updateMatrixWorld(true)
+      if (tick !== this.lastPoseTick) {
+        actor.root.scale.x = 1
+        actor.root.updateMatrixWorld(true)
+        actor.motion.sample(tickToSeconds(tick, this.tempo), 'project')
+        actor.root.scale.x = hand === 'left' ? -1 : 1
+        actor.root.updateMatrixWorld(true)
+      }
       for (const material of actor.materials) {
         material.uniforms.viewport.value.set(
           layout.viewportWidth,
@@ -242,6 +246,7 @@ export class AnatomicalHandsLayer {
         )
       }
     }
+    this.lastPoseTick = tick
   }
   private reportFailure(message: string): void {
     this.hide()

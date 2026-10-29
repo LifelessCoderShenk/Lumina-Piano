@@ -55,6 +55,12 @@ describe('anatomical app integration', () => {
       viewportHeight: 1920,
     })
     expect(matrices(layer)).toEqual(first)
+    layer.updateProject(source, 960, layout)
+    expect(matrices(layer)).toEqual(first)
+    const edited = project()
+    edited.tracks.forEach(track => track.notes.forEach(note => { note.pitch += 2 }))
+    layer.updateProject(edited, 960, { ...layout, viewportWidth: 1080 })
+    expect(matrices(layer)).not.toEqual(first)
     layer.group.traverse((object: Object3D) => {
       if (object instanceof SkinnedMesh)
         expect((object.material as ShaderMaterial).uniforms.viewport.value.x).toBe(1080)
