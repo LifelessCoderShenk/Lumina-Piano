@@ -30,9 +30,18 @@ button.onclick=async()=>{
   await loadMidiBytes(new Uint8Array(await(await fetch('/website/public/media/lumina-miniature.mid')).arrayBuffer()))
   const state=useAppStore.getState()
   state.batchUpdate(s=>{
-   applyVisualStyle(s,BUILT_IN_VISUAL_STYLE_PRESETS.find(p=>p.name==='Concert Gem').style)
-   s.particleSettings.enabled=true
-   s.handVisualization={enabled:true,opacity:65}
+   applyVisualStyle(s,BUILT_IN_VISUAL_STYLE_PRESETS.find(p=>p.name==='Aurora Glass').style)
+   // Showcase treatment: visible crystal interiors, fine lingering wisps,
+   // and a restrained glow that retains saturated note colors.
+   s.noteGlow=85
+   s.backgroundStyle='stage'
+   s.lightingIntensity=115
+   s.keyboardSaber=true
+   s.laneOpacity=0
+   s.noteLabelsOnKeys=false
+   s.noteLabelsOnNotes=false
+   s.particleSettings={...s.particleSettings,enabled:true,density:85,glow:120,lifetime:165,size:75,speed:115,spread:110}
+   s.handVisualization={enabled:true,opacity:78}
    s.visualizerSettings={...s.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:60}
   })
   // Let React apply the generated-hand layout before taking the export snapshot.

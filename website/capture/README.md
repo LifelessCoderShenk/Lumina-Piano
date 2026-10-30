@@ -67,3 +67,7 @@ Research references: [FürElise](https://for-elise.github.io/) combines motion re
 ### Anatomical hand video refresh
 
 Re-rendered the original miniature through the current anatomical hand layer and actual ExportEngine at 1920Ã—1080, 60 fps, Concert Gem with particles enabled. The standalone generated-hands MP4 and poster now use this export. The walkthrough retains its original UI stills and replaces the final performance with the new render (720p60). Source UI settings in the stills reflect the earlier capture. Both video references carry refreshed content hashes. Offline audio rendering does not play sound during capture.
+
+### Showcase effects polish
+
+The current video treatment uses Aurora Glass crystal notes and pitch colors on the stage background, note glow 85, lighting 115, keyboard saber, and wisp particles (density 85, glow 120, lifetime 165, size 75, speed 115, spread 110). Generated hands use 78% opacity. These are capture-only overrides, not app defaults. The walkthrough now has 18 seconds of original UI stills, concise optional captions, and the complete 23.8-second newly rendered performance. Its poster comes from the finished performance. Output remains 1080p60 for the main video and 720p60 for the assembled guide.

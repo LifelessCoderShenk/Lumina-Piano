@@ -248,7 +248,6 @@ export function MediaPreview({
                   src={media.asset.captions}
                   srcLang="en"
                   label="English"
-                  default
                 />
               )}
             </video>
