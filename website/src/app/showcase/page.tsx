@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Container } from "@/components/ui/container";
 import { MediaPreview } from "@/components/home/media-preview";
 import { homeMedia } from "@/lib/home-media";
+import { HandDemo } from "@/components/home/hand-demo";
 
 export const metadata: Metadata = {
   title: "Showcase",
@@ -37,6 +38,8 @@ export default function Showcase() {
           </div>
         </div>
       </section>
+
+      <HandDemo />
 
       <div id="visual-styles" className="mt-12 grid gap-10 md:grid-cols-2">
         {looks.map(({ media, title, description }) => (

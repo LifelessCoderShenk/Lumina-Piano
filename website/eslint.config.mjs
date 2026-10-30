@@ -11,5 +11,6 @@ export default defineConfig([
     "next-env.d.ts",
     ".qa/**",
     ".npm-cache/**",
+    "public/demos/**",
   ]),
 ]);
