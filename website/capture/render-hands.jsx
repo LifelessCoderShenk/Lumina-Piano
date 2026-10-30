@@ -30,9 +30,10 @@ button.onclick=async()=>{
   await loadMidiBytes(new Uint8Array(await(await fetch('/website/public/media/lumina-miniature.mid')).arrayBuffer()))
   const state=useAppStore.getState()
   state.batchUpdate(s=>{
-   applyVisualStyle(s,BUILT_IN_VISUAL_STYLE_PRESETS[0].style)
+   applyVisualStyle(s,BUILT_IN_VISUAL_STYLE_PRESETS.find(p=>p.name==='Concert Gem').style)
+   s.particleSettings.enabled=true
    s.handVisualization={enabled:true,opacity:65}
-   s.visualizerSettings={...s.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:30}
+   s.visualizerSettings={...s.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:60}
   })
   // Let React apply the generated-hand layout before taking the export snapshot.
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
