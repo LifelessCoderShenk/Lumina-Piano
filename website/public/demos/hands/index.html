@@ -57,7 +57,7 @@
         padding: 0 28px 16px;
         font-size: 13px;
       }
-    
+
       header { gap: 12px; flex-wrap: wrap; }
       input, select { max-width: 100%; box-sizing: border-box; }
       input[type="range"] { width: min(250px, 55vw); }
@@ -73,7 +73,7 @@
     <header>
       <div>
         <h1>Hand motion study</h1>
-        <p>Imported hand model · constrained joints · silent prototype</p>
+        <p>Silent MIDI preview</p>
       </div>
       <span id="status">Loading hand…</span>
     </header>
@@ -105,8 +105,7 @@
       /></label>
       <button id="cancel-import" hidden>Cancel import</button>
       <p id="import-status" role="status">
-        Files stay on this computer. Silent preview · 88 keys · up to 4,000
-        notes.
+        Your MIDI stays in your browser.
       </p>
     </section>
     <main id="viewport"></main>
@@ -137,19 +136,13 @@
           <option value="1" selected>Normal</option>
         </select></label
       ><button id="view">Top view</button
-      ><label><input type="checkbox" id="targets" />Contact targets</label
+      ><details><summary>Motion diagnostics</summary><label><input type="checkbox" id="targets" />Contact targets</label
       ><output id="error"></output
       ><output id="clock" aria-label="Playback position"></output
-      ><button id="audit">Check built-in exercises</button>
+      ><button id="audit">Check built-in exercises</button></details>
     </footer>
     <p class="note" id="audit-result" role="status"></p>
-    <p class="note">
-      Evaluation only. Motion is authored and solved from key targets, not
-      captured from a pianist. This preview uses the shared Lumina hand-motion system. Demo
-      presets use a six-second excerpt; imported MIDI uses the full performance,
-      with app-seeded fingering refined for hand reach. Gold keys: left hand.
-      Blue keys: right hand.
-    </p>
+
     <script type="module" src="./study.js"></script>
   </body>
 </html>

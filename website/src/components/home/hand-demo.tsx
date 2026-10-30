@@ -8,7 +8,7 @@ export function HandDemo() {
     <section id="hand-demo" aria-labelledby="hand-demo-title" className="mt-12 border-t border-white/10 pt-10">
       <h2 id="hand-demo-title" className="text-2xl font-medium tracking-tight">Try the new generated hands.</h2>
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-secondary">
-        Play a sample, change the camera angle, or open your own MIDI. This is a live, silent preview of our latest hand motion. Your MIDI stays in your browser; hand reach is still experimental.
+        Silent preview · Experimental
       </p>
       {open ? (
         <>
