@@ -19,16 +19,16 @@ export default function Pricing() {
           Make it yours.
         </>
       }
-      description="Start with a free trial with watermarked exports. Then continue with a one-time purchase."
+      description="Free trial with watermarked exports. One-time purchase afterward."
     >
       <div className="mt-14 max-w-2xl rounded-2xl border border-line bg-card p-8 sm:p-10">
         <h2 className="text-xl font-medium">
-          One-time purchase. Price to be announced.
+          One-time license
         </h2>
         <p className="mb-7 mt-4 leading-relaxed text-secondary">
-          The final price and purchase details are still being decided.
+          Price to be announced.
         </p>
-        <ButtonLink href="/download">Download Lumina Piano</ButtonLink>
+        <ButtonLink href="/download">View download options</ButtonLink>
       </div>
     </PageIntro>
   );

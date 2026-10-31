@@ -16,19 +16,19 @@ export default function Features() {
       eyebrow="Features"
       title={
         <>
-          More ways to make
+          Create. Edit.
           <br />
-          your music yours.
+          Make it yours.
         </>
       }
-      description="Visualize your notes. Record a performance. Refine your playing without rerecording. Bring it all together in video or sheet music."
+      description="From piano performance to video and sheet music."
     >
       <div className="mt-14 space-y-16">
         {[
-          { media: homeMedia.edit, title: "Refine the notes", href: "/showcase#note-correction", link: "Hear a note before and after correction", text: "Adjust pitch, timing, duration, and velocity. Quantize selected notes and undo edits while reviewing your performance." },
-          { media: homeMedia.score, title: "Bring your playing onto the page", href: "/showcase#score-example", link: "Open a real score and its MIDI", text: "Generate sheet music from MIDI, review the notes, and export a printable PDF. Set the key, timing grid, and notation options in the same workspace." },
-          { media: homeMedia.style, title: "Choose your visual style", href: "/showcase#visual-styles", link: "Compare two visual styles", text: "Set note colors, glow, and particles. Add generated hands that follow loaded MIDI, and save your look as a reusable preset." },
-          { media: homeMedia.record, title: "Set up your performance", href: "/showcase#workspace", link: "Explore the recording workspace", text: "Choose camera, MIDI, and audio inputs, or import existing footage. Position the visualization and align it with your keyboard." },
+          { media: homeMedia.edit, title: "Edit MIDI", href: "/showcase#note-correction", link: "Compare before & after", text: "Fix pitch, timing, length, and touch. Quantize or undo as you go." },
+          { media: homeMedia.score, title: "Create sheet music", href: "/showcase#score-example", link: "View sample score", text: "Turn MIDI into notation. Refine the score and export a PDF." },
+          { media: homeMedia.style, title: "Style your video", href: "/showcase#visual-styles", link: "Compare styles", text: "Colors, glow, particles, and MIDI-driven hands. Save your own presets." },
+          { media: homeMedia.record, title: "Record a performance", href: "/showcase#workspace", link: "See the workflow", text: "Combine camera, MIDI, and audio—or import footage. Align the visuals to your piano." },
         ].map(({ media, title, text, href, link }) => (
           <section key={title} className="grid items-center gap-8 md:grid-cols-2">
             <MediaPreview media={media} />

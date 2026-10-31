@@ -59,6 +59,8 @@
       }
 
       header { gap: 12px; flex-wrap: wrap; }
+      summary { cursor: pointer; padding: 10px 0; color: #aab0bc; }
+      details[open] { padding-bottom: 12px; }
       input, select { max-width: 100%; box-sizing: border-box; }
       input[type="range"] { width: min(250px, 55vw); }
       :focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
@@ -72,7 +74,7 @@
   <body>
     <header>
       <div>
-        <h1>Hand motion study</h1>
+        <h1>Generated hands</h1>
         <p>Silent MIDI preview</p>
       </div>
       <span id="status">Loading hand…</span>
@@ -85,8 +87,8 @@
           type="file"
           accept=".mid,.midi,audio/midi,audio/x-midi"
       /></label>
-      <button id="full-demo">Load full Lumina MIDI</button>
-      <label
+      <button id="full-demo">Load sample</button>
+      <details><summary>MIDI options</summary><label
         >Hands
         <select id="hand-mode">
           <option value="auto">Automatic</option>
@@ -103,7 +105,7 @@
           value="60"
           aria-label="Split MIDI note"
       /></label>
-      <button id="cancel-import" hidden>Cancel import</button>
+      </details><button id="cancel-import" hidden>Cancel import</button>
       <p id="import-status" role="status">
         Your MIDI stays in your browser.
       </p>
@@ -136,9 +138,8 @@
           <option value="1" selected>Normal</option>
         </select></label
       ><button id="view">Top view</button
-      ><details><summary>Motion diagnostics</summary><label><input type="checkbox" id="targets" />Contact targets</label
+      ><output id="clock" aria-label="Playback position"></output><details><summary>Motion diagnostics</summary><label><input type="checkbox" id="targets" />Contact targets</label
       ><output id="error"></output
-      ><output id="clock" aria-label="Playback position"></output
       ><button id="audit">Check built-in exercises</button></details>
     </footer>
     <p class="note" id="audit-result" role="status"></p>

@@ -14,12 +14,12 @@ export default function Download() {
       eyebrow="Download Lumina Piano"
       title={
         <>
-          Your next performance
+          Lumina Piano.
           <br />
-          starts here.
+          Windows & macOS.
         </>
       }
-      description="Lumina Piano is built for Windows and macOS. Start with a free trial with watermarked exports."
+      description="Free trial · Watermarked exports"
     >
       <div className="mt-14 grid max-w-3xl gap-4 sm:grid-cols-2">
         {["Windows", "macOS"].map((platform) => (
@@ -34,9 +34,6 @@ export default function Download() {
               className="mb-7 text-secondary"
             />
             <h2 className="text-xl font-medium">Lumina for {platform}</h2>
-            <p className="mt-4 text-sm leading-relaxed text-secondary">
-              The official download and installation details will be added here.
-            </p>
             <p className="mt-7 text-xs font-medium text-secondary">
               Download not yet available
             </p>

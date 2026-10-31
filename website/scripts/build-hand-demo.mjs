@@ -22,13 +22,21 @@ await build({
 });
 let html = await readFile(new URL("index.html", source), "utf8");
 html = html
+  .replace('Hand motion study</h1>', 'Generated hands</h1>')
+  .replace('Load full Lumina MIDI', 'Load sample')
+  .replace(/(<label\s*>Hands)/, '<details><summary>MIDI options</summary>$1')
+  .replace('<button id="cancel-import"', '</details><button id="cancel-import"')
   .replace("Imported hand model · constrained joints · silent prototype", "Silent MIDI preview")
   .replace(/Files stay on this computer\. Silent preview · 88 keys · up to 4,000\s+notes\./, "Your MIDI stays in your browser.")
   .replace(/<p class="note">\s*Evaluation only\.[\s\S]*?<\/p>/, "")
   .replace('<label><input type="checkbox" id="targets"', '<details><summary>Motion diagnostics</summary><label><input type="checkbox" id="targets"')
-  .replace('id="audit">Check built-in exercises</button>', 'id="audit">Check built-in exercises</button></details>');
+  .replace('id="audit">Check built-in exercises</button>', 'id="audit">Check built-in exercises</button></details>')
+  .replace(/<output id="clock" aria-label="Playback position"><\/output\s*>/, '')
+  .replace('<details><summary>Motion diagnostics', '<output id="clock" aria-label="Playback position"></output><details><summary>Motion diagnostics');
 html = html.replace("</style>", `
       header { gap: 12px; flex-wrap: wrap; }
+      summary { cursor: pointer; padding: 10px 0; color: #aab0bc; }
+      details[open] { padding-bottom: 12px; }
       input, select { max-width: 100%; box-sizing: border-box; }
       input[type="range"] { width: min(250px, 55vw); }
       :focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
