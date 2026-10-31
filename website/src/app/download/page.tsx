@@ -19,7 +19,7 @@ export default function Download() {
           Windows & macOS.
         </>
       }
-      description="Free trial · Watermarked exports"
+      description="Free trial Â· Watermarked exports"
     >
       <div className="mt-14 grid max-w-3xl gap-4 sm:grid-cols-2">
         {["Windows", "macOS"].map((platform) => (
