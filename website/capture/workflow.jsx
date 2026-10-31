@@ -36,9 +36,17 @@ window.electronAPI.ffmpeg.run=async()=>{
  if(!response.ok)throw new Error(await response.text())
 }
 useAppStore.getState().batchUpdate(state => {
- applyVisualStyle(state, BUILT_IN_VISUAL_STYLE_PRESETS.find(preset => preset.id === 'builtin-concert-gem').style)
- state.particleSettings.enabled = true
- state.handVisualization = {enabled:true,opacity:65}
+ applyVisualStyle(state, BUILT_IN_VISUAL_STYLE_PRESETS.find(preset => preset.id === 'builtin-aurora-glass').style)
+ state.backgroundStyle = 'stage'
+ state.noteGlow = 85
+ state.lightingIntensity = 115
+ state.keyboardSaber = true
+ state.laneOpacity = 0
+ state.noteLabelsOnKeys = false
+ state.noteLabelsOnNotes = false
+ state.particleSettings = {...state.particleSettings,enabled:true,density:85,glow:120,lifetime:165,size:75,speed:115,spread:110}
+ state.handVisualization = {enabled:true,opacity:78}
+ state.visualizerSettings = {...state.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:60}
 })
 // Local capture control: animate the real renderer without starting audio.
 const silentPreview = document.createElement('button')
@@ -61,5 +69,5 @@ const syncPreviewButton = state => {
 syncPreviewButton(useAppStore.getState())
 const unsubscribePreview = useAppStore.subscribe(syncPreviewButton)
 window.addEventListener('pagehide', unsubscribePreview, {once:true})
-document.body.append(silentPreview)
+if (!new URLSearchParams(location.search).has('stills')) document.body.append(silentPreview)
 createRoot(document.getElementById('root')).render(<App />)

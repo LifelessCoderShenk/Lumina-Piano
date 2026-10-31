@@ -71,3 +71,7 @@ Re-rendered the original miniature through the current anatomical hand layer and
 ### Showcase effects polish
 
 The current video treatment uses Aurora Glass crystal notes and pitch colors on the stage background, note glow 85, lighting 115, keyboard saber, and wisp particles (density 85, glow 120, lifetime 165, size 75, speed 115, spread 110). Generated hands use 78% opacity. These are capture-only overrides, not app defaults. The walkthrough now has 18 seconds of original UI stills, concise optional captions, and the complete 23.8-second newly rendered performance. Its poster comes from the finished performance. Output remains 1080p60 for the main video and 720p60 for the assembled guide.
+
+### Walkthrough piano framing correction
+
+Recaptured the import, loaded view, actual F5-to-E5 edit, style settings, output settings, and export dialog from the current app. All use the current width-proportioned keyboard, anatomical hands, and fixed 16:9 visualizer framing matching the finished video. The last still shows the export dialog, not a simulated completion. Assembly preserves source aspect ratio with contain-and-pad for both UI and performance. The existing verified final export remains unchanged.
