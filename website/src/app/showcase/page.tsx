@@ -30,7 +30,8 @@ export default function Showcase() {
         <MediaPreview media={homeMedia.hands} shape="hero" />
         <div className="mt-5 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 id="concert-title" className="text-2xl font-medium tracking-tight">Generated hands. Real piano sound.</h2>
+            <h2 id="concert-title" className="text-2xl font-medium tracking-tight">Chopin. In full flow.</h2>
+            <a href="https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1693" className="mt-2 inline-block text-xs text-secondary underline underline-offset-4">Fantaisie-Impromptu, Op. 66 · Mutopia MIDI</a>
           </div>
         </div>
       </section>

@@ -27,7 +27,9 @@ Object.assign(button.style,{position:'fixed',top:'8px',right:'12px',padding:'12p
 button.onclick=async()=>{
  try {
   button.disabled=true
-  await loadMidiBytes(new Uint8Array(await(await fetch('/website/public/media/lumina-miniature.mid')).arrayBuffer()))
+  const midiFile = new URLSearchParams(location.search).get('piece') === 'chopin'
+   ? 'chopin-showcase-excerpt.mid' : 'lumina-miniature.mid'
+  await loadMidiBytes(new Uint8Array(await(await fetch('/website/public/media/'+midiFile)).arrayBuffer()))
   const state=useAppStore.getState()
   state.batchUpdate(s=>{
    applyVisualStyle(s,BUILT_IN_VISUAL_STYLE_PRESETS.find(p=>p.name==='Aurora Glass').style)
