@@ -47,7 +47,7 @@ button.onclick=async()=>{
     s.particleSettings={...s.particleSettings,style:'spark',density:42,glow:85,lifetime:80,size:65,speed:65,spread:55}
     s.noteLabelsOnKeys=true
     s.noteLabelFormat='name'
-    s.noteLabelSize=22
+    s.noteLabelSize=16
     s.noteLabelColor='#FFFFFF'
    }
    s.handVisualization={enabled:true,opacity:78}
