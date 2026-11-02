@@ -3134,7 +3134,7 @@ void main() {
   ): void {
     const labelText = formatMidiNoteName(pitch, state.noteLabelFormat)
     const existing = labelSprites[index]
-    if (!state.noteLabelsOnNotes || rect.h < NOTE_LABEL_MIN_RECT_HEIGHT || rect.w < NOTE_LABEL_MIN_RECT_WIDTH) {
+    if (!state.noteLabelsOnNotes) {
       if (existing != null) {
         existing.sprite.visible = false
       }
@@ -3158,6 +3158,12 @@ void main() {
       labelSprites[index] = label
     }
 
+    // Keep the label pool aligned with note mesh indices, including notes too
+    // small to label. Skipping their slots makes later labels overwrite others.
+    if (rect.h < NOTE_LABEL_MIN_RECT_HEIGHT || rect.w < NOTE_LABEL_MIN_RECT_WIDTH) {
+      label.sprite.visible = false
+      return
+    }
     const labelHeight = clamp(state.noteLabelSize, 8, rect.h * 0.36)
     const labelWidth = Math.min(rect.w * 0.78, labelHeight * this.getLabelAspectRatio(label))
     label.sprite.position.set(
@@ -3214,11 +3220,9 @@ void main() {
     }
 
     const font = keyboard ? '800 64px Arial, sans-serif' : '700 54px Arial, sans-serif'
-    if (keyboard) {
-      context.font = font
-      canvas.width = Math.ceil(context.measureText(text).width) + 12
-      canvas.height = 84
-    }
+    context.font = font
+    canvas.width = Math.ceil(context.measureText(text).width) + 12
+    canvas.height = keyboard ? 84 : 72
     context.clearRect(0, 0, canvas.width, canvas.height)
     context.fillStyle = color
     context.font = font
@@ -3234,7 +3238,7 @@ void main() {
 
     const texture = new CanvasTexture(canvas)
     const textureState = {
-      aspectRatio: keyboard ? canvas.width / canvas.height : Math.max(0.72, Math.min(1.5, (text.length * 0.62) + 0.18)),
+      aspectRatio: canvas.width / canvas.height,
       texture,
     }
     this.labelTextures.set(cacheKey, textureState)

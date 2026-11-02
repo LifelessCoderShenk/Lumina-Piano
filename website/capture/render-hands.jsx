@@ -44,7 +44,11 @@ button.onclick=async()=>{
    s.noteLabelsOnNotes=false
    s.particleSettings={...s.particleSettings,enabled:true,density:85,glow:120,lifetime:165,size:75,speed:115,spread:110}
    if (midiFile === 'chopin-showcase-excerpt.mid') {
-    s.particleSettings={...s.particleSettings,style:'spark',density:22,glow:65,lifetime:55,size:40,speed:55,spread:40}
+    s.particleSettings={...s.particleSettings,style:'spark',density:42,glow:85,lifetime:80,size:65,speed:65,spread:55}
+    s.noteLabelsOnNotes=true
+    s.noteLabelFormat='name'
+    s.noteLabelSize=22
+    s.noteLabelColor='#FFFFFF'
    }
    s.handVisualization={enabled:true,opacity:78}
    s.visualizerSettings={...s.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:60}
@@ -53,6 +57,7 @@ button.onclick=async()=>{
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
   const engine=new ExportEngine()
   engine.onProgress(p=>{button.textContent=`Rendering ${Math.round(p.progress*100)}%`})
+
   await engine.export({outputPath:'/capture/workflow-performance.mp4',includeAudio:true})
   button.textContent='Render complete'
  }catch(error){button.disabled=false;button.textContent=String(error)}
