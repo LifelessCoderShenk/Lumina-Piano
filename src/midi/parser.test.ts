@@ -391,6 +391,8 @@ describe('parseMidi', () => {
 
       expect(project.tracks[0].notes[0].endTick).toBe(100)
       expect(project.tracks[0].notes[0].visualEndTick).toBe(400)
+      expect(project.tracks[0].notes[0].sustainEndTick).toBe(2000)
+      expect(project.totalTicks).toBe(2000)
     })
 
     it('hard-clamps rapid repeated same-pitch notes so visualEndTick never reaches the next hit', async () => {

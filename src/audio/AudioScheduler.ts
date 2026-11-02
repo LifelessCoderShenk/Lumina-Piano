@@ -375,7 +375,7 @@ export class AudioScheduler {
     }
 
     const noteStartSeconds = tickToSeconds(note.startTick, tempoMap)
-    const noteEndSeconds = tickToSeconds(note.endTick, tempoMap)
+    const noteEndSeconds = tickToSeconds(Math.max(note.endTick, note.sustainEndTick ?? note.endTick), tempoMap)
     const duration = Math.max(0, noteEndSeconds - noteStartSeconds)
     const scheduleTime = nowSeconds + (noteStartSeconds - currentSeconds)
 

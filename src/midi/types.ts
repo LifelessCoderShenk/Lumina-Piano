@@ -13,6 +13,8 @@ export interface Note {
   startTick: number
   endTick: number
   visualEndTick: number
+  /** Sound release under sustain pedal; independent of finger/key release. */
+  sustainEndTick?: number
   velocity: number
   fingering?: NoteFingering
 }

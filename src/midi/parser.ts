@@ -60,6 +60,7 @@ interface NormalizedNoteSeed {
   trackIndex: number
   velocity: number
   visualEndTick: number
+  sustainEndTick?: number
 }
 
 interface NormalizedTrackSeed {
@@ -107,7 +108,7 @@ export function parseMidi(bytes: Uint8Array | ArrayBuffer): ProjectData {
   const tracks = sanitizeDisplayTracks(mergeTracksForDisplay(finalizeTracks(normalizedTracks)))
   const totalTicks = tracks.reduce((maxTick, track) => {
     const trackMax = track.notes.reduce(
-      (noteMax, note) => Math.max(noteMax, note.visualEndTick),
+      (noteMax, note) => Math.max(noteMax, note.visualEndTick, note.sustainEndTick ?? note.endTick),
       0,
     )
     return Math.max(maxTick, trackMax)
@@ -301,6 +302,7 @@ function applySustainPedal(notes: NormalizedNoteSeed[], rawTracks: ToneTrackLike
       }
     }
 
+    if (visualEndTick > note.endTick) note.sustainEndTick = visualEndTick
     const naturalDurationTicks = Math.max(1, note.endTick - note.startTick)
     const maxVisualEndTick = note.startTick + (naturalDurationTicks * MAX_VISUAL_SUSTAIN_MULTIPLIER)
     note.visualEndTick = Math.min(visualEndTick, maxVisualEndTick)
@@ -454,6 +456,7 @@ function finalizeTracks(trackSeeds: NormalizedTrackSeed[]): Track[] {
       startTick: note.startTick,
       velocity: note.velocity,
       visualEndTick: note.visualEndTick,
+      ...(note.sustainEndTick == null ? {} : { sustainEndTick: note.sustainEndTick }),
     })),
   }))
 }

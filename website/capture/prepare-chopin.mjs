@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
-import { Midi } from '@tonejs/midi'
+import toneMidi from '@tonejs/midi'
+const { Midi } = toneMidi
 
 const media = new URL('../public/media/', import.meta.url)
 const source = new Midi(readFileSync(new URL('chopin-fantaisie-impromptu.mid', media)))
@@ -13,6 +14,18 @@ for (const sourceTrack of source.tracks) {
   const track = excerpt.addTrack()
   track.name = sourceTrack.name
   track.instrument.number = 0
+  track.channel = sourceTrack.channel
+  // This piano engraving puts pedal marks on the lower staff only, while
+  // exporting each staff on a separate MIDI channel. Both share one pedal.
+  const pedal = source.tracks.flatMap(staff => staff.controlChanges[64] ?? [])
+    .sort((a, b) => a.ticks - b.ticks)
+  const initialPedal = pedal.filter(event => event.ticks < start).at(-1)
+  if (initialPedal) track.addCC({ number: 64, ticks: 0, value: initialPedal.value })
+  for (const event of pedal) {
+    if (event.ticks >= start && event.ticks < end)
+      track.addCC({ number: 64, ticks: event.ticks - start, value: event.value })
+  }
+  if (pedal.length) track.addCC({ number: 64, ticks: end - start, value: 0 })
   for (const note of sourceTrack.notes) {
     if (note.ticks < start || note.ticks >= end) continue
     track.addNote({ midi: note.midi, ticks: note.ticks - start,

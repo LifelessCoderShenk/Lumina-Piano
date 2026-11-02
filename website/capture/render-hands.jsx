@@ -43,6 +43,9 @@ button.onclick=async()=>{
    s.noteLabelsOnKeys=false
    s.noteLabelsOnNotes=false
    s.particleSettings={...s.particleSettings,enabled:true,density:85,glow:120,lifetime:165,size:75,speed:115,spread:110}
+   if (midiFile === 'chopin-showcase-excerpt.mid') {
+    s.particleSettings={...s.particleSettings,style:'spark',density:22,glow:65,lifetime:55,size:40,speed:55,spread:40}
+   }
    s.handVisualization={enabled:true,opacity:78}
    s.visualizerSettings={...s.visualizerSettings,aspectRatio:'16:9',resolution:'1080p',framerate:60}
   })

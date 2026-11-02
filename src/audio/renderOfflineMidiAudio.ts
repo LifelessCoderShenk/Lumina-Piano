@@ -56,7 +56,7 @@ export async function renderOfflineMidiAudioBuffer(
 
       for (const note of track.notes) {
         const noteStartSeconds = leadInSeconds + tickToSeconds(note.startTick, tempoMap)
-        const noteEndSeconds = leadInSeconds + tickToSeconds(note.endTick, tempoMap)
+        const noteEndSeconds = leadInSeconds + tickToSeconds(Math.max(note.endTick, note.sustainEndTick ?? note.endTick), tempoMap)
         const duration = Math.max(0, noteEndSeconds - noteStartSeconds)
         sampler.triggerAttackRelease(
           Tone.Frequency(note.pitch, 'midi').toNote(),
