@@ -245,8 +245,8 @@ const NOTE_LABEL_MIN_RECT_HEIGHT = 20
 const NOTE_LABEL_MIN_RECT_WIDTH = 12
 const LABEL_TEXTURE_WIDTH = 256
 const LABEL_TEXTURE_HEIGHT = 96
-const WHITE_KEY_LABEL_COLOR = '#171717'
-const BLACK_KEY_LABEL_COLOR = '#f5f5f5'
+const WHITE_KEY_LABEL_COLOR = '#66666b'
+const BLACK_KEY_LABEL_COLOR = '#b8bac2'
 const PARTICLE_FLOW_TIME_SCROLL = 0.52
 const PARTICLE_BURST_WIND_BIAS_X = 60
 const PARTICLE_FLOW_SAMPLE_EPSILON = 8
@@ -2068,8 +2068,8 @@ void main() {
       }
 
       const aspect = this.getLabelAspectRatio(label)
-      const desiredHeight = clamp(state.noteLabelSize * 1.4, 12, Math.max(12, keyHeight * 0.24))
-      const labelWidth = Math.min(bounds.width * 0.9, desiredHeight * aspect)
+      const desiredHeight = clamp(state.noteLabelSize * 0.8, 8, Math.max(8, keyHeight * 0.12))
+      const labelWidth = Math.min(bounds.width * 0.6, desiredHeight * aspect)
       const labelHeight = labelWidth / aspect
       label.sprite.position.set(
         bounds.x + (bounds.width / 2),
@@ -3228,7 +3228,7 @@ void main() {
       return null
     }
 
-    const font = keyboard ? '800 64px Arial, sans-serif' : '700 54px Arial, sans-serif'
+    const font = keyboard ? '500 64px Arial, sans-serif' : '700 54px Arial, sans-serif'
     context.font = font
     canvas.width = Math.ceil(context.measureText(text).width) + 12
     canvas.height = keyboard ? 84 : 72
@@ -3237,12 +3237,6 @@ void main() {
     context.font = font
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    if (keyboard) {
-      context.strokeStyle = color === BLACK_KEY_LABEL_COLOR ? '#101010' : '#ffffff'
-      context.lineWidth = 5
-      context.lineJoin = 'round'
-      context.strokeText(text, canvas.width / 2, canvas.height / 2)
-    }
     context.fillText(text, canvas.width / 2, canvas.height / 2)
 
     const texture = new CanvasTexture(canvas)
