@@ -330,6 +330,10 @@ interface KeyPressUniforms {
 }
 
 interface KeyPressState {
+  baseHeight: number
+  motionFrom: number
+  motionTarget: number
+  motionStart: number
   basePositionY: number
   material: ShaderMaterial
   mesh: Mesh<PlaneGeometry, ShaderMaterial>
@@ -542,6 +546,7 @@ export class ThreeRenderer implements VisualizerRenderer {
   private persistentResources: Array<{ dispose(): void }> = []
   private keyboardMaterialStates: KeyboardMaterialState[] = []
   private keyHighlightStates = new Map<number, KeyHighlightState>()
+  private physicallyHeldPitches = new Set<number>()
   private keyPressStates = new Map<number, KeyPressState>()
   private impactReflectionStates = new Map<number, ImpactReflectionState>()
   private keyboardSaberStates = new Map<number, KeyboardSaberState>()
@@ -2302,6 +2307,7 @@ void main() {
 
   private updatePlaybackActiveKeys(currentTick: number, state: AppState): void {
     const activePitches = new Set<number>()
+    this.physicallyHeldPitches.clear()
 
     if (state.projectData == null || spatialIndex.getTotalNoteCount() === 0) {
       this.playbackActiveKeyPitches = activePitches
@@ -2316,6 +2322,9 @@ void main() {
     )
 
     for (const indexedNote of candidates) {
+      if (indexedNote.note.startTick <= currentTick && indexedNote.note.endTick > currentTick) {
+        this.physicallyHeldPitches.add(indexedNote.note.pitch)
+      }
       if (indexedNote.note.startTick <= currentTick && indexedNote.note.visualEndTick >= currentTick) {
         activePitches.add(indexedNote.note.pitch)
         if (state.createNoteColors.mode === 'dynamic' || state.createNoteColors.mode === 'random') {
@@ -3746,6 +3755,10 @@ void main() {
 
     this.staticResources.push(material, shadowMaterial)
     this.keyPressStates.set(pitch, {
+      baseHeight: height,
+      motionFrom: 0,
+      motionTarget: 0,
+      motionStart: 0,
       basePositionY: mesh.position.y,
       material,
       mesh,
@@ -4270,6 +4283,10 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
 
     for (const state of this.keyPressStates.values()) {
       state.uniforms.pressStrength.value = 0
+      state.motionFrom = 0
+      state.motionTarget = 0
+      state.motionStart = animationTimeSeconds
+      state.mesh.scale.y = state.baseHeight
       state.mesh.position.y = state.basePositionY
       state.mesh.visible = false
       state.shadowMaterial.opacity = 0
@@ -4340,16 +4357,36 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
 
       const pressState = this.keyPressStates.get(pitch)
       if (pressState != null) {
-        pressState.uniforms.pressStrength.value = nextStrength
+        // Finger motion follows key release, independently of pedal light and glow.
+        const held = this.physicallyHeldPitches.has(pitch)
+          || this.explicitActiveKeyPitches.has(pitch)
+          || this.liveSourceActiveKeyPitches.has(pitch)
+        const target = held ? 1 : 0
+        const sampleMotion = () => {
+          const duration = pressState.motionTarget > pressState.motionFrom ? 0.025 : 0.085
+          const progress = clamp((currentTimeSeconds - pressState.motionStart) / duration, 0, 1)
+          return lerp(pressState.motionFrom, pressState.motionTarget, easeOutCubic(progress))
+        }
+        if (target !== pressState.motionTarget) {
+          pressState.motionFrom = sampleMotion()
+          pressState.motionTarget = target
+          pressState.motionStart = currentTimeSeconds
+        }
+        const depression = sampleMotion()
+        if (Math.abs(depression - target) > 0.001) hasAnimatingHighlights = true
+        pressState.uniforms.pressStrength.value = depression
         pressState.uniforms.keyboardOpacity.value = this.keyboardOpacity
         pressState.uniforms.reflectionColor.value.setHex(
           this.resolveCreateModeColor(pitch, getAppState().createNoteColors),
         )
-        pressState.mesh.position.y = pressState.basePositionY - (pressState.pressDepth * nextStrength)
-        pressState.mesh.visible = nextStrength > 0.001
-        pressState.shadowMaterial.opacity = clamp(0.46 * nextStrength * this.keyboardOpacity, 0, 0.46)
+        // Keep the rear edge fixed: the front shortens in perspective as the key pivots.
+        const travel = pressState.pressDepth * depression
+        pressState.mesh.position.y = pressState.basePositionY + travel / 2
+        pressState.mesh.scale.y = pressState.baseHeight - travel
+        pressState.mesh.visible = depression > 0.001
+        pressState.shadowMaterial.opacity = clamp(0.46 * depression * this.keyboardOpacity, 0, 0.46)
         pressState.shadowMaterial.needsUpdate = true
-        pressState.shadowMesh.visible = nextStrength > 0.001
+        pressState.shadowMesh.visible = depression > 0.001
       }
 
       const keyboardSaber = this.keyboardSaberStates.get(pitch)

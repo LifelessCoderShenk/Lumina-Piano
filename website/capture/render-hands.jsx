@@ -45,7 +45,7 @@ button.onclick=async()=>{
    s.particleSettings={...s.particleSettings,enabled:true,density:85,glow:120,lifetime:165,size:75,speed:115,spread:110}
    if (midiFile === 'chopin-showcase-excerpt.mid') {
     s.particleSettings={...s.particleSettings,style:'spark',density:42,glow:85,lifetime:80,size:65,speed:65,spread:55}
-    s.noteLabelsOnNotes=true
+    s.noteLabelsOnKeys=true
     s.noteLabelFormat='name'
     s.noteLabelSize=22
     s.noteLabelColor='#FFFFFF'

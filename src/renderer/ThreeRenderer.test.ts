@@ -1021,7 +1021,7 @@ describe('ThreeRenderer', () => {
 
     await renderer.init(canvas)
 
-    expect((renderer as any).keyboardLabelSprites).toHaveLength(0)
+    expect((renderer as any).keyboardLabelSprites).toHaveLength(88)
     useAppStore.getState().setBackgroundColor('#393939')
     expect(mockRendererSetClearColor).toHaveBeenLastCalledWith(
       expect.objectContaining({ value: '#393939' }),
@@ -1254,6 +1254,7 @@ describe('ThreeRenderer', () => {
     expect(keyPressState.mesh.visible).toBe(false)
 
     ;(renderer as any).playbackActiveKeyPitches = new Set([60])
+    ;(renderer as any).physicallyHeldPitches = new Set([60])
     ;(renderer as any).applyActiveKeyHighlights(1)
     ;(renderer as any).applyActiveKeyHighlights(1.03)
 
@@ -1265,11 +1266,12 @@ describe('ThreeRenderer', () => {
     expect(highlightState.material.opacity).toBeCloseTo(0.45, 3)
     expect(keyPressState.uniforms.pressStrength.value).toBeCloseTo(1, 3)
     expect(keyPressState.mesh.visible).toBe(true)
-    expect(keyPressState.mesh.position.y).toBeLessThan(keyPressState.basePositionY)
+    expect(keyPressState.mesh.position.y).toBeGreaterThan(keyPressState.basePositionY)
     expect(keyPressState.shadowMaterial.opacity).toBeCloseTo(0.46, 3)
     expect(keyPressState.shadowMesh.visible).toBe(true)
 
     ;(renderer as any).playbackActiveKeyPitches = new Set()
+    ;(renderer as any).physicallyHeldPitches = new Set()
     ;(renderer as any).applyActiveKeyHighlights(1.06)
     ;(renderer as any).applyActiveKeyHighlights(1.15)
 
@@ -1302,6 +1304,7 @@ describe('ThreeRenderer', () => {
     }
 
     ;(renderer as any).playbackActiveKeyPitches = new Set([61])
+    ;(renderer as any).physicallyHeldPitches = new Set([61])
     ;(renderer as any).applyActiveKeyHighlights(2)
     ;(renderer as any).applyActiveKeyHighlights(2.06)
 
@@ -1309,8 +1312,34 @@ describe('ThreeRenderer', () => {
     expect(blackPress.uniforms.blackKey.value).toBe(1)
     expect(blackPress.pressDepth).toBeLessThan(whitePress.pressDepth)
     expect(blackPress.mesh.visible).toBe(true)
-    expect(blackPress.mesh.position.y).toBeCloseTo(blackPress.basePositionY - blackPress.pressDepth, 5)
+    expect(blackPress.mesh.position.y).toBeCloseTo(blackPress.basePositionY + blackPress.pressDepth / 2, 5)
     expect(blackPress.uniforms.pressStrength.value).toBeCloseTo(1, 5)
+  })
+
+  it('releases the physical key while pedal light remains and keeps the rear edge fixed', async () => {
+    loadProjectWithNotes([
+      { endTick: 120, id: 'pedal-key', pitch: 60, startTick: 0, velocity: 90, visualEndTick: 480 },
+    ])
+    const renderer = new ThreeRenderer()
+    const canvas = document.createElement('canvas')
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 360 })
+    await renderer.init(canvas)
+    const internal = renderer as any
+    internal.resetSimulatedAnimationState(0)
+    internal.updatePlaybackActiveKeys(60, useAppStore.getState())
+    internal.applyActiveKeyHighlights(1)
+    internal.applyActiveKeyHighlights(1.06)
+    const press = internal.keyPressStates.get(60)
+    expect(press.uniforms.pressStrength.value).toBeCloseTo(1)
+    expect(press.mesh.position.y + press.mesh.scale.y / 2)
+      .toBeCloseTo(press.basePositionY + press.baseHeight / 2)
+    internal.updatePlaybackActiveKeys(120, useAppStore.getState())
+    internal.applyActiveKeyHighlights(1.1)
+    internal.applyActiveKeyHighlights(1.19)
+    expect(press.uniforms.pressStrength.value).toBe(0)
+    expect(press.mesh.visible).toBe(false)
+    expect(internal.keyHighlightStates.get(60).material.opacity).toBeGreaterThan(0)
   })
 
   it('shows keyboard beams only when enabled and follows the key highlight fade', async () => {
