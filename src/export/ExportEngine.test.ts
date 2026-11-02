@@ -517,7 +517,7 @@ describe('ExportEngine', () => {
         id: 'track-1',
         name: 'Track 1',
         notes: [
-          createNote('note-1', 0, 120, 60),
+          { ...createNote('note-1', 0, 120, 60), sustainEndTick: 480 },
           createNote('note-2', 480, 600, 64),
         ],
       },
@@ -528,6 +528,8 @@ describe('ExportEngine', () => {
 
     expect(mockRenderFrame.mock.calls[0]?.[0]).toBe(0)
     expect(mockSamplerTriggerAttackRelease.mock.calls[0]?.[2]).toBe(0)
+    // Pedal extends sound to beat one without changing the key-release time.
+    expect(mockSamplerTriggerAttackRelease.mock.calls[0]?.[1]).toBeCloseTo(0.5, 6)
     expect(mockSamplerTriggerAttackRelease.mock.calls[1]?.[2]).toBeCloseTo(0.5, 6)
   })
 
