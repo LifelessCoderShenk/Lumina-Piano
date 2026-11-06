@@ -15,6 +15,7 @@ export interface PastedNote {
   startTick: number
   endTick: number
   visualEndTick: number
+  sustainEndTick?: number
   velocity: number
   fingering?: NoteFingering
 }
@@ -113,11 +114,12 @@ export function resolveNoteTargets(noteIds: string[]): {
   }
 
   const uniqueNoteIds = [...new Set(noteIds)]
+  const selectedIds = new Set(uniqueNoteIds)
   const targetsById = new Map<string, NoteTarget>()
 
   projectData.tracks.forEach((track, trackIndex) => {
     for (const note of track.notes) {
-      if (uniqueNoteIds.includes(note.id)) {
+      if (selectedIds.has(note.id)) {
         targetsById.set(note.id, {
           note,
           track,
@@ -171,6 +173,7 @@ export function cloneNote(note: Note): Note {
     startTick: note.startTick,
     velocity: note.velocity,
     visualEndTick: note.visualEndTick,
+    ...(note.sustainEndTick == null ? {} : { sustainEndTick: note.sustainEndTick }),
     ...(note.fingering == null ? {} : { fingering: { ...note.fingering } }),
   }
 }
@@ -248,7 +251,7 @@ export function recalculateTotalTicks(tracks: Track[]): number {
 
   for (const track of tracks) {
     for (const note of track.notes) {
-      totalTicks = Math.max(totalTicks, note.visualEndTick)
+      totalTicks = Math.max(totalTicks, note.visualEndTick, note.endTick, note.sustainEndTick ?? note.endTick)
     }
   }
 

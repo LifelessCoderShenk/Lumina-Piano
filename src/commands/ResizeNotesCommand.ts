@@ -55,6 +55,7 @@ export class ResizeNotesCommand implements Command {
         ...cloneNote(target.note),
         endTick: Math.max(nextStartTick + 1, nextEndTick),
         startTick: nextStartTick,
+        ...(target.note.sustainEndTick == null ? {} : { sustainEndTick: Math.max(nextEndTick, target.note.sustainEndTick) }),
         visualEndTick: Math.max(nextStartTick + 1, nextVisualEndTick),
       })
     }

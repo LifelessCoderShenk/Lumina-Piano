@@ -31,6 +31,7 @@ export class Clipboard {
         ...copiedNote.note,
         endTick: copiedNote.note.endTick - earliestStartTick,
         startTick: copiedNote.note.startTick - earliestStartTick,
+        ...(copiedNote.note.sustainEndTick == null ? {} : { sustainEndTick: copiedNote.note.sustainEndTick - earliestStartTick }),
         visualEndTick: copiedNote.note.visualEndTick - earliestStartTick,
       },
       trackId: copiedNote.trackId,
@@ -45,6 +46,7 @@ export class Clipboard {
     const notes: PastedNote[] = this.copiedNotes.map((copiedNote) => ({
       endTick: copiedNote.note.endTick,
       pitch: copiedNote.note.pitch,
+      ...(copiedNote.note.sustainEndTick == null ? {} : { sustainEndTick: copiedNote.note.sustainEndTick }),
       startTick: copiedNote.note.startTick,
       trackId: copiedNote.trackId,
       velocity: copiedNote.note.velocity,

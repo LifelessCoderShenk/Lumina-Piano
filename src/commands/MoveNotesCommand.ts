@@ -52,6 +52,7 @@ export class MoveNotesCommand implements Command {
         pitch: clampPitch(target.note.pitch + deltaPitch),
         startTick: clampedStartTick,
         visualEndTick: target.note.visualEndTick + appliedDeltaTicks,
+        ...(target.note.sustainEndTick == null ? {} : { sustainEndTick: target.note.sustainEndTick + appliedDeltaTicks }),
       })
     }
   }

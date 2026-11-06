@@ -46,6 +46,7 @@ export class PasteNotesCommand implements Command {
         pitch: clampPitch(note.pitch),
         startTick: normalizedTargetTick + (note.startTick - earliestStartTick),
         velocity: note.velocity,
+        ...(note.sustainEndTick == null ? {} : { sustainEndTick: normalizedTargetTick + note.sustainEndTick - earliestStartTick }),
         visualEndTick: normalizedTargetTick + (note.visualEndTick - earliestStartTick),
         ...(note.fingering == null ? {} : { fingering: { ...note.fingering } }),
       }

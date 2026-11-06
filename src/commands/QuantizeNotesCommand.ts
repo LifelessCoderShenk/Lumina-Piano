@@ -45,6 +45,7 @@ export class QuantizeNotesCommand implements Command {
         endTick: target.note.endTick + deltaTicks,
         startTick: quantizedStartTick,
         visualEndTick: target.note.visualEndTick + deltaTicks,
+        ...(target.note.sustainEndTick == null ? {} : { sustainEndTick: target.note.sustainEndTick + deltaTicks }),
       })
     }
   }
