@@ -175,7 +175,7 @@ export class PlaybackEngine {
   once<K extends keyof PlaybackEventMap>(event: K, listener: PlaybackEventMap[K]): void {
     const onceListener = ((...args: Parameters<PlaybackEventMap[K]>) => {
       this.off(event, onceListener as PlaybackEventMap[K])
-      listener(...args)
+      ;(listener as (...values: Parameters<PlaybackEventMap[K]>) => void)(...args)
     }) as PlaybackEventMap[K]
 
     this.on(event, onceListener)
@@ -186,7 +186,7 @@ export class PlaybackEngine {
     ...args: Parameters<PlaybackEventMap[K]>
   ): void {
     for (const listener of [...this.listeners[event]]) {
-      listener(...args)
+      ;(listener as (...values: Parameters<PlaybackEventMap[K]>) => void)(...args)
     }
   }
 

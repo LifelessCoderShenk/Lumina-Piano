@@ -8,7 +8,7 @@ interface TextPoolOptions {
   anchorX?: number
   anchorY?: number
   fontFamily?: string
-  fontWeight?: string
+  fontWeight?: PIXI.TextStyle['fontWeight']
   dropShadow?: boolean
   dropShadowColor?: number
   dropShadowDistance?: number

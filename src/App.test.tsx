@@ -4,7 +4,7 @@ OUTPUT: Root-layout coverage for each right-pane mode, including Transcriptor.
 PURPOSE: Verifies Transcriptor takes the same full visualizer pane rather than creating a compact keyboard surface.
 */
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 

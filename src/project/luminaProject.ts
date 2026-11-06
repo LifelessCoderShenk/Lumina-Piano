@@ -1,7 +1,9 @@
+import { validateProjectTimeline } from './validateProjectTimeline'
+import { validateWorkspace } from './validateWorkspace'
 import type { ProjectData } from '../midi/types'
 import { loadProjectData } from '../midi/loadMidiProject'
 import { playbackEngine } from '../playback/PlaybackEngine'
-import { handVisualizationInitial } from '../store/defaults'
+import { createParticleSettingsDefaults, handVisualizationInitial } from '../store/defaults'
 import { useAppStore } from '../store/store'
 import type {
   AppState,
@@ -102,6 +104,8 @@ export function parseLuminaProject(text: string): LuminaProjectDocument {
   if (document.version !== LUMINA_PROJECT_VERSION) throw new Error('This Lumina project version is not supported.')
   if (typeof document.name !== 'string' || document.workspace == null) throw new Error('This Lumina project is incomplete.')
   validateProjectData(document.projectData)
+  validateProjectTimeline(document.projectData)
+  validateWorkspace(document.workspace)
   return document as LuminaProjectDocument
 }
 
@@ -134,12 +138,19 @@ export async function loadLuminaProjectFileFromPath(filePath: string): Promise<{
 }
 
 export async function applyLuminaProjectDocument(document: LuminaProjectDocument): Promise<void> {
+  validateProjectData(document.projectData)
+  validateProjectTimeline(document.projectData)
+  validateWorkspace(document.workspace)
   await loadProjectData(document.projectData)
   const maxTick = Math.max(0, document.projectData.totalTicks)
   const clampTick = (tick: number) => Math.max(0, Math.min(maxTick, Number.isFinite(tick) ? tick : 0))
   const workspace = document.workspace
   useAppStore.getState().batchUpdate((state) => {
-    Object.assign(state, workspace.appearance)
+    for (const key of APPEARANCE_KEYS) {
+      if (Object.hasOwn(workspace.appearance, key)) {
+        (state as unknown as Record<string, unknown>)[key] = structuredClone(workspace.appearance[key])
+      }
+    }
     state.backgroundImage = workspace.appearance.backgroundImage ?? null
     state.backgroundImageTreatment = workspace.appearance.backgroundImageTreatment ?? {
       blur: 0,
@@ -160,6 +171,7 @@ export async function applyLuminaProjectDocument(document: LuminaProjectDocument
     state.createNoteColors = structuredClone(workspace.createNoteColors)
     state.handVisualization = structuredClone(workspace.handVisualization ?? handVisualizationInitial)
     state.particleSettings = {
+      ...createParticleSettingsDefaults(),
       ...structuredClone(workspace.particleSettings),
       colorMode: workspace.particleSettings.colorMode ?? 'note',
       customColor: workspace.particleSettings.customColor ?? '#7ec8ff',

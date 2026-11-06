@@ -96,9 +96,10 @@ export function useTranscriptionMedia(settings: TranscriptionSettings, sessionId
 
   useEffect(() => {
     mounted.current = true
+    const activeRecorders = recorders.current
     return () => {
       mounted.current = false
-      recorders.current.forEach(({ recorder }) => { if (recorder.state !== 'inactive') recorder.stop() })
+      activeRecorders.forEach(({ recorder }) => { if (recorder.state !== 'inactive') recorder.stop() })
     }
   }, [])
 

@@ -100,7 +100,7 @@ export function MenuBar({ onExportClick }: MenuBarProps) {
           {activeMenu === title && (
             <div className={styles.dropdown}>
               {items.map((item, index) => (
-                item.divider ? (
+                'divider' in item && item.divider ? (
                   <div key={index} className={styles.divider} />
                 ) : (
                   <button

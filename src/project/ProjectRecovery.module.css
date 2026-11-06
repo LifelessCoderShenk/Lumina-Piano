@@ -1,0 +1,4 @@
+.banner { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 18px; background: #20242c; color: #e5e7eb; font: 13px var(--font-family-base); border-bottom: 1px solid #353b47; }
+.banner button { border: 1px solid #667085; border-radius: 6px; padding: 5px 10px; color: inherit; background: #303744; cursor: pointer; }
+.banner button:focus-visible { outline: 2px solid #a3c7ff; outline-offset: 3px; }
+.banner button:disabled { opacity: .5; cursor: default; }

@@ -28,18 +28,18 @@ import type { AppStore } from './types'
 enableMapSet()
 
 export const useAppStore = create<AppStore>()(
-  immer((set, get) => ({
-    ...createProjectSlice(set, get),
-    ...createPlaybackSlice(set, get),
-    ...createCameraViewportSlice(set, get),
-    ...createSelectionSlice(set, get),
-    ...createTrackSlice(set, get),
-    ...createPiecesSlice(set, get),
-    ...createCreateModeSlice(set, get),
-    ...createTranscriptionSlice(set, get),
-    ...createUISlice(set, get),
-    ...createVisualizerAppearanceSlice(set, get),
-    ...createOrchestrationActions(set, get),
+  immer((set, get, api) => ({
+    ...createProjectSlice(set, get, api),
+    ...createPlaybackSlice(set, get, api),
+    ...createCameraViewportSlice(set, get, api),
+    ...createSelectionSlice(set, get, api),
+    ...createTrackSlice(set, get, api),
+    ...createPiecesSlice(set, get, api),
+    ...createCreateModeSlice(set, get, api),
+    ...createTranscriptionSlice(set, get, api),
+    ...createUISlice(set, get, api),
+    ...createVisualizerAppearanceSlice(set, get, api),
+    ...createOrchestrationActions(set, get, api),
   })),
 )
 

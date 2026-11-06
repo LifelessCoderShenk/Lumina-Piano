@@ -155,7 +155,9 @@ export const createOrchestrationActions: StateCreator<
     } catch (error) {
       console.error(`Failed to load piece "${piece.name}":`, error)
       set((state) => {
-        state.errorMessage = `Failed to load piece "${piece.name}".`
+        const detail = error instanceof Error ? error.message : 'Check that the file is still available.'
+        state.errorMessage = `Could not open "${piece.name}". ${detail}`
+        state.loadPieceError = state.errorMessage
       })
       return false
     }

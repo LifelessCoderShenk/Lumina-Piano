@@ -1,7 +1,7 @@
 import React from 'react'
 import { Camera, Files, Palette, Sparkles } from 'lucide-react'
 import { AppIcon } from '../AppIcon/AppIcon'
-import { useAppStore, type CreateTab } from '../../store/store'
+import { useAppStore } from '../../store/store'
 import styles from './SecondBar.module.css'
 
 const secondBarStyle = {

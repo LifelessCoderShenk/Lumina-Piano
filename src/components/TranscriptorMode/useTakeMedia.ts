@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { readMediaAsset, type RecordedMediaAsset, type ResolvedMediaSegment } from '../../transcription/mediaStorage'
 import type { TranscriptionMediaSource, TranscriptionSession } from '../../transcription/types'
@@ -13,8 +13,7 @@ export interface ActiveTakeMedia {
 export function useTakeMedia(take: TranscriptionSession, latest: readonly RecordedMediaAsset[] | RecordedMediaAsset | null) {
   const [resolved, setResolved] = useState<{ id: string; segments: ResolvedMediaSegment[]; urls: Map<string, string> }>({ id: '', segments: [], urls: new Map() })
   const [warning, setWarning] = useState<string | null>(null)
-  const latestAssets = Array.isArray(latest) ? latest : latest ? [latest] : []
-  const latestKey = latestAssets.map((asset) => asset.id).join('|')
+  const latestAssets = useMemo(() => Array.isArray(latest) ? latest : latest ? [latest] : [], [latest])
   useEffect(() => {
     let canceled = false
     const urls = new Map<string, string>()
@@ -32,7 +31,7 @@ export function useTakeMedia(take: TranscriptionSession, latest: readonly Record
       setWarning(missing ? 'Some recorded inputs are unavailable. Their video is hidden and their audio is silent.' : null)
     })()
     return () => { canceled = true; urls.forEach((url) => URL.revokeObjectURL(url)) }
-  }, [take.id, take.mediaSegments, take.durationMs, latestKey])
+  }, [take.id, take.mediaSegments, take.durationMs, latestAssets])
 
   const atAll = (timeMs: number): ActiveTakeMedia[] => resolved.id !== take.id ? [] : resolved.segments.flatMap((segment) => {
     const config = take.settings.mediaSources?.find((source) => source.id === (segment.inputId ?? segment.source.inputId)) ?? null

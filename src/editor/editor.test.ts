@@ -78,7 +78,6 @@ import { resetStore, useAppStore } from '../store/store'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 import { NoteEditorController } from './NoteEditorController'
 import {
-  HANDLE_HEIGHT,
   MARQUEE_DASH_LENGTH,
   drawDashedRect,
   noteToScreenRect,

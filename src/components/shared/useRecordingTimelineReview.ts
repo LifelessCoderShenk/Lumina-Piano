@@ -54,7 +54,7 @@ export function useRecordingTimelineReview({
       playbackEngine.pause()
     }
     return true
-  }, [preRollSeconds, precomputedTempoMap, timeline.startOffsetMs])
+  }, [preRollSeconds, precomputedTempoMap, timeline])
 
   useEffect(() => () => {
     getActiveVisualizerRenderer()?.setReviewTimelineTick?.(null)

@@ -115,3 +115,24 @@ describe('Lumina project files', () => {
     expect(() => parseLuminaProject(JSON.stringify({ ...createLuminaProjectDocument({ ...useAppStore.getState(), projectData } as never, 'Test'), version: 2 }))).toThrow('version is not supported')
   })
 })
+
+describe('project failure safety', () => {
+  it.each([
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { doc.projectData.tracks[0].notes[0].pitch = 999 },
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { doc.projectData.tempoMap = [] },
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { doc.projectData.timeSignatures = [{ tick: 0, numerator: 4, denominator: 0 }] },
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { delete (doc.workspace as Partial<typeof doc.workspace>).tracks },
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { Object.assign(doc.workspace.appearance, { resetStore: 'replaced' }) },
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { doc.workspace.visualizerSettings.framerate = 999 as 60 },
+    (doc: ReturnType<typeof createLuminaProjectDocument>) => { doc.workspace.cameraOverlay.scale = Number.NaN },
+  ])('rejects malformed workspace before replacing the current project', async (corrupt) => {
+    resetStore()
+    useAppStore.setState({ projectData })
+    const doc = createLuminaProjectDocument(useAppStore.getState(), 'Safe project')
+    corrupt(doc)
+    loadProjectData.mockClear()
+    await expect(applyLuminaProjectDocument(doc)).rejects.toThrow()
+    expect(loadProjectData).not.toHaveBeenCalled()
+    expect(useAppStore.getState().projectData).toEqual(projectData)
+  })
+})

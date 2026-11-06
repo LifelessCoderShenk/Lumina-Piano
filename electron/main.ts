@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 
 import { spawnProcess } from './spawnProcess'
+import { atomicWrite } from './atomicWrite'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -166,7 +167,11 @@ app.on('ready', () => {
     }
 
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
-    await writeFile(filePath, bytes)
+    if (path.extname(filePath).toLowerCase() === '.lumina') {
+      await atomicWrite(filePath, bytes)
+    } else {
+      await writeFile(filePath, bytes)
+    }
   })
 
   ipcMain.handle('fs:readFile', async (_event, filePath: string) => {

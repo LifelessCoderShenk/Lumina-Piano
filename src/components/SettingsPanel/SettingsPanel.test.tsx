@@ -175,11 +175,11 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByLabelText('Show note names on falling notes'))
 
     expect(useAppStore.getState().backgroundColor).toBe('#303030')
-    expect(useAppStore.getState().noteLabelsOnNotes).toBe(false)
-    expect(useAppStore.getState().noteLabelsOnKeys).toBe(false)
+    expect(useAppStore.getState().noteLabelsOnNotes).toBe(true)
+    expect(useAppStore.getState().noteLabelsOnKeys).toBe(true)
 
     fireEvent.click(screen.getByLabelText('Show note names on keyboard keys'))
-    expect(useAppStore.getState().noteLabelsOnKeys).toBe(true)
+    expect(useAppStore.getState().noteLabelsOnKeys).toBe(false)
   })
 
   it('adds, previews, replaces, and removes a custom background image', async () => {

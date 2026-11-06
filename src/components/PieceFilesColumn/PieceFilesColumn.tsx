@@ -42,15 +42,21 @@ export function PieceFilesColumn({
   const addMidi = async () => {
     if (activeAction != null) return
     const picker = window.electronAPI?.openMidiFile ?? window.electronAPI?.dialog?.openMidiFile
-    if (typeof picker !== 'function') return
-    setActiveAction('midi')
+    if (typeof picker !== 'function') {
+      setProjectMessage({ kind: 'error', text: 'MIDI import is unavailable. Restart the desktop app and try again.' })
+      return
+    }
+    setActiveAction('midi'); setProjectMessage(null)
     try {
       const filePath = await picker()
       if (!filePath || !isMidiFilePath(filePath)) return
       const piece = createPiece(filePath)
       addPiece(piece)
-      await loadPiece(piece.id)
+      const loaded = await loadPiece(piece.id)
+      if (!loaded) throw new Error(useAppStore.getState().loadPieceError ?? 'Could not import MIDI.')
       onSelectPieceSource('new')
+    } catch (error) {
+      setProjectMessage({ kind: 'error', text: error instanceof Error ? error.message : 'Could not import MIDI.' })
     } finally { setActiveAction(null) }
   }
 

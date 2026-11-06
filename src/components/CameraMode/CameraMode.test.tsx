@@ -965,10 +965,11 @@ function CameraModeHarness({
     : '40%'
 
   React.useEffect(() => {
-    mockActiveVisualizerCanvas.current = visualizerCanvasRef.current
+    const canvas = visualizerCanvasRef.current
+    mockActiveVisualizerCanvas.current = canvas
 
     return () => {
-      if (mockActiveVisualizerCanvas.current === visualizerCanvasRef.current) {
+      if (mockActiveVisualizerCanvas.current === canvas) {
         mockActiveVisualizerCanvas.current = null
       }
     }

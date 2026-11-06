@@ -1,23 +1,11 @@
+import { PIANO_SAMPLE_URLS, PIANO_ATTACK_SECONDS, PIANO_RELEASE_SECONDS } from './pianoSamples'
 import * as Tone from 'tone'
 
 import type { AppState } from '../store/store'
 import { tickToSeconds } from '../tempo/tempoMap'
 
-const ATTACK_SECONDS = 0.01
-const RELEASE_SECONDS = 0.5
 const MIN_SCHEDULE_OFFSET_SECONDS = 0.001
-const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/'
 
-const SALAMANDER_SAMPLE_URLS = {
-  A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3',
-  A1: 'A1.mp3', C2: 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3',
-  A2: 'A2.mp3', C3: 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3',
-  A3: 'A3.mp3', C4: 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3',
-  A4: 'A4.mp3', C5: 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3',
-  A5: 'A5.mp3', C6: 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3',
-  A6: 'A6.mp3', C7: 'C7.mp3', 'D#7': 'Ds7.mp3', 'F#7': 'Fs7.mp3',
-  A7: 'A7.mp3', C8: 'C8.mp3',
-} as const
 
 export async function renderOfflineMidiAudioBuffer(
   state: AppState,
@@ -41,10 +29,10 @@ export async function renderOfflineMidiAudioBuffer(
 
   const renderedBuffer = await Tone.Offline(async () => {
     const sampler = new Tone.Sampler({
-      attack: ATTACK_SECONDS,
-      baseUrl: SALAMANDER_BASE_URL,
-      release: RELEASE_SECONDS,
-      urls: SALAMANDER_SAMPLE_URLS,
+      attack: PIANO_ATTACK_SECONDS,
+      baseUrl: '',
+      release: PIANO_RELEASE_SECONDS,
+      urls: PIANO_SAMPLE_URLS,
     }).toDestination()
 
     await Tone.loaded()

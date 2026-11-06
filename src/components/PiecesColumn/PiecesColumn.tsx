@@ -43,22 +43,8 @@ export function PiecesColumn({ showSamplePieces = false }: PiecesColumnProps) {
   const pieces = useAppStore((state) => state.pieces)
   const currentPieceId = useAppStore((state) => state.currentPieceId)
   const loadPieceError = useAppStore((state) => state.loadPieceError)
-  const clearLoadPieceError = useAppStore((state) => state.clearLoadPieceError)
   const loadPiece = useAppStore((state) => state.loadPiece)
 
-  useEffect(() => {
-    if (loadPieceError == null) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      clearLoadPieceError()
-    }, 3000)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [clearLoadPieceError, loadPieceError])
 
   const handlePieceClick = async (pieceId: string) => {
     if (loadingPieceId != null) {

@@ -1,3 +1,4 @@
+import { PIANO_SAMPLE_URLS, PIANO_ATTACK_SECONDS, PIANO_RELEASE_SECONDS } from './pianoSamples'
 import * as Tone from 'tone'
 
 import type { Note, Track } from '../midi/types'
@@ -13,40 +14,7 @@ const SCHEDULE_OVERLAP_MS = 50
 const SEEK_THRESHOLD_TICKS = 480
 const MIN_VOLUME_DB = -60
 const MAX_VOLUME_DB = 0
-const SALAMANDER_BASE_URL = 'https://tonejs.github.io/audio/salamander/'
 
-const SALAMANDER_SAMPLE_URLS = {
-  A0: 'A0.mp3',
-  C1: 'C1.mp3',
-  'D#1': 'Ds1.mp3',
-  'F#1': 'Fs1.mp3',
-  A1: 'A1.mp3',
-  C2: 'C2.mp3',
-  'D#2': 'Ds2.mp3',
-  'F#2': 'Fs2.mp3',
-  A2: 'A2.mp3',
-  C3: 'C3.mp3',
-  'D#3': 'Ds3.mp3',
-  'F#3': 'Fs3.mp3',
-  A3: 'A3.mp3',
-  C4: 'C4.mp3',
-  'D#4': 'Ds4.mp3',
-  'F#4': 'Fs4.mp3',
-  A4: 'A4.mp3',
-  C5: 'C5.mp3',
-  'D#5': 'Ds5.mp3',
-  'F#5': 'Fs5.mp3',
-  A5: 'A5.mp3',
-  C6: 'C6.mp3',
-  'D#6': 'Ds6.mp3',
-  'F#6': 'Fs6.mp3',
-  A6: 'A6.mp3',
-  C7: 'C7.mp3',
-  'D#7': 'Ds7.mp3',
-  'F#7': 'Fs7.mp3',
-  A7: 'A7.mp3',
-  C8: 'C8.mp3',
-} as const
 
 interface ScheduledNote {
   note: Note
@@ -84,7 +52,9 @@ export class AudioScheduler {
     let loadError: unknown
 
     this.sampler = new Tone.Sampler({
-      baseUrl: SALAMANDER_BASE_URL,
+      baseUrl: '',
+      attack: PIANO_ATTACK_SECONDS,
+      release: PIANO_RELEASE_SECONDS,
       onerror: (error: unknown) => {
         loadFailed = true
         loadError = error
@@ -94,17 +64,23 @@ export class AudioScheduler {
           this.isInitialized = true
         }
       },
-      urls: SALAMANDER_SAMPLE_URLS,
+      urls: PIANO_SAMPLE_URLS,
     }).toDestination()
 
     try {
       await Tone.loaded()
     } catch (error: unknown) {
-      throw new AudioSchedulerError('Failed to load piano samples.', 'SAMPLE_LOAD_FAILED', error)
+      this.sampler?.dispose()
+      this.sampler = null
+      this.isInitialized = false
+      throw new AudioSchedulerError('Piano samples could not be loaded. Restart Lumina and try again.', 'SAMPLE_LOAD_FAILED', error)
     }
 
     if (loadFailed) {
-      throw new AudioSchedulerError('Failed to load piano samples.', 'SAMPLE_LOAD_FAILED', loadError)
+      this.sampler?.dispose()
+      this.sampler = null
+      this.isInitialized = false
+      throw new AudioSchedulerError('Piano samples could not be loaded. Restart Lumina and try again.', 'SAMPLE_LOAD_FAILED', loadError)
     }
 
     if (!this.isInitialized) {

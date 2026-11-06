@@ -318,15 +318,3 @@ function phaseToLabel(phase: ExportProgress['phase']): string {
 function getElectronAPI() {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  if (typeof error === 'string') {
-    return error
-  }
-
-  return 'Export failed'
-}

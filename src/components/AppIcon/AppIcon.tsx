@@ -1,6 +1,6 @@
 import type { LucideIcon, LucideProps } from 'lucide-react'
 
-export type AppIconSize = 16 | 18 | 20 | 24
+export type AppIconSize = 14 | 15 | 16 | 18 | 19 | 20 | 24
 
 interface AppIconProps extends Omit<LucideProps, 'absoluteStrokeWidth' | 'color' | 'fill' | 'size' | 'stroke' | 'strokeWidth'> {
   icon: LucideIcon

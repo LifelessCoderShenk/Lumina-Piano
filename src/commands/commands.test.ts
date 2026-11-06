@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Note, ProjectData, Track } from '../midi/types'
+import type { Note, ProjectData } from '../midi/types'
 import { spatialIndex } from '../spatial/SpatialIndex'
 import { resetStore, useAppStore } from '../store/store'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'

@@ -19,6 +19,7 @@ import { getActiveVisualizerRenderer } from './renderer/activeVisualizerRenderer
 import { useCommandShortcuts } from './commands/useCommandShortcuts'
 import { useAppStore } from './store/store'
 import styles from './App.module.css'
+import { ProjectRecovery } from './project/ProjectRecovery'
 
 const appRootStyle = {
   backgroundColor: 'var(--color-bg)',
@@ -129,6 +130,7 @@ export function App() {
   ) {
     return (
       <div className={styles.app} style={appRootStyle}>
+        <ProjectRecovery />
         <div className={styles.createShell}>
           <EditPanel
             cameraSourceDimensions={cameraSourceDimensions}

@@ -10,7 +10,8 @@
     "dev": "electron-forge start",
     "build": "electron-forge package",
     "make": "electron-forge make",
-    "start": "electron-forge start"
+    "start": "electron-forge start",
+    "typecheck:app": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
     "@pixi/filter-bloom": "^5.1.1",
@@ -38,6 +39,7 @@
     "@types/node": "^25.8.0",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^4.3.4",
     "dependency-cruiser": "^18.0.0",
     "electron": "^42.1.0",

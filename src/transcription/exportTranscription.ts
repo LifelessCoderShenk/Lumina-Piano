@@ -1,3 +1,4 @@
+import { renderSampledPiano } from '../audio/renderSampledPiano'
 import { VexFlow } from 'vexflow'
 import { scoreFontData } from './scoreFontData'
 import { Midi } from '@tonejs/midi'
@@ -79,39 +80,8 @@ export async function createScorePrintHtml(notes: readonly CapturedNote[], setti
   return `<!doctype html><html><head><title>Transcribed piano</title><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:"><style>@font-face{font-family:Bravura;src:url(${scoreFontData}) format('woff2')}@page{size:A4 portrait;margin:14mm}body{margin:0;color:#111;font-family:Arial,sans-serif}section{break-after:page}section:last-child{break-after:auto}h1{font-size:20px;margin:0 0 8px}p{font-size:12px}svg{display:block;width:100%;height:auto}footer{text-align:center;font-size:11px;margin-top:16px}</style></head><body>${pages.join('')}</body></html>`
 }
 
-/** Local piano-like synthesis works offline and does not alter live playback. */
-export async function renderTranscriptionAudio(notes: readonly CapturedNote[], minimumDuration = 0, volume = 1): Promise<AudioBuffer> {
-  const duration = Math.max(minimumDuration, notes.reduce((end, note) => Math.max(end, note.endMs / 1000), 0) + 1)
-  const context = new OfflineAudioContext(1, Math.ceil(duration * 44100), 44100)
-  const master = context.createGain()
-  master.gain.value = 0.2 * volume
-  const compressor = context.createDynamicsCompressor()
-  master.connect(compressor).connect(context.destination)
-  for (const note of notes) {
-    const start = note.startMs / 1000
-    const end = Math.max(start + 0.001, note.endMs / 1000)
-    const envelope = context.createGain()
-    const peak = note.velocity / 127
-    envelope.gain.setValueAtTime(0, start)
-    envelope.gain.linearRampToValueAtTime(peak, start + Math.min(0.004, (end - start) / 2))
-    envelope.gain.setTargetAtTime(peak * 0.3, start + Math.min(0.004, (end - start) / 2), 0.3)
-    envelope.gain.cancelAndHoldAtTime(end)
-    envelope.gain.setTargetAtTime(0, end, 0.12)
-    envelope.connect(master)
-    for (const [harmonic, gain] of [[1, 1], [2, 0.3], [3, 0.12]]) {
-      const frequency = 440 * 2 ** ((note.pitch - 69) / 12) * harmonic
-      if (frequency >= 22050) continue
-      const oscillator = context.createOscillator()
-      const level = context.createGain()
-      oscillator.frequency.value = frequency
-      level.gain.value = gain
-      oscillator.connect(level).connect(envelope)
-      oscillator.start(start)
-      oscillator.stop(end + 0.9)
-    }
-  }
-  return context.startRendering()
-}
+/** Uses the same bundled piano samples as Create playback and export. */
+export const renderTranscriptionAudio = renderSampledPiano
 
 export async function exportTranscription(editedNotes: readonly CapturedNote[], settings: TranscriptionSettings, format: TranscriptionExportFormat, options: TranscriptionExportOptions = {}): Promise<string | null> {
   const notes = format !== 'pdf' && settings.exportTiming === 'original' ? options.originalNotes ?? editedNotes : editedNotes

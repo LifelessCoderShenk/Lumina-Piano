@@ -468,10 +468,7 @@ vi.mock('three/examples/jsm/postprocessing/SMAAPass.js', () => {
   class SMAAPass {
     dispose = mockSmaaPassDispose
 
-    constructor(
-      public width: number,
-      public height: number,
-    ) {}
+    constructor() {}
   }
 
   return { SMAAPass }
@@ -899,7 +896,7 @@ describe('ThreeRenderer', () => {
     expect((renderer as any).renderer.toneMapping).toBe('ACESFilmicToneMapping')
     expect((renderer as any).renderer.outputColorSpace).toBe('SRGBColorSpace')
     expect((renderer as any).renderer.toneMappingExposure).toBe(1.08)
-    expect((renderer as any).smaaPass).toMatchObject({ height: 720, width: 1280 })
+    expect(mockEffectComposerAddPass).toHaveBeenCalledWith((renderer as any).smaaPass)
     expect((renderer as any).bloomCompositePass.uniforms.bloomTexture.value).toBe((renderer as any).bloomComposer.renderTarget2.texture)
     expect((renderer as any).bloomComposer.renderToScreen).toBe(false)
     expect((renderer as any).bloomCompositePass.uniforms.bloomDebugView.value).toBe(0)

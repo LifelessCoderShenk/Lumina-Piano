@@ -134,7 +134,7 @@ export function TranscriptorMode() {
   useLayoutEffect(() => {
     const host = document.getElementById('transcription-sidebar-root')
     if (host !== sidebarHost) setSidebarHost(host)
-  })
+  }, [sidebarHost])
 
   const score = useMemo(() => buildScoreDocument(notes, settings), [notes, settings])
   const reviewIds = useMemo(() => notes.filter((note) => note.startMs <= review.timeMs && note.endMs > review.timeMs).map((note) => note.id), [notes, review.timeMs])

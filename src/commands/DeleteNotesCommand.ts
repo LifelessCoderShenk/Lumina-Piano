@@ -9,11 +9,6 @@ import {
   resolveNoteTargets,
 } from './Command'
 
-type DeletedNoteSnapshot = {
-  trackId: string
-  note: Note
-}
-
 export class DeleteNotesCommand implements Command {
   readonly description: string
 

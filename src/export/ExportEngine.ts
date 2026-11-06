@@ -528,32 +528,6 @@ function formatPsnr(psnrDb: number): string {
   return Number.isFinite(psnrDb) ? `${psnrDb.toFixed(1)} dB` : 'lossless'
 }
 
-function shouldPlayTrack(trackId: string, state: AppState): boolean {
-  const anySoloed = Object.values(state.trackSoloed).some(Boolean)
-  if (anySoloed) {
-    return state.trackSoloed[trackId] === true
-  }
-
-  return state.trackMuted[trackId] !== true
-}
-
-function countScheduledNotes(
-  projectData: NonNullable<AppState['projectData']>,
-  state: AppState,
-): number {
-  let count = 0
-
-  for (const track of projectData.tracks) {
-    if (!shouldPlayTrack(track.id, state)) {
-      continue
-    }
-
-    count += track.notes.length
-  }
-
-  return count
-}
-
 function getTotalFrames(
   fps: VisualizerSettings['framerate'],
   totalDurationSeconds: number,

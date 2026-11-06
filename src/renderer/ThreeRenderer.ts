@@ -1280,7 +1280,7 @@ export class ThreeRenderer implements VisualizerRenderer {
     const material = new ShaderMaterial({
       depthTest: false,
       depthWrite: false,
-      uniforms,
+      uniforms: { ...uniforms },
       vertexShader: `
 varying vec2 vBackgroundUv;
 
@@ -2581,7 +2581,7 @@ void main() {
   gl_FragColor = vec4(color * shimmer, alpha);
 }`,
       transparent: true,
-      uniforms,
+      uniforms: { ...uniforms },
       vertexShader: `
 uniform float particleTime;
 uniform float pixelRatio;
@@ -2652,7 +2652,7 @@ void main() {
       seeds,
       sizeAttribute,
       sizes,
-      uniforms,
+      uniforms: { ...uniforms },
       velocityAttribute,
       velocities,
     }
@@ -3627,7 +3627,7 @@ void main() {
         }
       `,
       transparent: true,
-      uniforms,
+      uniforms: { ...uniforms },
       vertexShader: `
         varying vec2 vUv;
 
@@ -3653,7 +3653,7 @@ void main() {
       pitch,
       velocity: 80,
       startTimeSeconds: Number.NaN,
-      uniforms,
+      uniforms: { ...uniforms },
     })
   }
 
@@ -3711,7 +3711,7 @@ void main() {
         }
       `,
       transparent: true,
-      uniforms,
+      uniforms: { ...uniforms },
       vertexShader: `
         varying vec2 vUv;
 
@@ -3759,7 +3759,7 @@ void main() {
       pressDepth,
       shadowMaterial,
       shadowMesh,
-      uniforms,
+      uniforms: { ...uniforms },
     })
   }
 
@@ -3798,7 +3798,7 @@ void main() {
         }
       `,
       transparent: true,
-      uniforms,
+      uniforms: { ...uniforms },
       vertexShader: `
         varying vec2 vUv;
 
@@ -4618,10 +4618,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       `,
     }, 'baseTexture')
     this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
-    this.smaaPass = new SMAAPass(
-      this.viewportWidth * this.composerPixelRatio,
-      this.viewportHeight * this.composerPixelRatio,
-    )
+    this.smaaPass = new SMAAPass()
     this.outputPass = new OutputPass()
 
     this.finalComposer.addPass(this.finalRenderPass)

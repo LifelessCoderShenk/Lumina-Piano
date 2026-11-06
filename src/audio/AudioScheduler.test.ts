@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Note, ProjectData, Track } from '../midi/types'
+import type { Note, Track } from '../midi/types'
 import { resetStore, useAppStore } from '../store/store'
 import type { PrecomputedTempoMap } from '../tempo/tempoMap'
 import { AudioScheduler, AudioSchedulerError } from './AudioScheduler'
@@ -97,14 +97,14 @@ afterEach(() => {
 })
 
 describe('AudioScheduler initialization', () => {
-  it('creates Tone.Sampler with the Salamander base URL and becomes initialized after samples load', async () => {
+  it('creates Tone.Sampler with bundled piano samples and becomes initialized after samples load', async () => {
     const scheduler = new AudioScheduler()
 
     await scheduler.init()
 
     expect(MockSampler).toHaveBeenCalledWith(
       expect.objectContaining({
-        baseUrl: 'https://tonejs.github.io/audio/salamander/',
+        baseUrl: '',
       }),
     )
     expect(mockToneLoaded).toHaveBeenCalled()
@@ -148,6 +148,11 @@ describe('AudioScheduler initialization', () => {
     await expect(scheduler.init()).rejects.toMatchObject({
       code: 'SAMPLE_LOAD_FAILED',
     })
+    expect(scheduler.isReady()).toBe(false)
+    expect(mockSamplerDispose).toHaveBeenCalled()
+    await scheduler.init()
+    expect(scheduler.isReady()).toBe(true)
+    scheduler.destroy()
   })
 })
 

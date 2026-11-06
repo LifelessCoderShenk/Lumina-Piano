@@ -4,7 +4,6 @@ import {
   cloneNote,
   commitProjectData,
   createUpdatedProjectData,
-  describeCommand,
   requireProjectData,
   resolveNoteTargets,
 } from './Command'
