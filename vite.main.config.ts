@@ -7,9 +7,9 @@ export default defineConfig({
     lib: {
       entry: 'electron/main.ts',
       formats: ['cjs'],
-      fileName: () => 'main.js',
+      fileName: () => 'main.cjs',
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: [
         'electron',
         'ffmpeg-static',

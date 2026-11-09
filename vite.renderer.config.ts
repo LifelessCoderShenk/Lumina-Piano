@@ -8,7 +8,7 @@ export default defineConfig({
   root: '.',
   build: {
     outDir: '.vite/renderer/main_window',
-    rollupOptions: {
+    rolldownOptions: {
       input: 'index.html',
     },
   },

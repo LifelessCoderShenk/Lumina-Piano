@@ -1,5 +1,8 @@
 const { app, BrowserWindow, session } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const ffmpeg = require('ffmpeg-static');
 app.setPath('userData', path.join(__dirname, '../.tmp/readiness-smoke-profile'));
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
@@ -41,6 +44,29 @@ app.whenReady().then(async () => {
       return {persistedAcrossReload:true,pedalPreserved:true,discardVerified:true};
     })()`);
     console.log('RECOVERY_SMOKE_PASS',JSON.stringify(recovered));
+    const directory = path.resolve(__dirname, '../.tmp/export-smoke');
+    fs.mkdirSync(directory, { recursive: true });
+    const base = path.join(directory, 'fixture.mp4');
+    const wav = path.join(directory, 'fixture.wav');
+    const run = args => execFileSync(ffmpeg, args, { windowsHide: true, timeout: 120000, stdio: 'pipe' });
+    run(['-y','-f','lavfi','-i','testsrc2=size=1280x720:rate=30','-t','2','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',base]);
+    run(['-y','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2',wav]);
+    for (const format of ['mp4','webm']) {
+      const output = path.join(directory, 'output.' + format);
+      const inputs = { base, wav, output, format };
+      const args = await win.webContents.executeJavaScript(`(async () => {
+        const { videoTimelineFfmpegArgs } = await import('/src/transcription/videoExport.ts');
+        const { normalizeTranscriptionSettings } = await import('/src/transcription/settings.ts');
+        const { base, wav, output, format } = ${JSON.stringify(inputs)};
+        const source = { id:'fixture',kind:'video',hasMicrophone:false };
+        const segments = [0,1000].map(startMs => ({source,sourceId:source.id,startMs,sourceOffsetMs:0,durationMs:1000,kind:'video'}));
+        return videoTimelineFfmpegArgs(base,wav,[{source,path:base}],segments,output,format,2,normalizeTranscriptionSettings({}));
+      })()`);
+      run(args);
+      run(['-v','error','-i',output,'-f','null','-']);
+      if (fs.statSync(output).size < 1000) throw new Error('Export is empty');
+      console.log('EXPORT_SMOKE_PASS',JSON.stringify({format,bytes:fs.statSync(output).size,decoded:true}));
+    }
     app.exit(0);
   } catch(error) { console.error(error); app.exit(1); }
 });
