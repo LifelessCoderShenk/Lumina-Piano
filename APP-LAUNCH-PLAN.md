@@ -40,7 +40,7 @@ Baseline checks -> project safety -> audio consistency -> first-use walkthrough 
 - Failed MIDI/library imports now show a persistent actionable error.
 - Fixed sustain timing loss in edit snapshots, moves, quantization, copy/paste, delete undo, velocity changes, and project-length recalculation.
 - Long-workflow automated check passes: real 20,000-note MIDI import with tempo change, edit, serialization, and reopen with full project equality (over 30 minutes). This does not claim a 30-minute realtime playback or video export soak test.
-- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 783 tests passed on 2026-11-05.
+- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 784 tests passed on 2026-11-08.
 - Production type check passes. Renderer, main, and preload production builds pass; Forge 8 development startup passes. Warnings remain for the large renderer bundle and future native config loading.
 - App lint (`npx eslint src electron`): zero errors, 106 code-size warnings.
 - Full TypeScript checking including legacy test doubles remains separate from the passing production check.
@@ -48,6 +48,7 @@ Baseline checks -> project safety -> audio consistency -> first-use walkthrough 
 - Silent real-Electron audio smoke check passed with external network requests blocked: stereo, 3.5-second output, nonzero sustained audio, no clipping, and silent post-release tail. This verifies rendering, not subjective listening quality.
 - Desktop startup and recovery prompt visually verified on patched Electron. Restore clicks failed twice with Windows `SendInput sent 0 of 1 events; GetLastError=87`; the manual walkthrough remains incomplete. Actual isolated Electron IndexedDB recovery passed save -> renderer reload -> read -> discard, retaining pedal timing.
 - Actual FFmpeg export smoke passes for MP4 and WebM: the app timeline-composition function overlays repeated synthetic fixture clips, encodes two-second files, and both files decode fully without errors. This is not a full visualizer export or long-duration sync assessment.
+- Export timing fixed: FFmpeg mixing ignored timestamp-only offsets, starting recorded segments too early. Explicit sample delay now places audio correctly. Real MP3/MP4 outputs verify silence before a one-second start, signal during the segment, and silence after it. Audio-only timelines also correctly map the original video stream.
 - Manual gates still pending: complete save/reopen/export matrix, camera/microphone denial and disconnection, long-performance checks, offline desktop playback/export, visual/keyboard walkthrough, and audible sound-quality review.
 - MIDI keyboard checks explicitly deferred at the user's request: no hardware connected. Software tests do not substitute for this gate.
 - Distribution and commercial release work intentionally deferred until these gates are reviewed.

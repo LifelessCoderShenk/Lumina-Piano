@@ -109,14 +109,14 @@ export function videoTimelineFfmpegArgs(base: string, wav: string, cameraInputs:
     const sourceVolume = config?.volume ?? settings.microphoneVolume ?? 1
     if ((kind === 'audio' || includeLegacyMic) && sourceVolume > 0 && settings.exportAudioMix !== 'synth') {
       const mic = `mic${index}`
-      filters.push(`[${audioPads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${sourceStart.toFixed(6)}:duration=${clipDuration.toFixed(6)},asetpts=PTS-STARTPTS+${timelineStart.toFixed(6)}/TB,volume=${sourceVolume}[${mic}]`)
+      filters.push(`[${audioPads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${sourceStart.toFixed(6)}:duration=${clipDuration.toFixed(6)},asetpts=PTS-STARTPTS,adelay=${(timelineStart * 1000).toFixed(3)}:all=1,volume=${sourceVolume}[${mic}]`)
       micLabels.push(`[${mic}]`)
     }
   })
   filters.push(`[${audioIndex}:a]volume=${settings.exportAudioMix === 'recorded' ? 0 : settings.pianoVolume ?? 1},apad[piano]`)
   if (micLabels.length > 0) filters.push(`[piano]${micLabels.join('')}amix=inputs=${micLabels.length + 1}:duration=longest:normalize=0,alimiter=limit=0.95:level=false[audio]`)
   else filters.push('[piano]alimiter=limit=0.95:level=false[audio]')
-  args.push('-filter_complex', filters.join(';'), '-map', `[${video}]`, '-map', '[audio]', '-t', duration.toFixed(6), '-r', String(FPS))
+  args.push('-filter_complex', filters.join(';'), '-map', video === '0:v' ? '0:v' : `[${video}]`, '-map', '[audio]', '-t', duration.toFixed(6), '-r', String(FPS))
   if (format === 'mp4') args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart')
   else args.push('-c:v', 'libvpx-vp9', '-crf', '28', '-b:v', '0', '-c:a', 'libopus', '-b:a', '160k')
   return [...args, output]
@@ -154,7 +154,7 @@ export function audioTimelineFfmpegArgs(wav: string, mediaInputs: readonly Camer
     const label = `recorded${index}`
     const rawTimelineStart = (segment.startMs + (config?.latencyMs ?? 0)) / 1000
     const sourceStart = Math.max(0, segment.sourceOffsetMs / 1000 - Math.min(0, rawTimelineStart))
-    filters.push(`[${pads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${sourceStart.toFixed(6)}:duration=${Math.max(.001, segment.durationMs / 1000).toFixed(6)},asetpts=PTS-STARTPTS+${Math.max(0, rawTimelineStart).toFixed(6)}/TB,volume=${volume}[${label}]`)
+    filters.push(`[${pads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${sourceStart.toFixed(6)}:duration=${Math.max(.001, segment.durationMs / 1000).toFixed(6)},asetpts=PTS-STARTPTS,adelay=${(Math.max(0, rawTimelineStart) * 1000).toFixed(3)}:all=1,volume=${volume}[${label}]`)
     recorded.push(`[${label}]`)
   })
   if (recorded.length) filters.push(`[piano]${recorded.join('')}amix=inputs=${recorded.length + 1}:duration=longest:normalize=0,alimiter=limit=0.95:level=false[audio]`)

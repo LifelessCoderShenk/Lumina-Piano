@@ -67,6 +67,30 @@ app.whenReady().then(async () => {
       if (fs.statSync(output).size < 1000) throw new Error('Export is empty');
       console.log('EXPORT_SMOKE_PASS',JSON.stringify({format,bytes:fs.statSync(output).size,decoded:true}));
     }
+    for (const format of ['mp3','mp4']) {
+      const output = path.join(directory, 'delayed.' + format);
+      const args = await win.webContents.executeJavaScript(`(async () => {
+        const { audioTimelineFfmpegArgs, videoTimelineFfmpegArgs } = await import('/src/transcription/videoExport.ts');
+        const { normalizeTranscriptionSettings } = await import('/src/transcription/settings.ts');
+        const source = { id:'mic',kind:'audio',hasMicrophone:true };
+        const inputs = [{source,path:${JSON.stringify(wav)}}];
+        const segments = [{source,sourceId:'mic',kind:'audio',sourceOffsetMs:0,startMs:1000,durationMs:500}];
+        const settings = normalizeTranscriptionSettings({exportAudioMix:'recorded'});
+        return ${JSON.stringify(format)} === 'mp3'
+          ? audioTimelineFfmpegArgs(${JSON.stringify(wav)},inputs,segments,${JSON.stringify(output)},2,settings)
+          : videoTimelineFfmpegArgs(${JSON.stringify(base)},${JSON.stringify(wav)},inputs,segments,${JSON.stringify(output)},'mp4',2,settings);
+      })()`);
+      run(args);
+      const pcm = run(['-v','error','-i',output,'-vn','-ac','1','-ar','48000','-f','f32le','-']);
+      const rms = (start,end) => {
+        let sum = 0; const from = Math.round(start*48000), to = Math.round(end*48000);
+        for(let i=from;i<to;i++) sum += pcm.readFloatLE(i*4) ** 2;
+        return Math.sqrt(sum/(to-from));
+      };
+      const early = rms(0.1,0.8), placed = rms(1.1,1.4), tail = rms(1.7,1.9);
+      if (early > 0.0001 || placed < 0.01 || tail > 0.0001) throw new Error('Recorded audio timing failed: '+JSON.stringify({format,early,placed,tail}));
+      console.log('AUDIO_PLACEMENT_PASS',JSON.stringify({format,early,placed,tail}));
+    }
     app.exit(0);
   } catch(error) { console.error(error); app.exit(1); }
 });

@@ -43,7 +43,7 @@ describe('performance video take timeline', () => {
     const args = videoTimelineFfmpegArgs('score.webm', 'piano.wav', [{ source: face, path: 'face.webm' }, { source: piano, path: 'piano.webm' }], segments, 'out.mp4', 'mp4', 4, settings)
     const filter = args[args.indexOf('-filter_complex') + 1]
     expect(filter).toContain('crop=iw*0.8:ih*0.8')
-    expect(filter).toContain('[2:a]atrim=start=0.000000:duration=3.000000,asetpts=PTS-STARTPTS+0.120000/TB,volume=0.8')
+    expect(filter).toContain('[2:a]atrim=start=0.000000:duration=3.000000,asetpts=PTS-STARTPTS,adelay=120.000:all=1,volume=0.8')
     expect(filter).not.toContain('[2:v]')
 
     const audioArgs = audioTimelineFfmpegArgs('piano.wav', [{ source: piano, path: 'piano.webm' }], [segments[1]], 'out.mp3', 4, settings)
@@ -51,4 +51,15 @@ describe('performance video take timeline', () => {
     expect(audioFilter).toContain('[1:a]atrim=start=0.000000:duration=3.000000')
     expect(audioFilter).toContain('amix=inputs=2')
   })
+})
+
+it('keeps the unfiltered video stream when only recorded audio is present', () => {
+  const source: RecordedCameraTake = { id: 'mic', kind: 'audio', blob: new Blob(), durationMs: 500, hasMicrophone: true }
+  const segments: ResolvedMediaSegment[] = [{ source, sourceId: source.id, kind: 'audio', startMs: 1000, sourceOffsetMs: 0, durationMs: 500 }]
+  const settings = normalizeTranscriptionSettings({ exportAudioMix: 'recorded' })
+  const video = videoTimelineFfmpegArgs('base.mp4', 'piano.wav', [{ source, path: 'mic.wav' }], segments, 'out.mp4', 'mp4', 2, settings)
+  expect(video[video.indexOf('-map') + 1]).toBe('0:v')
+  expect(video[video.indexOf('-filter_complex') + 1]).toContain('asetpts=PTS-STARTPTS,adelay=1000.000:all=1')
+  const audio = audioTimelineFfmpegArgs('piano.wav', [{ source, path: 'mic.wav' }], segments, 'out.mp3', 2, settings)
+  expect(audio[audio.indexOf('-filter_complex') + 1]).toContain('asetpts=PTS-STARTPTS,adelay=1000.000:all=1')
 })
