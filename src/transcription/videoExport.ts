@@ -77,7 +77,7 @@ export function videoTimelineFfmpegArgs(base: string, wav: string, cameraInputs:
       filters.push(`[${sourceIndex}:v]split=${labels.length}${labels.map((label) => `[${label}]`).join('')}`)
       videoSegments.forEach(({ index }, labelIndex) => videoPads.set(index, labels[labelIndex]))
     }
-    const recordedAudioSegments = sourceSegments.filter(({ segment }) => mediaKind(segment) === 'audio' || (input.source.hasMicrophone && segment.kind == null && input.source.kind == null))
+    const recordedAudioSegments = sourceSegments.filter(({ segment }) => recordedAudioTiming(segment, settings) != null)
     if (recordedAudioSegments.length === 1) audioPads.set(recordedAudioSegments[0].index, `${sourceIndex}:a`)
     else if (recordedAudioSegments.length > 1) {
       const labels = recordedAudioSegments.map(({ index }) => `sourceAudio${index}`)
@@ -105,11 +105,10 @@ export function videoTimelineFfmpegArgs(base: string, wav: string, cameraInputs:
       filters.push(`[${video}][${face}]overlay=${box.x}:${box.y}:enable='between(t,${timelineStart.toFixed(6)},${(timelineStart + clipDuration).toFixed(6)})':eof_action=pass:repeatlast=0[${nextVideo}]`)
       video = nextVideo
     }
-    const includeLegacyMic = segment.source.hasMicrophone && segment.kind == null && segment.source.kind == null
-    const sourceVolume = config?.volume ?? settings.microphoneVolume ?? 1
-    if ((kind === 'audio' || includeLegacyMic) && sourceVolume > 0 && settings.exportAudioMix !== 'synth') {
+    const audio = recordedAudioTiming(segment, settings)
+    if (audio) {
       const mic = `mic${index}`
-      filters.push(`[${audioPads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${sourceStart.toFixed(6)}:duration=${clipDuration.toFixed(6)},asetpts=PTS-STARTPTS,adelay=${(timelineStart * 1000).toFixed(3)}:all=1,volume=${sourceVolume}[${mic}]`)
+      filters.push(`[${audioPads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${audio.sourceStart.toFixed(6)}:duration=${audio.duration.toFixed(6)},asetpts=PTS-STARTPTS,adelay=${(audio.start * 1000).toFixed(3)}:all=1,volume=${audio.volume}[${mic}]`)
       micLabels.push(`[${mic}]`)
     }
   })
@@ -126,6 +125,19 @@ function mediaKind(segment: ResolvedMediaSegment): 'video' | 'audio' {
   return segment.kind ?? segment.source.kind ?? 'video'
 }
 
+/** Trim audio before time zero and add actual silence before delayed segments. */
+function recordedAudioTiming(segment: ResolvedMediaSegment, settings: TranscriptionSettings) {
+  const legacyMic = segment.source.hasMicrophone && segment.kind == null && segment.source.kind == null
+  if ((mediaKind(segment) !== 'audio' && !legacyMic) || settings.exportAudioMix === 'synth') return null
+  const config = settings.mediaSources?.find(source => source.id === (segment.inputId ?? segment.source.inputId))
+  const volume = config?.volume ?? settings.microphoneVolume ?? 1
+  const rawStart = (segment.startMs + (config?.latencyMs ?? 0)) / 1000
+  const skipped = Math.max(0, -rawStart)
+  const duration = segment.durationMs / 1000 - skipped
+  if (volume <= 0 || duration <= 0) return null
+  return { volume, start: Math.max(0, rawStart), sourceStart: segment.sourceOffsetMs / 1000 + skipped, duration }
+}
+
 /** Mix reusable recorded audio segments against the same take clock used by video export. */
 export function audioTimelineFfmpegArgs(wav: string, mediaInputs: readonly CameraInput[], segments: readonly ResolvedMediaSegment[], output: string, duration: number, settings: TranscriptionSettings): string[] {
   const args = ['-y', '-i', wav]
@@ -135,7 +147,7 @@ export function audioTimelineFfmpegArgs(wav: string, mediaInputs: readonly Camer
   const pads = new Map<number, string>()
   mediaInputs.forEach((input, inputOffset) => {
     const sourceIndex = inputOffset + 1
-    const audioSegments = segments.map((segment, index) => ({ segment, index })).filter(({ segment }) => segment.sourceId === input.source.id && segment.durationMs > 0 && (mediaKind(segment) === 'audio' || (segment.source.hasMicrophone && segment.kind == null && segment.source.kind == null)))
+    const audioSegments = segments.map((segment, index) => ({ segment, index })).filter(({ segment }) => segment.sourceId === input.source.id && recordedAudioTiming(segment, settings) != null)
     if (audioSegments.length === 1) pads.set(audioSegments[0].index, `${sourceIndex}:a`)
     else if (audioSegments.length > 1) {
       const labels = audioSegments.map(({ index }) => `audioSource${index}`)
@@ -147,14 +159,10 @@ export function audioTimelineFfmpegArgs(wav: string, mediaInputs: readonly Camer
   const recorded: string[] = []
   segments.forEach((segment, index) => {
     const sourceIndex = inputIndex.get(segment.sourceId)
-    if (sourceIndex == null || segment.durationMs <= 0 || (mediaKind(segment) !== 'audio' && !(segment.source.hasMicrophone && segment.kind == null && segment.source.kind == null))) return
-    const config = settings.mediaSources?.find((source) => source.id === (segment.inputId ?? segment.source.inputId))
-    const volume = config?.volume ?? settings.microphoneVolume ?? 1
-    if (volume <= 0 || settings.exportAudioMix === 'synth') return
+    const audio = recordedAudioTiming(segment, settings)
+    if (sourceIndex == null || !audio) return
     const label = `recorded${index}`
-    const rawTimelineStart = (segment.startMs + (config?.latencyMs ?? 0)) / 1000
-    const sourceStart = Math.max(0, segment.sourceOffsetMs / 1000 - Math.min(0, rawTimelineStart))
-    filters.push(`[${pads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${sourceStart.toFixed(6)}:duration=${Math.max(.001, segment.durationMs / 1000).toFixed(6)},asetpts=PTS-STARTPTS,adelay=${(Math.max(0, rawTimelineStart) * 1000).toFixed(3)}:all=1,volume=${volume}[${label}]`)
+    filters.push(`[${pads.get(index) ?? `${sourceIndex}:a`}]atrim=start=${audio.sourceStart.toFixed(6)}:duration=${audio.duration.toFixed(6)},asetpts=PTS-STARTPTS,adelay=${(audio.start * 1000).toFixed(3)}:all=1,volume=${audio.volume}[${label}]`)
     recorded.push(`[${label}]`)
   })
   if (recorded.length) filters.push(`[piano]${recorded.join('')}amix=inputs=${recorded.length + 1}:duration=longest:normalize=0,alimiter=limit=0.95:level=false[audio]`)
@@ -198,7 +206,8 @@ export function drawPerformanceFrame(context: CanvasRenderingContext2D, image: C
 export async function exportPerformanceVideo(notes: readonly CapturedNote[], settings: TranscriptionSettings, outputPath: string, format: 'mp4' | 'webm', options: VideoExportOptions): Promise<void> {
   if (typeof VideoEncoder === 'undefined') throw new Error('Video export requires a desktop build with WebCodecs support.')
   const assertActive = () => { if (options.signal?.aborted) throw new DOMException('Export canceled', 'AbortError') }
-  const duration = Math.max(options.durationMs / 1000, ...notes.map((note) => note.endMs / 1000), 0.1) + 1
+  assertActive()
+  const duration = notes.reduce((end, note) => Math.max(end, note.endMs / 1000), Math.max(options.durationMs / 1000, 0.1)) + 1
   const directory = await window.electronAPI.export.getTempDir()
   await window.electronFS.mkdir(directory)
   let encoder: VideoEncoder | null = null

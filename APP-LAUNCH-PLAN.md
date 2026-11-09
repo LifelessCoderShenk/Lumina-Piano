@@ -34,13 +34,13 @@ Scope: finish the app experience before distribution, signing, licensing, pricin
 Baseline checks -> project safety -> audio consistency -> first-use walkthrough and fixes -> complete workflow regression matrix -> release-readiness report.
 
 ## Status
-- Implementation in progress; none of the four exit gates is declared complete.
+- Automated readiness work completed for this pass. Release approval remains open for the explicit manual/hardware gates below; passing automation is not evidence of real-device or listening quality.
 - Project protection implemented: atomic `.lumina` replacement, validation before workspace replacement, Create recovery with explicit restore/discard, and storage-failure messages. Automated failure-injection tests pass. Recovery saves at three-second intervals, so the latest edits may be lost on abrupt termination.
 - Playback and Create export now share bundled piano samples and sampler configuration. Sample-load failures allow retry. Transcription review/export now renders the same bundled samples in an isolated offline audio context, preserving pedal endpoints and overlapping repeated strikes.
 - Failed MIDI/library imports now show a persistent actionable error.
 - Fixed sustain timing loss in edit snapshots, moves, quantization, copy/paste, delete undo, velocity changes, and project-length recalculation.
 - Long-workflow automated check passes: real 20,000-note MIDI import with tempo change, edit, serialization, and reopen with full project equality (over 30 minutes). This does not claim a 30-minute realtime playback or video export soak test.
-- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 784 tests passed on 2026-11-08.
+- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 786 tests passed on 2026-11-08.
 - Production type check passes. Renderer, main, and preload production builds pass; Forge 8 development startup passes. Warnings remain for the large renderer bundle and future native config loading.
 - App lint (`npx eslint src electron`): zero errors, 106 code-size warnings.
 - Full TypeScript checking including legacy test doubles remains separate from the passing production check.
@@ -49,9 +49,20 @@ Baseline checks -> project safety -> audio consistency -> first-use walkthrough 
 - Desktop startup and recovery prompt visually verified on patched Electron. Restore clicks failed twice with Windows `SendInput sent 0 of 1 events; GetLastError=87`; the manual walkthrough remains incomplete. Actual isolated Electron IndexedDB recovery passed save -> renderer reload -> read -> discard, retaining pedal timing.
 - Actual FFmpeg export smoke passes for MP4 and WebM: the app timeline-composition function overlays repeated synthetic fixture clips, encodes two-second files, and both files decode fully without errors. This is not a full visualizer export or long-duration sync assessment.
 - Export timing fixed: FFmpeg mixing ignored timestamp-only offsets, starting recorded segments too early. Explicit sample delay now places audio correctly. Real MP3/MP4 outputs verify silence before a one-second start, signal during the segment, and silence after it. Audio-only timelines also correctly map the original video stream.
+- Full transcription export stress passed: 60 seconds of real score frames at 1280x720/30fps with sampled audio, encoded through WebCodecs and FFmpeg in about 8.4 seconds. The full result decodes. Cancellation leaves no final output or temporary directories. An injected final-write failure preserves the existing output and cleans all temporary directories.
+- Muted repeated microphone clips no longer leave unused FFmpeg split outputs. Negative latency trims the pre-zero part of audio rather than extending the clip. Large-note-count duration calculations no longer spread arrays into Math.max.
 - Manual gates still pending: complete save/reopen/export matrix, camera/microphone denial and disconnection, long-performance checks, offline desktop playback/export, visual/keyboard walkthrough, and audible sound-quality review.
 - MIDI keyboard checks explicitly deferred at the user's request: no hardware connected. Software tests do not substitute for this gate.
 - Distribution and commercial release work intentionally deferred until these gates are reviewed.
 
 ## Repeatable silent smoke check
 Run `npm run dev` from the repository root, then `npx electron scripts/readiness-smoke.cjs` with the development server on localhost:5173. The runner uses an isolated profile under `.tmp`, mutes its hidden window, blocks external HTTP requests, verifies real sampled audio, recovery persistence, and real MP4/WebM timeline composition and decoding, and exits nonzero on failure. It never touches the user's recovery database. Synthetic export fixtures and outputs stay in `.tmp/export-smoke`; these are test assets, not product showcase media.
+
+## Full export stress check
+With the local Vite server on localhost:5173, run `npx electron scripts/export-stress.cjs`. It uses an isolated profile and restricted file bridge under `.tmp/full-export-stress`, performs a real one-minute transcription export, decodes the result, cancels a second export, and injects a final write failure. It is silent and does not touch user projects. Expected output: `FULL_EXPORT_PASS` with `canceled`, `writeFailure`, and `decoded` true and zero temporary directories remaining.
+
+## Final readiness limits
+- Automated checks pass; no production dependency findings or high/critical tooling findings were reported by npm audit on this pass. The 23 moderate tooling findings remain documented, not waived as harmless.
+- A full one-minute transcription export was tested. A 30-minute recording/export soak, 4K Create visualizer exports, and varied-machine performance are not yet verified.
+- Physical MIDI, camera/microphone disconnect and permission behavior, subjective piano sound, and the complete manual keyboard/focus walkthrough require real-device/manual verification. There is no connected MIDI keyboard; audio playback was intentionally kept silent. Native UI input previously failed with Windows error 87.
+- Distribution, signing, downloads, licensing, and pricing remain outside this phase.

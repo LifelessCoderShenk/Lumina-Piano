@@ -110,7 +110,7 @@ export async function exportTranscription(editedNotes: readonly CapturedNote[], 
         const uniqueSources = [...new Map(timeline.map((segment) => [segment.source.id, segment.source])).values()]
         const inputs: CameraInput[] = uniqueSources.map((source, index) => ({ source, path: `${directory}/audio-${index}.webm` }))
         for (const input of inputs) await window.electronFS.writeFile(input.path, new Uint8Array(await input.source.blob.arrayBuffer()))
-        const duration = Math.max((options.durationMs ?? 0) / 1000, ...notes.map((note) => note.endMs / 1000), .1) + 1
+        const duration = notes.reduce((end, note) => Math.max(end, note.endMs / 1000), Math.max((options.durationMs ?? 0) / 1000, .1)) + 1
         await api.ffmpeg.run(audioTimelineFfmpegArgs(wav, inputs, timeline, outputPath, duration, settings))
       } else await api.ffmpeg.run(['-y', '-i', wav, '-vn', '-codec:a', 'libmp3lame', '-q:a', '2', outputPath])
     } finally {

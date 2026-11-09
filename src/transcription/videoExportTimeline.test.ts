@@ -63,3 +63,21 @@ it('keeps the unfiltered video stream when only recorded audio is present', () =
   const audio = audioTimelineFfmpegArgs('piano.wav', [{ source, path: 'mic.wav' }], segments, 'out.mp3', 2, settings)
   expect(audio[audio.indexOf('-filter_complex') + 1]).toContain('asetpts=PTS-STARTPTS,adelay=1000.000:all=1')
 })
+
+it('does not create unused audio split outputs for muted repeated clips', () => {
+  const source: RecordedCameraTake = { id: 'camera', blob: new Blob(), durationMs: 2000, hasMicrophone: true }
+  const segments = [0, 1000].map(startMs => ({ source, sourceId: source.id, startMs, sourceOffsetMs: 0, durationMs: 1000 }))
+  for (const settings of [normalizeTranscriptionSettings({ exportAudioMix: 'synth' }), normalizeTranscriptionSettings({ microphoneVolume: 0 })]) {
+    const video = videoTimelineFfmpegArgs('base.mp4', 'piano.wav', [{ source, path: 'camera.webm' }], segments, 'out.mp4', 'mp4', 2, settings)
+    expect(video[video.indexOf('-filter_complex') + 1]).not.toContain('asplit=')
+    const audio = audioTimelineFfmpegArgs('piano.wav', [{ source, path: 'camera.webm' }], segments, 'out.mp3', 2, settings)
+    expect(audio[audio.indexOf('-filter_complex') + 1]).not.toContain('asplit=')
+  }
+})
+it('clips negative audio latency at time zero instead of extending the segment', () => {
+  const source: RecordedCameraTake = { id: 'mic', inputId: 'mic', kind: 'audio', blob: new Blob(), durationMs: 2000, hasMicrophone: true }
+  const settings = normalizeTranscriptionSettings({ mediaSources: [{ id:'mic', kind:'audio', role:'piano', name:'Mic', deviceId:'test', enabled:true, volume:1, latencyMs:-200 }] })
+  const segments = [{ source, sourceId:source.id, kind:'audio' as const, startMs:0, sourceOffsetMs:0, durationMs:1000 }]
+  const args = audioTimelineFfmpegArgs('piano.wav', [{source,path:'mic.wav'}], segments, 'out.mp3', 2, settings)
+  expect(args[args.indexOf('-filter_complex')+1]).toContain('atrim=start=0.200000:duration=0.800000')
+})
