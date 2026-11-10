@@ -108,13 +108,13 @@ export class ExportEngine {
     this.isRunning = true
     this.shouldCancel = false
     store.setIsExporting(true)
-    this.tempDir = await getTempDir()
     if (previousPlayback.isPlaying) {
       playbackEngine.pause()
     }
 
     let beganOfflineRender = false
     try {
+      this.tempDir = await getTempDir()
       activeRenderer.beginOfflineRender()
       beganOfflineRender = true
       await mkdirExportDir(this.tempDir)

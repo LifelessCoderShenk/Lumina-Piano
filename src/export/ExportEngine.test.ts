@@ -262,6 +262,15 @@ describe('ExportEngine', () => {
     expect(useAppStore.getState().isExporting).toBe(false)
   })
 
+  it('resets the export job after temporary-directory failure so retry works', async () => {
+    loadProject(480)
+    mockGetTempDir.mockRejectedValueOnce(new Error('Temporary storage unavailable'))
+    const engine = new ExportEngine()
+    await expect(engine.export(createSettings())).rejects.toThrow('Temporary storage unavailable')
+    expect(useAppStore.getState().isExporting).toBe(false)
+    await expect(engine.export(createSettings())).resolves.toBeUndefined()
+  })
+
   it('sets isExporting false when export fails', async () => {
     loadProject(480)
     mockSaveFile.mockRejectedValueOnce(Object.assign(new Error('disk'), { code: 'ENOSPC' }))

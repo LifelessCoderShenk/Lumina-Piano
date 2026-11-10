@@ -40,7 +40,7 @@ Baseline checks -> project safety -> audio consistency -> first-use walkthrough 
 - Failed MIDI/library imports now show a persistent actionable error.
 - Fixed sustain timing loss in edit snapshots, moves, quantization, copy/paste, delete undo, velocity changes, and project-length recalculation.
 - Long-workflow automated check passes: real 20,000-note MIDI import with tempo change, edit, serialization, and reopen with full project equality (over 30 minutes). This does not claim a 30-minute realtime playback or video export soak test.
-- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 787 tests passed on 2026-11-09.
+- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 788 tests passed on 2026-11-09.
 - Production type check passes. Renderer, main, and preload production builds pass; Forge 8 development startup passes. Warnings remain for the large renderer bundle and future native config loading.
 - App lint (`npx eslint src electron`): zero errors, 106 code-size warnings.
 - Full TypeScript checking including legacy test doubles remains separate from the passing production check.
@@ -63,7 +63,7 @@ With the local Vite server on localhost:5173, run `npx electron scripts/export-s
 
 ## Final readiness limits
 - Automated checks pass; npm audit reports zero findings across both production and development dependencies on this pass. This is an audit result, not a guarantee that no vulnerabilities exist.
-- A full 30-minute transcription export passed on 2026-11-09: 7,200 notes, a 30:01.17 output at 1280x720/30fps with stereo audio, full decode, cancellation, and injected write failure cleanup. Live recording soak, 4K Create visualizer exports, and varied-machine performance still require separate acceptance checks.
+- A full 30-minute transcription export passed on 2026-11-09: 7,200 notes, a 30:01.17 output at 1280x720/30fps with stereo audio, full decode, cancellation, and injected write failure cleanup. Live recording soak and varied-machine performance still require real-device acceptance checks. A separate real 4K Create export passed on this machine.
 - Physical MIDI, camera/microphone disconnect and permission behavior, subjective piano sound, and the complete manual keyboard/focus walkthrough require real-device/manual verification. There is no connected MIDI keyboard; audio playback was intentionally kept silent. Native UI input previously failed with Windows error 87.
 - Distribution, signing, downloads, licensing, and pricing remain outside this phase.
 
@@ -71,10 +71,15 @@ With the local Vite server on localhost:5173, run `npx electron scripts/export-s
 `$env:LUMINA_STRESS_SECONDS='1800'; npx electron scripts/export-stress.cjs` selects a 30-minute fixture with 7,200 notes. The default remains a one-minute check. Hot-reload WebSocket traffic is blocked only in this isolated test so dependency/config changes cannot reset it mid-export. Progress is printed for audio preparation and each video-export stage.
 
 ## Final verified result — 2026-11-09
-- 787 tests across 73 files passed; production type checking and all three production builds passed.
+- 788 tests across 73 files passed; production type checking and all three production builds passed.
 - ESLint: zero errors, 106 existing code-size warnings. Full npm audit: zero findings.
 - Patched glob/minimatch consumers passed archive creation/extraction checks through the root, packager, and universal consumers.
 - Thirty-minute transcription export: 63,000,692 bytes, fully decodable H.264/AAC, 1280x720, 30fps, stereo 44.1kHz, 30:01.17 including release tail. Frame rendering and encoding took 216.6 seconds after audio preparation. A frame at 15 minutes was visually inspected.
 - Mid-export cancellation and injected write failure passed, retained prior output, and left zero current-run temporary directories.
 - Piano audio now schedules future voices in 30-second windows; sustain tails remain independent across window boundaries. The short rendering path is unchanged.
-- Hardware, subjective listening, remaining manual UI acceptance, and separate Create-mode 4K acceptance are not asserted as passed. Distribution remains deferred.
+- Hardware, subjective listening, remaining manual UI acceptance, are not asserted as passed. Create-mode 4K acceptance passed on this machine. Distribution remains deferred.
+
+## Final Create-mode check — 2026-11-09
+A real Three.js Create export passed at 3840x2160 with sampled audio and particles: 60 frames over two seconds, full decode, restored preview size, and no temporary directories left. An exported frame was visually inspected. Run `npx electron scripts/create-4k-smoke.cjs` with the local Vite server on port 5173 to reproduce it.
+
+Temporary-directory failure now clears the export busy state and permits a successful retry; a regression test covers this. The final suite is 788 passing tests. No additional software implementation is left open in this readiness pass. Physical-device, listening, and remaining manual acceptance checks are explicitly not certified by automated tests.
