@@ -26,7 +26,18 @@ export async function renderSampledPiano(notes: readonly PianoNote[], minimumDur
       throw new Error('Piano samples could not be loaded. Retry the export or restart Lumina.')
     }
   }))
+  // Keep future sources out of the audio graph until their rendering window.
+  // Thousands of dormant sources otherwise make long offline renders scale poorly.
+  const windowSeconds = 30
+  const windows = new Map<number, number[]>()
   notes.forEach((note, index) => {
+    const window = Math.floor(note.startMs / (windowSeconds * 1000))
+    const indices = windows.get(window) ?? []
+    indices.push(index)
+    windows.set(window, indices)
+  })
+  const schedule = (indices: readonly number[]) => indices.forEach(index => {
+    const note = notes[index]
     const start = note.startMs / 1000
     const end = Math.max(start + 0.001, note.endMs / 1000)
     const source = context.createBufferSource()
@@ -42,5 +53,12 @@ export async function renderSampledPiano(notes: readonly PianoNote[], minimumDur
     source.start(start)
     source.stop(end + PIANO_RELEASE_SECONDS)
   })
-  return context.startRendering()
+  schedule(windows.get(0) ?? [])
+  const scheduling = [...windows.entries()].filter(([window]) => window > 0).map(([window, indices]) =>
+    context.suspend(window * windowSeconds).then(async () => {
+      try { schedule(indices) } finally { await context.resume() }
+    }),
+  )
+  const [rendered] = await Promise.all([context.startRendering(), ...scheduling])
+  return rendered
 }

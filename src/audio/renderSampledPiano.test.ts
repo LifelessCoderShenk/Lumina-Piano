@@ -7,6 +7,8 @@ const gains: any[] = []
 const rendered = {} as AudioBuffer
 const decode = vi.fn(async () => ({}))
 const render = vi.fn(async () => rendered)
+const suspend = vi.fn(async (_time: number) => undefined)
+const resume = vi.fn(async () => undefined)
 const fetchSample = vi.fn()
 const connect = function (this: unknown, target: unknown) { return target }
 const makeContext = vi.fn()
@@ -19,6 +21,8 @@ beforeEach(() => {
     destination = {}
     decodeAudioData = decode
     startRendering = render
+    suspend = suspend
+    resume = resume
     constructor(...args: unknown[]) { makeContext(...args) }
     createDynamicsCompressor() { return { connect } }
     createGain() {
@@ -68,4 +72,17 @@ describe('sampled transcription piano', () => {
     expect(sources).toHaveLength(0)
     expect(makeContext).toHaveBeenCalledWith(2, 4 * 44100, 44100)
   })
+})
+
+it('schedules later windows while keeping pedal tails across their boundary', async () => {
+  await renderSampledPiano([
+    {pitch:60,velocity:100,startMs:29900,endMs:31000},
+    {pitch:60,velocity:80,startMs:30000,endMs:32000},
+    {pitch:69,velocity:90,startMs:60000,endMs:61000},
+  ])
+  expect(suspend.mock.calls.map(call => call[0])).toEqual([30,60])
+  expect(resume).toHaveBeenCalledTimes(2)
+  expect(sources[0].stop).toHaveBeenCalledWith(31.5)
+  expect(sources[1].start).toHaveBeenCalledWith(30)
+  expect(sources[2].start).toHaveBeenCalledWith(60)
 })

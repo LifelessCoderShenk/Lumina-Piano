@@ -34,17 +34,17 @@ Scope: finish the app experience before distribution, signing, licensing, pricin
 Baseline checks -> project safety -> audio consistency -> first-use walkthrough and fixes -> complete workflow regression matrix -> release-readiness report.
 
 ## Status
-- Automated readiness work completed for this pass. Release approval remains open for the explicit manual/hardware gates below; passing automation is not evidence of real-device or listening quality.
+- Software hardening and the automated readiness pass are complete. Release approval remains open for the explicit manual/hardware gates below; passing automation is not evidence of real-device or listening quality.
 - Project protection implemented: atomic `.lumina` replacement, validation before workspace replacement, Create recovery with explicit restore/discard, and storage-failure messages. Automated failure-injection tests pass. Recovery saves at three-second intervals, so the latest edits may be lost on abrupt termination.
 - Playback and Create export now share bundled piano samples and sampler configuration. Sample-load failures allow retry. Transcription review/export now renders the same bundled samples in an isolated offline audio context, preserving pedal endpoints and overlapping repeated strikes.
 - Failed MIDI/library imports now show a persistent actionable error.
 - Fixed sustain timing loss in edit snapshots, moves, quantization, copy/paste, delete undo, velocity changes, and project-length recalculation.
 - Long-workflow automated check passes: real 20,000-note MIDI import with tempo change, edit, serialization, and reopen with full project equality (over 30 minutes). This does not claim a 30-minute realtime playback or video export soak test.
-- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 786 tests passed on 2026-11-08.
+- Recording review dependencies and media cleanup were corrected; final regression: 73 test files and 787 tests passed on 2026-11-09.
 - Production type check passes. Renderer, main, and preload production builds pass; Forge 8 development startup passes. Warnings remain for the large renderer bundle and future native config loading.
 - App lint (`npx eslint src electron`): zero errors, 106 code-size warnings.
 - Full TypeScript checking including legacy test doubles remains separate from the passing production check.
-- Security patches: Electron 42.11.18, Forge 8.0.1, Vite 8.3.6, React Vite plugin 6.2.1, Vitest 4.1.12, and compatible transitive updates verified. Production audit: zero findings. Full audit: 23 moderate findings, zero low/high/critical. Remaining sources are glob cancellation and minimatch amplification in tooling; unsafe major overrides and audit-suggested downgrades were not applied. Forge migration follows https://github.com/electron/forge/releases/tag/v8.0.1; main/preload use `.cjs`, build options use `rolldownOptions`, and Node >=22.17 is required.
+- Security patches: Electron 42.11.18, Forge 8.0.1, Vite 8.3.6, React Vite plugin 6.2.1, Vitest 4.1.12, and compatible transitive updates verified. Production audit: zero findings. Full audit: zero findings after scoped glob/minimatch security pins. The affected modern consumers were verified with lint, tests, builds, and archive round trips; legacy APIs were left untouched. See TOOLCHAIN-SECURITY.md for the pins and removal criteria. Forge migration follows https://github.com/electron/forge/releases/tag/v8.0.1; main/preload use `.cjs`, build options use `rolldownOptions`, and Node >=22.17 is required.
 - Silent real-Electron audio smoke check passed with external network requests blocked: stereo, 3.5-second output, nonzero sustained audio, no clipping, and silent post-release tail. This verifies rendering, not subjective listening quality.
 - Desktop startup and recovery prompt visually verified on patched Electron. Restore clicks failed twice with Windows `SendInput sent 0 of 1 events; GetLastError=87`; the manual walkthrough remains incomplete. Actual isolated Electron IndexedDB recovery passed save -> renderer reload -> read -> discard, retaining pedal timing.
 - Actual FFmpeg export smoke passes for MP4 and WebM: the app timeline-composition function overlays repeated synthetic fixture clips, encodes two-second files, and both files decode fully without errors. This is not a full visualizer export or long-duration sync assessment.
@@ -62,7 +62,19 @@ Run `npm run dev` from the repository root, then `npx electron scripts/readiness
 With the local Vite server on localhost:5173, run `npx electron scripts/export-stress.cjs`. It uses an isolated profile and restricted file bridge under `.tmp/full-export-stress`, performs a real one-minute transcription export, decodes the result, cancels a second export, and injects a final write failure. It is silent and does not touch user projects. Expected output: `FULL_EXPORT_PASS` with `canceled`, `writeFailure`, and `decoded` true and zero temporary directories remaining.
 
 ## Final readiness limits
-- Automated checks pass; no production dependency findings or high/critical tooling findings were reported by npm audit on this pass. The 23 moderate tooling findings remain documented, not waived as harmless.
-- A full one-minute transcription export was tested. A 30-minute recording/export soak, 4K Create visualizer exports, and varied-machine performance are not yet verified.
+- Automated checks pass; npm audit reports zero findings across both production and development dependencies on this pass. This is an audit result, not a guarantee that no vulnerabilities exist.
+- A full 30-minute transcription export passed on 2026-11-09: 7,200 notes, a 30:01.17 output at 1280x720/30fps with stereo audio, full decode, cancellation, and injected write failure cleanup. Live recording soak, 4K Create visualizer exports, and varied-machine performance still require separate acceptance checks.
 - Physical MIDI, camera/microphone disconnect and permission behavior, subjective piano sound, and the complete manual keyboard/focus walkthrough require real-device/manual verification. There is no connected MIDI keyboard; audio playback was intentionally kept silent. Native UI input previously failed with Windows error 87.
 - Distribution, signing, downloads, licensing, and pricing remain outside this phase.
+
+## Extended export soak
+`$env:LUMINA_STRESS_SECONDS='1800'; npx electron scripts/export-stress.cjs` selects a 30-minute fixture with 7,200 notes. The default remains a one-minute check. Hot-reload WebSocket traffic is blocked only in this isolated test so dependency/config changes cannot reset it mid-export. Progress is printed for audio preparation and each video-export stage.
+
+## Final verified result — 2026-11-09
+- 787 tests across 73 files passed; production type checking and all three production builds passed.
+- ESLint: zero errors, 106 existing code-size warnings. Full npm audit: zero findings.
+- Patched glob/minimatch consumers passed archive creation/extraction checks through the root, packager, and universal consumers.
+- Thirty-minute transcription export: 63,000,692 bytes, fully decodable H.264/AAC, 1280x720, 30fps, stereo 44.1kHz, 30:01.17 including release tail. Frame rendering and encoding took 216.6 seconds after audio preparation. A frame at 15 minutes was visually inspected.
+- Mid-export cancellation and injected write failure passed, retained prior output, and left zero current-run temporary directories.
+- Piano audio now schedules future voices in 30-second windows; sustain tails remain independent across window boundaries. The short rendering path is unchanged.
+- Hardware, subjective listening, remaining manual UI acceptance, and separate Create-mode 4K acceptance are not asserted as passed. Distribution remains deferred.
