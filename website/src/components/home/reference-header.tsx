@@ -11,6 +11,7 @@ const links = [
   ["/features", "Features"],
   ["/showcase", "Showcase"],
   ["/pricing", "Pricing"],
+  ["/account", "Account"],
 ] as const;
 
 /** Shared two-row masthead across every website route. */
