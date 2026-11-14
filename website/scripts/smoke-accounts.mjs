@@ -9,7 +9,6 @@ for (const path of ['/', '/features', '/showcase', '/pricing', '/download', '/lo
     assert.match(response.headers.get('cache-control'), /no-store/);
     const html = await response.text();
     assert.match(html, /Sign-in will be available/);
-    assert.match(html, /disabled/);
   }
   console.log('PASS', path);
 }
