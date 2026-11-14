@@ -2,10 +2,12 @@
 
 import { redirect } from "next/navigation";
 import { accountClient } from "@/lib/auth/server";
+import { emailCodesEnabled } from "@/lib/auth/config";
 
 export type LoginState = { step: "email" | "code"; email: string; message: string };
 
 export async function login(previous: LoginState, data: FormData): Promise<LoginState> {
+  if (!emailCodesEnabled()) return { step: "email", email: "", message: "Sign-in is not available yet. Please try again later." };
   const email = String(data.get("email") ?? "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
     return { step: "email", email, message: "Enter a valid email address." };

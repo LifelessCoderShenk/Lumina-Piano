@@ -1,13 +1,13 @@
 # Shared Lumina accounts
 
-Status: dependencies installed; production build, TypeScript, lint, and unconfigured production-route smoke checks pass. Dependency audit reports zero vulnerabilities. Live Supabase authentication is not connected or end-to-end verified. Desktop sign-in and export watermark enforcement are not implemented by this change. Account records alone do not activate a desktop trial or license.
+Status: staging project `lumina-staging` is provisioned in us-east-1. The account SQL migration was executed successfully in its SQL Editor, and local public connection settings are saved in ignored `.env.local`. The connected production build passes. Email authentication is not end-to-end verified: custom SMTP is required to change the default magic-link template to a code. Keep `AUTH_EMAIL_CODES_ENABLED=false` until the template is configured. Desktop sign-in and export watermark enforcement are not implemented by this change.
 
 ## Connect Supabase
 
 1. Install the locked dependencies with `npm ci` from `website`.
 2. Create a Supabase project and apply `supabase/migrations/202611090001_accounts.sql` using its SQL editor or migration tooling.
 3. Copy `.env.example` to `.env.local`. Set the project URL and **publishable** key from Supabase's Connect dialog. Never put a service-role or secret key in `NEXT_PUBLIC_*` variables.
-4. Enable email authentication. In Authentication → Email Templates → Magic Link, use `{{ .Token }}` in the email body so users receive a code. Keep email confirmation enabled. Both first-time and returning users verify their email through the same form.
+4. Enable email authentication. Configure custom SMTP first; the dashboard currently disables template editing without it. In Authentication → Email Templates → Magic Link, use `{{ .Token }}` in the email body so users receive a code. Verify the first-time signup template also delivers a code. Keep email confirmation enabled. Set `AUTH_EMAIL_CODES_ENABLED=true` only after configuring both paths and test new and returning users before exposing sign-in publicly.
 5. Configure production SMTP, sender identity, the production Site URL, and Supabase authentication rate limits before public launch. Test new and returning users with the actual email templates and delivery provider.
 6. Run `npm run lint`, `npm run typecheck`, and `npm run build`. Start with `npm run dev`; open `/login`.
 
@@ -42,6 +42,6 @@ References: https://supabase.com/docs/guides/auth/server-side/creating-a-client 
 - Keep staging protected and no-indexed. Do not cache `/login` or `/account` in front of Next.js. Test against the actual HTTPS staging hostname.
 - The `Website checks` GitHub workflow runs lint, build, types, and a high-severity audit. Enable it as a required branch check in repository settings before production publishing.
 - For an unconfigured local production build, run `npm run start -- --port 3010`, then `node scripts/smoke-accounts.mjs`. This verifies public routes, disabled unconfigured sign-in, private caching, and signed-out redirects. It does not test live identity or database authorization.
-- Supabase and Vercel integrations were discovered but were not connected at the time of validation. No cloud project, database migration, or deployment has been created by these local changes.
+- Supabase was configured through the signed-in dashboard. Vercel still needs sign-in; no website deployment exists yet. The SQL was applied directly, so it is not registered in Supabase CLI migration history; reconcile migration history before using CLI-based deployment against this project.
 
 Security maintenance: Next.js was updated to 16.4.6. The scoped minimatch override removes the vulnerable 7–10 dependency used by TypeScript ESLint; retain lint validation when updating or removing this override.

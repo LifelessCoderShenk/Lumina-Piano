@@ -3,3 +3,7 @@ export function authConfig() {
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   return url && key ? { url, key } : null;
 }
+
+export function emailCodesEnabled() {
+  return process.env.AUTH_EMAIL_CODES_ENABLED === "true";
+}
