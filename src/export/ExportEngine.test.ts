@@ -108,6 +108,10 @@ vi.mock('../playback/PlaybackEngine', () => ({
 }))
 
 beforeEach(() => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), setTransform: vi.fn(),
+    strokeText: vi.fn(), fillText: vi.fn(),
+  } as unknown as CanvasRenderingContext2D)
   resetStore()
   vi.clearAllMocks()
   mockActiveVisualizerRenderer.current = {

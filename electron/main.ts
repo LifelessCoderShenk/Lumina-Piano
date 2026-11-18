@@ -5,6 +5,7 @@ import type { OpenDialogOptions } from 'electron'
 
 import { spawnProcess } from './spawnProcess'
 import { atomicWrite } from './atomicWrite'
+import { desktopAccount, desktopSignIn, desktopSignOut } from './accounts'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -44,6 +45,13 @@ const createWindow = () => {
 }
 
 app.on('ready', () => {
+  const accountHandler = (action: () => Promise<{ email: string | null }>) => async (event: Electron.IpcMainInvokeEvent) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Unauthorized account request')
+    return action()
+  }
+  ipcMain.handle('account:status', accountHandler(desktopAccount))
+  ipcMain.handle('account:signIn', accountHandler(desktopSignIn))
+  ipcMain.handle('account:signOut', accountHandler(desktopSignOut))
   ipcMain.handle('dialog:showSaveDialog', async (_, options) => {
     if (!mainWindow) return null
     const result = await dialog.showSaveDialog(mainWindow, options)

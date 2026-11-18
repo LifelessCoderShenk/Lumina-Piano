@@ -17,6 +17,8 @@ module.exports = {
       name: '@electron-forge/maker-squirrel',
       config: {
         name: 'LuminaPiano',
+        authors: 'Lumina Piano',
+        description: 'Create and export piano performances with Lumina Piano. Trial exports include a watermark.',
       },
     },
   ],

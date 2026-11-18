@@ -1,4 +1,5 @@
 import { ArrayBufferTarget, Muxer } from 'webm-muxer'
+import { drawTrialWatermark } from '../export/trialWatermark'
 import { renderScore } from '../components/TranscriptorMode/ScoreSheet'
 import { getBlackKeyWidth, getWhiteKeyBounds, isBlackKey, pitchToKeyX } from '../renderer/pianoMath'
 import { writeAudioBufferToWav } from '../export/wavWriter'
@@ -230,6 +231,7 @@ export async function exportPerformanceVideo(notes: readonly CapturedNote[], set
       const page = Math.min(lastPage, Math.floor(time / (measureMs * 2)))
       if (page !== currentPage) { image = await scoreImage(notes, settings, page); currentPage = page }
       drawPerformanceFrame(context, image!, notes, settings, time, (time - page * measureMs * 2) / (measureMs * 2))
+      drawTrialWatermark(context, canvas.width, canvas.height)
       const frame = new VideoFrame(canvas, { timestamp: Math.round(frameIndex * 1_000_000 / FPS), duration: Math.round(1_000_000 / FPS) })
       try { encoder.encode(frame, { keyFrame: frameIndex % (FPS * 2) === 0 }) } finally { frame.close() }
       if (encoder.encodeQueueSize > 6) await encoder.flush()

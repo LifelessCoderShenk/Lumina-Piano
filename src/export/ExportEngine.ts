@@ -1,4 +1,5 @@
 import { ArrayBufferTarget, Muxer } from 'webm-muxer'
+import { trialFrameComposer } from './trialWatermark'
 
 import { mkdirExportDir, rmExportDir } from './exportFileSystem'
 import { writeAudioBufferToWav } from './wavWriter'
@@ -244,6 +245,7 @@ export class ExportEngine {
 
     const target = new ArrayBufferTarget()
     const canvas = activeRenderer.getCanvas()
+    const composeTrialFrame = trialFrameComposer(canvas)
     const muxer = new Muxer({
       firstTimestampBehavior: 'offset',
       target,
@@ -297,7 +299,7 @@ export class ExportEngine {
         activeRenderer.renderFrame(tick, {
           animationTimeSeconds: frameTimeSeconds,
         })
-        const videoFrame = new VideoFrame(canvas, {
+        const videoFrame = new VideoFrame(composeTrialFrame(), {
           duration: frameDurationMicros,
           timestamp: timestampMicros,
         })

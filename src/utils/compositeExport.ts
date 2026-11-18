@@ -1,4 +1,5 @@
 import type { CameraOverlaySettings } from '../store/types'
+import { drawTrialWatermark } from '../export/trialWatermark'
 import type { ExportResolution } from '../export/types'
 import { resolveCameraOrientationGeometry } from '../components/shared/cameraOrientation'
 import { writeExportFile } from '../export/exportFileSystem'
@@ -299,6 +300,7 @@ export async function compositeExport(
           height,
         )
 
+        drawTrialWatermark(context, width, height)
         if (hasReachedVerifiedDuration()) {
           finalizeExport()
           return

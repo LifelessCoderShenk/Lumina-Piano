@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ElectronAPI, ElectronFS } from '../src/preload/api'
 
 const electronApi: ElectronAPI = {
+  account: {
+    status: () => ipcRenderer.invoke('account:status'),
+    signIn: () => ipcRenderer.invoke('account:signIn'),
+    signOut: () => ipcRenderer.invoke('account:signOut'),
+  },
   showSaveDialog: (options) => ipcRenderer.invoke('dialog:showSaveDialog', options),
   openJsonFile: () => ipcRenderer.invoke('dialog:openJsonFile'),
   openMidiFile: () => ipcRenderer.invoke('dialog:openMidiFile'),

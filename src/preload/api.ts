@@ -17,6 +17,11 @@ export interface ElectronExportBridge {
 }
 
 export interface ElectronAPI {
+  account?: {
+    status(): Promise<{ email: string | null }>
+    signIn(): Promise<{ email: string | null }>
+    signOut(): Promise<{ email: string | null }>
+  }
   showSaveDialog(options: SaveDialogOptions): Promise<string | null>
   openJsonFile(): Promise<string | null>
   openMidiFile(): Promise<string | null>

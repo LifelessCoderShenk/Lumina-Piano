@@ -1,4 +1,5 @@
 import { ArrayBufferTarget, Muxer } from 'webm-muxer'
+import { drawTrialWatermark } from './trialWatermark'
 
 import type { CameraOverlaySettings, VisualizerSettings } from '../store/types'
 import {
@@ -158,6 +159,7 @@ export async function exportPerformanceVideoDeterministically(
         height,
       )
 
+      drawTrialWatermark(context, width, height)
       const frame = new VideoFrame(canvas, {
         duration: frameDurationMicros,
         timestamp: resolvePerformanceFrameTimestampMicros(frameIndex, frameRate),

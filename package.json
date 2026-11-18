@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@pixi/filter-bloom": "^5.1.1",
+    "@supabase/supabase-js": "^2.119.0",
     "@tonejs/midi": "^2.0.28",
     "classnames": "^2.5.1",
     "electron-squirrel-startup": "^1.0.1",
