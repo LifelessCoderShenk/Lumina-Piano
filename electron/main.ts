@@ -2,13 +2,14 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import type { OpenDialogOptions } from 'electron'
+import squirrelStartup from 'electron-squirrel-startup'
 
 import { spawnProcess } from './spawnProcess'
 import { atomicWrite } from './atomicWrite'
 import { desktopAccount, desktopSignIn, desktopSignOut } from './accounts'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (require('electron-squirrel-startup')) {
+if (squirrelStartup) {
   app.quit()
 }
 
