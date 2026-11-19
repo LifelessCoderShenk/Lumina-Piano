@@ -185,7 +185,7 @@ export default function Home() {
             </Link>
           </div>
           <p className={styles.downloadNote}>
-            Windows preview available. macOS coming soon.
+            Windows and macOS previews available.
           </p>
         </div>
       </section>

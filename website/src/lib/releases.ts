@@ -6,7 +6,13 @@ export const windowsPreview = {
   notes: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.0-preview.1",
 };
 
+export const macPreview = {
+  notes: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/mac-preview-2",
+  appleSilicon: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/download/mac-preview-2/Lumina-Piano-macOS-arm64-preview.zip",
+  intel: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/download/mac-preview-2/Lumina-Piano-macOS-x64-preview.zip",
+};
+
 export const previewFeedbackUrl = "https://github.com/LifelessCoderShenk/Lumina-Piano/issues/new?" + new URLSearchParams({
-  title: `[Windows ${windowsPreview.version}] `,
-  body: `App version: ${windowsPreview.version}\nWindows version:\n\nWhat happened?\n\nSteps to reproduce:\n1. \n\nWhat did you expect?\n\nReports are public. Do not include passwords, sign-in links, or private recordings.`,
+  title: "[Lumina preview] ",
+  body: "App version:\nWindows/macOS version:\nProcessor (Intel/Apple Silicon):\n\nWhat happened?\n\nSteps to reproduce:\n1. \n\nWhat did you expect?\n\nReports are public. Do not include passwords, sign-in links, or private recordings.",
 }).toString();

@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import { Monitor } from "lucide-react";
 import { PageIntro } from "@/components/page-intro";
-import { previewFeedbackUrl, windowsPreview } from "@/lib/releases";
+import { macPreview, previewFeedbackUrl, windowsPreview } from "@/lib/releases";
 
 export const metadata: Metadata = {
   title: "Download",
   description:
-    "Download the Lumina Piano Windows preview. Free trial with watermarked exports. macOS coming soon.",
+    "Download Lumina Piano previews for Windows, Apple Silicon, and Intel Macs. Free trial with watermarked exports.",
 };
 
 export default function Download() {
@@ -43,7 +43,15 @@ export default function Download() {
                 <a href={windowsPreview.notes} className="mt-4 inline-block text-sm underline underline-offset-4">Release notes & checksum</a>
               </>
             ) : (
-              <p className="mt-7 text-sm font-medium text-secondary">Coming soon</p>
+              <>
+                <p className="mt-3 text-sm text-secondary">macOS Preview 2</p>
+                <div className="mt-7 flex flex-wrap gap-3">
+                  <a href={macPreview.appleSilicon} className="button button--primary">Apple Silicon</a>
+                  <a href={macPreview.intel} className="button button--secondary">Intel Mac</a>
+                </div>
+                <p className="mt-5 text-sm text-secondary">Not notarized. macOS may block opening this preview.</p>
+                <a href={macPreview.notes} className="mt-4 inline-block text-sm underline underline-offset-4">Release notes & checksums</a>
+              </>
             )}
           </section>
         ))}
@@ -52,7 +60,7 @@ export default function Download() {
         <details className="rounded-2xl border border-line p-6">
           <summary className="cursor-pointer text-base font-medium text-primary">Getting started</summary>
           <ol className="mt-5 list-decimal space-y-3 pl-5 text-sm leading-relaxed">
-            <li>Install and open Lumina Piano.</li>
+            <li>Install and open Lumina Piano. On Mac, extract the ZIP and move the app to Applications.</li>
             <li>Choose <strong className="text-primary">Trial · Sign in</strong> at the top-right. Use the same Google account as the website.</li>
             <li>Open a sample or add your MIDI, then export a short video. Trial exports include the Lumina watermark.</li>
           </ol>

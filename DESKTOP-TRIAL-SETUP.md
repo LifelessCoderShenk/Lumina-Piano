@@ -22,7 +22,7 @@ All video-export paths burn in the compact piano symbol with `Lumina` underneath
 
 The owner confirmed desktop sign-in and the branded export watermark locally. An unsigned preview is published at https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.0-preview.1 with SHA256SUMS.txt. It is not a completed stable release: clean-machine testing and code signing remain pending.
 
-Preview 1 was built from clean commit `c8a2baf`, excluding ongoing workspace edits. The website pins this exact installer in `website/src/lib/releases.ts`. For subsequent previews, build from a clean commit, verify packaged startup and exports, upload a new versioned asset and checksum, then update that manifest. Do not overwrite published installer assets. macOS and paid licenses remain unavailable.
+Preview 1 was built from clean commit `c8a2baf`, excluding ongoing workspace edits. The website pins this exact installer in `website/src/lib/releases.ts`. For subsequent previews, build from a clean commit, verify packaged startup and exports, upload a new versioned asset and checksum, then update that manifest. Do not overwrite published installer assets. Paid licenses remain unavailable. For the separately built Mac previews, see `MACOS-PREVIEW.md`.
 
 Run `npm run verify:release` from `website` after each publication. It streams the public installer without authentication or execution, checks its SHA-256 against the reviewed manifest, and verifies the published checksum file. This detects broken downloads or mismatched assets, but does not replace installer testing or code signing.
 
