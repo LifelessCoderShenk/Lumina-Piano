@@ -269,6 +269,7 @@ describe('App Create Mode shell', () => {
 
   it('does not render transport, track list, or menu bar in Create Mode and shows the new shell', () => {
     const { container } = render(<App />)
+    expect(screen.getByTestId('title-bar')).toBeTruthy()
 
     expect(screen.queryByTestId('menu-bar')).toBeNull()
     expect(screen.queryByTestId('track-list')).toBeNull()

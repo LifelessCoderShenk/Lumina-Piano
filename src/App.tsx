@@ -130,6 +130,7 @@ export function App() {
   ) {
     return (
       <div className={styles.app} style={appRootStyle}>
+        <TitleBar />
         <ProjectRecovery />
         <div className={styles.createShell}>
           <EditPanel
