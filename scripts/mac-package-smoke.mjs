@@ -29,17 +29,23 @@ try {
   socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Renderer check timed out.')), 30_000);
-    socket.onopen = () => socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: {
-      expression: `(async () => { for (let i=0;i<100;i++) { if (document.body.innerText.includes('Trial · Sign in') && typeof window.electronAPI?.account?.signIn === 'function') return true; await new Promise(r=>setTimeout(r,100)); } return false; })()`,
-      awaitPromise: true, returnByValue: true,
+    const check = () => socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: {
+      expression: `Boolean(document.body?.innerText.includes('Trial · Sign in') && typeof window.electronAPI?.account?.signIn === 'function')`,
+      returnByValue: true,
     } }));
+    socket.onopen = check;
     socket.onerror = () => { clearTimeout(timeout); reject(new Error('Debug connection failed.')); };
     socket.onmessage = event => {
       const message = JSON.parse(event.data);
       if (message.id !== 1) return;
-      clearTimeout(timeout);
-      if (message.result?.result?.value === true) resolve();
-      else reject(new Error('Packaged sign-in UI or bridge is missing.'));
+      if (message.result?.result?.value === true) {
+        clearTimeout(timeout);
+        resolve();
+      } else {
+        // The first target can still be navigating from about:blank. Retry in
+        // its new execution context instead of treating navigation as failure.
+        setTimeout(() => { if (socket.readyState === WebSocket.OPEN) check(); }, 500);
+      }
     };
   });
   console.log('Packaged macOS renderer and account bridge verified.');
