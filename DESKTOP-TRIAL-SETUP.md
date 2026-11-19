@@ -8,7 +8,7 @@ Supabase redirect configured and confirmed by the account owner:
 
 to Authentication → URL Configuration → Redirect URLs in `lumina-staging`. Do not replace the existing website callback. The Google callback remains the Supabase HTTPS callback; do not add this localhost address to Google.
 
-All video-export paths burn in `Lumina Piano · Trial`: visualization, camera composite (including the legacy MediaRecorder fallback), and transcription. The watermark is part of encoded frames, not preview UI. Transcription camera overlays are constrained to the score area above the watermark. This trial build intentionally has no paid-export switch; account metadata and local settings cannot remove it. Paid license enforcement and offline entitlement policy still need implementation.
+All video-export paths burn in the compact piano symbol with `Lumina` underneath: visualization, camera composite (including the legacy MediaRecorder fallback), and transcription. The watermark is part of encoded frames, not preview UI. Transcription camera overlays are constrained to the score area above the watermark. This trial build intentionally has no paid-export switch; account metadata and local settings cannot remove it. Paid license enforcement and offline entitlement policy still need implementation.
 
 ## Required real-app checks before distribution
 
@@ -19,3 +19,4 @@ All video-export paths burn in `Lumina Piano · Trial`: visualization, camera co
 - Test the installer on a clean Windows machine, including uninstall/reinstall without loss of projects.
 
 The installer is an unsigned private test artifact until signing and manual acceptance are complete. Do not publish it as a completed public trial. No installer upload or website download link is created by packaging alone.
+

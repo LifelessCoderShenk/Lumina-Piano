@@ -1,3 +1,4 @@
+// Canvas vector API is unavailable in jsdom.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectData, Track } from '../midi/types'
@@ -108,9 +109,10 @@ vi.mock('../playback/PlaybackEngine', () => ({
 }))
 
 beforeEach(() => {
+  vi.stubGlobal('Path2D', class {})
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), setTransform: vi.fn(),
-    strokeText: vi.fn(), fillText: vi.fn(),
+    stroke: vi.fn(), strokeText: vi.fn(), fillText: vi.fn(),
   } as unknown as CanvasRenderingContext2D)
   resetStore()
   vi.clearAllMocks()
@@ -677,3 +679,7 @@ function createMockAudioBuffer(): AudioBuffer {
     sampleRate: 48_000,
   } as AudioBuffer
 }
+
+
+
+

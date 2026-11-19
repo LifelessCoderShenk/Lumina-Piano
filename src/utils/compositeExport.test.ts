@@ -1,3 +1,4 @@
+// Canvas vector API is unavailable in jsdom.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -62,6 +63,7 @@ class FakeMediaRecorder {
 
 describe('compositeExport duration lifecycle', () => {
   beforeEach(() => {
+  vi.stubGlobal('Path2D', class {})
     recorders.length = 0
     mediaRecorderStart.mockReset()
     mediaRecorderStop.mockReset()
@@ -148,7 +150,7 @@ describe('compositeExport duration lifecycle', () => {
         rotate: vi.fn(),
         save: vi.fn(),
         setTransform: vi.fn(),
-        strokeText: vi.fn(),
+        stroke: vi.fn(), strokeText: vi.fn(),
         fillText: vi.fn(),
         scale: vi.fn(),
         translate: vi.fn(),
@@ -441,3 +443,7 @@ describe('resolveCompositeDrawPlan', () => {
     expect(plan?.camera.destinationHeight).toBe(672)
   })
 })
+
+
+
+
