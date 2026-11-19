@@ -24,3 +24,5 @@ The owner confirmed desktop sign-in and the branded export watermark locally. An
 
 Preview 1 was built from clean commit `c8a2baf`, excluding ongoing workspace edits. The website pins this exact installer in `website/src/lib/releases.ts`. For subsequent previews, build from a clean commit, verify packaged startup and exports, upload a new versioned asset and checksum, then update that manifest. Do not overwrite published installer assets. macOS and paid licenses remain unavailable.
 
+Run `npm run verify:release` from `website` after each publication. It streams the public installer without authentication or execution, checks its SHA-256 against the reviewed manifest, and verifies the published checksum file. This detects broken downloads or mismatched assets, but does not replace installer testing or code signing.
+

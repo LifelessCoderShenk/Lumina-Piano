@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Monitor } from "lucide-react";
 import { PageIntro } from "@/components/page-intro";
-import { windowsPreview } from "@/lib/releases";
+import { previewFeedbackUrl, windowsPreview } from "@/lib/releases";
 
 export const metadata: Metadata = {
   title: "Download",
@@ -47,6 +47,17 @@ export default function Download() {
             )}
           </section>
         ))}
+      </div>
+      <div className="mt-8 max-w-3xl text-secondary">
+        <details className="rounded-2xl border border-line p-6">
+          <summary className="cursor-pointer text-base font-medium text-primary">Getting started</summary>
+          <ol className="mt-5 list-decimal space-y-3 pl-5 text-sm leading-relaxed">
+            <li>Install and open Lumina Piano.</li>
+            <li>Choose <strong className="text-primary">Trial · Sign in</strong> at the top-right. Use the same Google account as the website.</li>
+            <li>Open a sample or add your MIDI, then export a short video. Trial exports include the Lumina watermark.</li>
+          </ol>
+        </details>
+        <p className="mt-6 text-sm"><a href={previewFeedbackUrl} className="underline underline-offset-4">Report a problem</a><span className="ml-2">GitHub account required · Reports are public</span></p>
       </div>
     </PageIntro>
   );
