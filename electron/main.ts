@@ -340,7 +340,7 @@ function getSamplePiecesDirectory(): string {
 
 function getFfmpegBinaryPath(): string | null {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'ffmpeg.exe')
+    return path.join(process.resourcesPath, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
   }
 
   // Keep the dev-only lookup lazy. Vite deliberately externalizes this

@@ -1,0 +1,79 @@
+name: macOS preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck:app
+      - run: npx vitest run electron/accounts.test.ts src/export/trialWatermark.test.ts src/App.test.tsx
+      - run: npm run build -- --arch=${{ matrix.arch }}
+      - name: Verify packaged app and FFmpeg
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: |
+          APP="out/Lumina Piano-darwin-$MAC_ARCH/Lumina Piano.app"
+          test -d "$APP"
+          "$APP/Contents/Resources/ffmpeg" -version
+          /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP/Contents/Info.plist"
+          node scripts/mac-package-smoke.mjs "$APP"
+      - name: Archive preview
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent "out/Lumina Piano-darwin-$MAC_ARCH/Lumina Piano.app" "artifacts/Lumina-Piano-macOS-$MAC_ARCH-preview.zip"
+          cd artifacts
+          shasum -a 256 *.zip > "SHA256SUMS-$MAC_ARCH.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish tested preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          cat > notes.md <<'EOF'
+          Native Apple Silicon (arm64) and Intel (x64) macOS previews.
+
+          Extract the ZIP and move Lumina Piano.app to Applications. Google sign-in uses the same account as the website. Trial exports carry the Lumina watermark.
+
+          These builds are not Developer ID signed or Apple notarized. Gatekeeper may prevent opening them. Physical Mac camera, microphone, MIDI, and export acceptance testing is still pending; this is not a stable release.
+
+          Both builds passed packaged renderer/account startup checks, FFmpeg execution, TypeScript, and targeted tests on native macOS runners. Checksums are included.
+          EOF
+          gh release create "mac-preview-$RUN_NUMBER" artifacts/* --target "$RELEASE_SHA" --prerelease --title "Lumina Piano macOS Preview $RUN_NUMBER" --notes-file notes.md
