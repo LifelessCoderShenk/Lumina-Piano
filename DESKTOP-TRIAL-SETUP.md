@@ -20,6 +20,8 @@ All video-export paths burn in the compact piano symbol with `Lumina` underneath
 
 ## Windows preview distribution
 
+Current Windows release: `v1.0.1-preview.2`, built from clean commit `b059917`. Repeated launches now restore/focus the running window. Packaged startup, account bridge, second-instance exit, and bundled FFmpeg synthetic audio/video encoding and full decoding passed locally. The app version is 1.0.1 so it can replace the earlier 1.0.0 preview. A clean-machine install/upgrade test remains pending.
+
 The owner confirmed desktop sign-in and the branded export watermark locally. An unsigned preview is published at https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.0-preview.1 with SHA256SUMS.txt. It is not a completed stable release: clean-machine testing and code signing remain pending.
 
 Preview 1 was built from clean commit `c8a2baf`, excluding ongoing workspace edits. The website pins this exact installer in `website/src/lib/releases.ts`. For subsequent previews, build from a clean commit, verify packaged startup and exports, upload a new versioned asset and checksum, then update that manifest. Do not overwrite published installer assets. Paid licenses remain unavailable. For the separately built Mac previews, see `MACOS-PREVIEW.md`.
