@@ -5,9 +5,10 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const appPath = process.argv[2];
-if (!appPath || process.platform !== 'darwin') throw new Error('Pass a packaged .app on macOS.');
+if (!appPath || !['darwin', 'win32'].includes(process.platform)) throw new Error('Pass a packaged .app on macOS or .exe on Windows.');
+const executable = process.platform === 'darwin' ? path.join(appPath, 'Contents/MacOS/lumina-piano') : path.resolve(appPath);
 const profile = await mkdtemp(path.join(tmpdir(), 'lumina-smoke-'));
-const child = spawn(path.join(appPath, 'Contents/MacOS/lumina-piano'), [
+const child = spawn(executable, [
   '--remote-debugging-port=9434', '--mute-audio', `--user-data-dir=${profile}`,
 ], { stdio: 'inherit' });
 let socket;
@@ -48,10 +49,26 @@ try {
       }
     };
   });
-  console.log('Packaged macOS renderer and account bridge verified.');
+  console.log('Packaged renderer and account bridge verified.');
+  if (process.platform === 'win32') {
+    await new Promise((resolve, reject) => {
+      const duplicate = spawn(executable, ['--mute-audio', `--user-data-dir=${profile}`], { stdio: 'inherit' });
+      const timeout = setTimeout(() => {
+        duplicate.kill();
+        reject(new Error('Second launch did not exit.'));
+      }, 15_000);
+      duplicate.on('error', error => { clearTimeout(timeout); reject(error); });
+      duplicate.on('exit', code => {
+        clearTimeout(timeout);
+        if (code === 0 && child.exitCode === null) resolve();
+        else reject(new Error(`Unexpected second-launch exit: ${code}`));
+      });
+    });
+    console.log('Second launch exited while the original app remained running.');
+  }
 } finally {
   socket?.close();
   child.kill();
   await delay(1000);
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 1000 });
 }

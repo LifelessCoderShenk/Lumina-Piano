@@ -14,6 +14,15 @@ if (squirrelStartup) {
 }
 
 let mainWindow: BrowserWindow | null = null
+const primaryInstance = !squirrelStartup && app.requestSingleInstanceLock()
+if (!squirrelStartup && !primaryInstance) app.quit()
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -46,6 +55,7 @@ const createWindow = () => {
 }
 
 app.on('ready', () => {
+  if (!primaryInstance) return
   const accountHandler = (action: () => Promise<{ email: string | null }>) => async (event: Electron.IpcMainInvokeEvent) => {
     if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Unauthorized account request')
     return action()
@@ -296,7 +306,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (primaryInstance && BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
 })
