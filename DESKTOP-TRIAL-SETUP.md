@@ -18,5 +18,9 @@ All video-export paths burn in the compact piano symbol with `Lumina` underneath
 - Export videos from all three modes and inspect the saved files at 720p and 4K for legibility, watermark visibility, correct aspect ratio, and audio sync.
 - Test the installer on a clean Windows machine, including uninstall/reinstall without loss of projects.
 
-The installer is an unsigned private test artifact until signing and manual acceptance are complete. Do not publish it as a completed public trial. No installer upload or website download link is created by packaging alone.
+## Windows preview distribution
+
+The owner confirmed desktop sign-in and the branded export watermark locally. An unsigned preview is published at https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.0-preview.1 with SHA256SUMS.txt. It is not a completed stable release: clean-machine testing and code signing remain pending.
+
+Preview 1 was built from clean commit `c8a2baf`, excluding ongoing workspace edits. The website pins this exact installer in `website/src/lib/releases.ts`. For subsequent previews, build from a clean commit, verify packaged startup and exports, upload a new versioned asset and checksum, then update that manifest. Do not overwrite published installer assets. macOS and paid licenses remain unavailable.
 
