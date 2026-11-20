@@ -1,6 +1,6 @@
 {
   "name": "lumina-piano",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": ".vite/build/main.cjs",
   "scripts": {
     "lint": "eslint .",

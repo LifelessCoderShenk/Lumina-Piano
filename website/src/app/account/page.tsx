@@ -19,7 +19,7 @@ export default async function AccountPage() {
     <p className="mt-3 break-all text-secondary">{user.email}</p>
     <div className="my-10 rounded-2xl border border-line bg-card p-7">
       <h2 className="text-2xl font-medium">{error ? "Account status unavailable" : paid ? "Lifetime license" : "Free trial"}</h2>
-      <p className="mt-3 text-secondary">{error ? "Please refresh to try again." : paid ? "Your one-time license is linked to this account." : "Watermarked exports. One-time purchase coming soon."}</p>
+      <p className="mt-3 text-secondary">{error ? "Please refresh to try again." : paid ? "Your one-time license is linked to this account." : "No time limit. Exports include the Lumina watermark."}</p>
       <ButtonLink href="/download" className="mt-6">Get Lumina Piano</ButtonLink>
     </div>
     <form action={signOut}><Button type="submit" variant="secondary">Sign out</Button></form>

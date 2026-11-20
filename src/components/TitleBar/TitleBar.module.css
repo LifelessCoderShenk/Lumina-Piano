@@ -7,6 +7,7 @@
   justify-content: space-between;
   border-bottom: 1px solid #ffffff10;
   position: relative;
+  z-index: 20;
   user-select: none;
 }
 

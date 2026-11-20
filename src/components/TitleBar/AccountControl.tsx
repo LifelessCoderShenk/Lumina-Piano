@@ -1,33 +1,61 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import styles from './AccountControl.module.css'
 
 export function AccountControl() {
   const [email, setEmail] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'checking' | 'signingIn' | 'signingOut' | null>('checking')
   const [message, setMessage] = useState('')
+  const panel = useRef<HTMLDetailsElement>(null)
+  const trigger = useRef<HTMLElement>(null)
+
   useEffect(() => {
     let active = true
-    window.electronAPI?.account?.status().then(value => { if (active) setEmail(value.email) }).catch(() => undefined)
+    const account = window.electronAPI?.account
+    if (!account) { setBusy(null); return }
+    account.status().then(value => { if (active) setEmail(value.email) })
+      .catch(() => { if (active) setMessage('Could not check your account. Try again when connected.') })
+      .finally(() => { if (active) setBusy(null) })
     return () => { active = false }
   }, [])
-  async function act() {
+
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (panel.current && !panel.current.contains(event.target as Node)) panel.current.open = false
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [])
+
+  async function act(action: 'status' | 'signIn' | 'signOut') {
     const account = window.electronAPI?.account
-    if (!account) { setMessage('Account sign-in requires the desktop app.'); return }
-    setBusy(true)
+    if (!account) { setMessage('Open the desktop app to sign in.'); return }
+    setBusy(action === 'status' ? 'checking' : action === 'signIn' ? 'signingIn' : 'signingOut')
     setMessage('')
-    try {
-      const result = await (email ? account.signOut() : account.signIn())
-      setEmail(result.email)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': Error: /, '') : 'Sign-in failed. Please try again.')
-    } finally { setBusy(false) }
+    try { setEmail((await account[action]()).email) }
+    catch (error) {
+      setMessage(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': Error: /, '') : 'Could not update your account. Please try again.')
+    } finally { setBusy(null) }
   }
-  return <div style={{ position: 'relative', zIndex: 2, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-    <button onClick={() => void act()} disabled={busy} title={email ? `${email} — sign out` : 'Sign in with Google'}
-      style={{ background: 'transparent', color: '#c4ccd8', border: '1px solid #ffffff20', borderRadius: 12, padding: '3px 12px', fontSize: 12 }}>
-      {busy ? 'Complete sign-in in your browser…' : email ? 'Trial · Sign out' : 'Trial · Sign in'}
-    </button>
-    {message && <div role="alert" style={{ position: 'absolute', right: 0, top: 32, width: 320, padding: 14, background: '#17171b', color: '#f5f5f7', border: '1px solid #444', borderRadius: 8 }}>
-      {message} <button onClick={() => setMessage('')} aria-label="Dismiss account message">×</button>
-    </div>}
-  </div>
+
+  return <details ref={panel} className={styles.account} onKeyDown={event => {
+    if (event.key === 'Escape' && panel.current) {
+      panel.current.open = false
+      trigger.current?.focus()
+    }
+  }}>
+    <summary ref={trigger} className={styles.trigger}>
+      {busy === 'checking' ? 'Checking account…' : email ? 'Trial · Account' : 'Trial · Sign in'}
+    </summary>
+    <div className={styles.panel}>
+      <h2>Account</h2>
+      <p className={styles.email}>{email ?? 'Sign in with your website account.'}</p>
+      <div className={styles.trial}><strong>Free trial · No time limit</strong><span>Exports include the Lumina watermark.</span></div>
+      {busy && <p role="status">{busy === 'signingIn' ? 'Finish signing in through your browser.' : busy === 'signingOut' ? 'Signing out…' : 'Checking your account…'}</p>}
+      {message && <p role="alert">{message}</p>}
+      <div className={styles.actions}>
+        <button disabled={!!busy} onClick={() => void act(email ? 'signOut' : 'signIn')}>{email ? 'Sign out' : 'Continue with Google'}</button>
+        {message && <button disabled={!!busy} onClick={() => void act('status')}>Retry status</button>}
+      </div>
+    </div>
+  </details>
 }

@@ -38,7 +38,8 @@ function accountClient() {
 
 export async function desktopAccount() {
   const { data, error } = await accountClient().auth.getUser()
-  return { email: error ? null : data.user?.email ?? null }
+  if (error && error.name !== 'AuthSessionMissingError') throw new Error('Could not verify your account. Check your connection and try again.')
+  return { email: data.user?.email ?? null }
 }
 
 export async function desktopSignOut() {

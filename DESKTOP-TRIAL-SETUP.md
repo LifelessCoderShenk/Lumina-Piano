@@ -1,5 +1,7 @@
 # Desktop trial acceptance
 
+Trial policy: unlimited duration, with a branded watermark on every video export. There is no expiry timer. The account panel shows the signed-in email and offers a separate sign-out action; account verification failures are shown with a retry action. Paid entitlement enforcement is still a separate, unfinished release task.
+
 This build signs in with the same Supabase/Google identity as the website. Tokens stay in Electron's main process and persist using OS-backed asynchronous safeStorage encryption. The renderer receives only the verified email. A loopback-only PKCE callback listens on port 43821 during sign-in and closes after success/failure or three minutes.
 
 Supabase redirect configured and confirmed by the account owner:

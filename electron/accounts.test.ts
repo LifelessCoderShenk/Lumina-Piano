@@ -29,7 +29,7 @@ it('returns only the verified email, never session tokens or metadata', async ()
 it('does not trust a user record when server verification fails', async () => {
   mocks.getUser.mockResolvedValue({ data: { user: { email: 'tester@example.com' } }, error: new Error('Invalid token') })
   const { desktopAccount } = await import('./accounts')
-  expect(await desktopAccount()).toEqual({ email: null })
+  await expect(desktopAccount()).rejects.toThrow('Could not verify your account')
 })
 
 it('refuses to begin sign-in when secure OS storage is unavailable', async () => {
@@ -37,4 +37,10 @@ it('refuses to begin sign-in when secure OS storage is unavailable', async () =>
   const { desktopSignIn } = await import('./accounts')
   await expect(desktopSignIn()).rejects.toThrow('Secure account storage is unavailable')
   expect(mocks.createClient).not.toHaveBeenCalled()
+})
+
+it('returns signed out when no saved session exists', async () => {
+  mocks.getUser.mockResolvedValue({ data: { user: null }, error: { name: 'AuthSessionMissingError' } })
+  const { desktopAccount } = await import('./accounts')
+  expect(await desktopAccount()).toEqual({ email: null })
 })
