@@ -22,7 +22,7 @@ All video-export paths burn in the compact piano symbol with `Lumina` underneath
 
 ## Windows preview distribution
 
-Current Windows release: `v1.0.1-preview.2`, built from clean commit `b059917`. Repeated launches now restore/focus the running window. Packaged startup, account bridge, second-instance exit, and bundled FFmpeg synthetic audio/video encoding and full decoding passed locally. The app version is 1.0.1 so it can replace the earlier 1.0.0 preview. A clean-machine install/upgrade test remains pending.
+Current Windows release: `v1.0.2-preview.3`, built from clean commit `594eb79`. Includes the unlimited-trial account panel with explicit sign-out and retryable status failures. Eight account tests, TypeScript, targeted lint, packaged startup/account bridge, and second-instance exit checks passed. Repeated launches restore/focus the running window. A clean-machine install/upgrade test remains pending.
 
 The owner confirmed desktop sign-in and the branded export watermark locally. An unsigned preview is published at https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.0-preview.1 with SHA256SUMS.txt. It is not a completed stable release: clean-machine testing and code signing remain pending.
 
