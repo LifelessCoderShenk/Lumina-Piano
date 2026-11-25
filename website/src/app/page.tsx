@@ -6,6 +6,7 @@ import { ComparisonSection } from "@/components/home/comparison-section";
 import { homeMedia } from "@/lib/home-media";
 import { referenceContent } from "@/lib/reference-content";
 import styles from "./home.module.css";
+import { HeroVideo } from "@/components/home/hero-video";
 
 const steps = [
   {
@@ -88,7 +89,9 @@ export default function Home() {
               <span>macOS</span>
             </div>
           </div>
-          <MediaPreview media={homeMedia.hero} shape="hero" />
+          <div className={styles.heroVisual}>
+            <HeroVideo />
+          </div>
         </div>
         <ul className={styles.benefits}>
           {[
