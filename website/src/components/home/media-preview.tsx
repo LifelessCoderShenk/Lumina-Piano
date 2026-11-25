@@ -211,9 +211,11 @@ function DetailDrawing({ kind }: { kind: HomeMedia["kind"] }) {
 export function MediaPreview({
   media,
   shape = "wide",
+  autoPlay = false,
 }: {
   media: HomeMedia;
   shape?: "hero" | "square" | "wide";
+  autoPlay?: boolean;
 }) {
   return (
     <figure className={`${styles.frame} ${styles[shape]}`}>
@@ -232,9 +234,10 @@ export function MediaPreview({
             <video
               key={media.asset.src}
               controls
-              preload="none"
+              autoPlay={autoPlay}
+              preload={autoPlay ? "metadata" : "none"}
               playsInline
-              muted={!media.asset.hasAudio}
+              muted={autoPlay || !media.asset.hasAudio}
               loop={!media.asset.hasAudio}
               poster={media.asset.poster}
               aria-label={media.asset.alt}

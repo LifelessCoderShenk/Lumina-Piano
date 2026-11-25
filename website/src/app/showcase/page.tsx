@@ -27,7 +27,7 @@ export default function Showcase() {
         </div>
       </header>
       <section id="performance-demo" aria-labelledby="concert-title">
-        <MediaPreview media={homeMedia.hands} shape="hero" />
+        <MediaPreview media={homeMedia.hands} shape="hero" autoPlay />
         <div className="mt-5 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 id="concert-title" className="text-2xl font-medium tracking-tight">Chopin. In full flow.</h2>
