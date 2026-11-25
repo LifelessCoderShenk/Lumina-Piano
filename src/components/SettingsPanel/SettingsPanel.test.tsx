@@ -229,9 +229,9 @@ describe('SettingsPanel', () => {
   it('switches falling-note material and adjusts note glow', () => {
     render(<SettingsPanel onClose={() => undefined} />)
 
-    expect(screen.getByRole('button', { name: 'Sculpted' }).getAttribute('aria-pressed')).toBe('true')
+    expect((screen.getByLabelText('Falling note style') as HTMLSelectElement).value).toBe('gradient')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Saber' }))
+    fireEvent.change(screen.getByLabelText('Falling note style'), { target: { value: 'saber' } })
     fireEvent.change(screen.getByLabelText('Fall speed'), { target: { value: '140' } })
     fireEvent.change(screen.getByLabelText('Note width'), { target: { value: '80' } })
     fireEvent.change(screen.getByLabelText('Note opacity'), { target: { value: '72' } })
@@ -246,13 +246,13 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().lightingIntensity).toBe(70)
     expect(screen.getByText('160%')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Outline' }))
+    fireEvent.change(screen.getByLabelText('Falling note style'), { target: { value: 'outline' } })
     expect(useAppStore.getState().noteStyle).toBe('outline')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Crystal' }))
+    fireEvent.change(screen.getByLabelText('Falling note style'), { target: { value: 'crystal' } })
     expect(useAppStore.getState().noteStyle).toBe('crystal')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Gem' }))
+    fireEvent.change(screen.getByLabelText('Falling note style'), { target: { value: 'gem' } })
     expect(useAppStore.getState().noteStyle).toBe('gem')
   })
 
@@ -275,7 +275,7 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByLabelText('Show ghost hands'))
 
     expect(useAppStore.getState().handVisualization.enabled).toBe(true)
-    expect((screen.getByLabelText('Ghost hands opacity') as HTMLInputElement).value).toBe('35')
+    expect((screen.getByLabelText('Ghost hands opacity') as HTMLInputElement).value).toBe('55')
 
     fireEvent.change(screen.getByLabelText('Ghost hands opacity'), { target: { value: '56' } })
 

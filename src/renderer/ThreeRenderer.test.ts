@@ -476,6 +476,9 @@ vi.mock('three/examples/jsm/postprocessing/SMAAPass.js', () => {
 
 vi.mock('three/examples/jsm/postprocessing/UnrealBloomPass.js', () => {
   class UnrealBloomPass {
+    highPassUniforms = { smoothWidth: { value: 0.01 } }
+    compositeMaterial = { uniforms: { bloomFactors: { value: [] } } }
+    renderTargetsHorizontal = [{ texture: { glowOnly: true } }]
     dispose = mockUnrealBloomPassDispose
 
     constructor(
@@ -892,12 +895,12 @@ describe('ThreeRenderer', () => {
     renderer.setKeyboardOpacity(0.4)
     renderer.setActiveKeyPitches([60])
 
-    expect((renderer as any).bloomPass.radius).toBe(0.018)
+    expect((renderer as any).bloomPass.radius).toBe(0.12)
     expect((renderer as any).renderer.toneMapping).toBe('ACESFilmicToneMapping')
     expect((renderer as any).renderer.outputColorSpace).toBe('SRGBColorSpace')
     expect((renderer as any).renderer.toneMappingExposure).toBe(1.08)
     expect(mockEffectComposerAddPass).toHaveBeenCalledWith((renderer as any).smaaPass)
-    expect((renderer as any).bloomCompositePass.uniforms.bloomTexture.value).toBe((renderer as any).bloomComposer.renderTarget2.texture)
+    expect((renderer as any).bloomCompositePass.uniforms.bloomTexture.value).toBe((renderer as any).bloomPass.renderTargetsHorizontal[0].texture)
     expect((renderer as any).bloomComposer.renderToScreen).toBe(false)
     expect((renderer as any).bloomCompositePass.uniforms.bloomDebugView.value).toBe(0)
     const keyboardHeightRatio = 270 / 720
@@ -1367,6 +1370,7 @@ describe('ThreeRenderer', () => {
   })
 
   it('adds independently adjustable reactive lighting behind active keys', async () => {
+    useAppStore.getState().setLightingIntensity(100)
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
     Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 640 })
@@ -1710,6 +1714,7 @@ describe('ThreeRenderer', () => {
   })
 
   it('recolors visible notes, key highlights, impact reflections, wave segments, and active particles when Create Mode colors change', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -1937,7 +1942,7 @@ describe('ThreeRenderer', () => {
     }
 
     expect(roundedNoteUniforms.noteStyleMode.value).toBe(1)
-    expect(roundedNoteUniforms.noteGlowStrength.value).toBe(1)
+    expect(roundedNoteUniforms.noteGlowStrength.value).toBe(0.65)
 
     useAppStore.getState().setNoteStyle('saber')
     useAppStore.getState().setNoteGlow(160)
@@ -2040,6 +2045,7 @@ void main() {
   })
 
   it('emits velocity-scaled bursts when note ids cross the boundary during forward playback', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -2226,6 +2232,7 @@ void main() {
   })
 
   it('emits particle bursts during offline export frames without relying on live playback state', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -2391,6 +2398,7 @@ void main() {
   })
 
   it('uses deterministic flow noise sampling and drifts active particles sideways over time', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -2455,6 +2463,7 @@ void main() {
   })
 
   it('emits bursts for all crossed notes during large uninterrupted forward jumps', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -2584,6 +2593,7 @@ void main() {
   })
 
   it('suppresses skipped-range bursts across loop restarts while allowing new loop notes to emit', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 
@@ -2637,6 +2647,7 @@ void main() {
   })
 
   it('resumes normal range-based bursts after pausing and resuming playback', async () => {
+    useAppStore.getState().setParticleSettings({ enabled: true })
     const renderer = new ThreeRenderer()
     const canvas = document.createElement('canvas')
 

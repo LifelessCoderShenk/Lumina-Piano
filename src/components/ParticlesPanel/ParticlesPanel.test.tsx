@@ -3,6 +3,7 @@ import React from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { resetStore, useAppStore } from '../../store/store'
+import { createParticleSettingsDefaults } from '../../store/defaults'
 import { PARTICLE_PRESETS } from '../../store/particlePresets'
 import { ParticlesPanel } from './ParticlesPanel'
 
@@ -49,6 +50,7 @@ describe('ParticlesPanel', () => {
   })
 
   it('updates the Create-mode particle settings', () => {
+    useAppStore.getState().setParticleSettings({ enabled: false })
     render(<ParticlesPanel />)
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable particles' }))
@@ -61,7 +63,7 @@ describe('ParticlesPanel', () => {
 
     expect(useAppStore.getState().particleSettings).toMatchObject({
       density: 175,
-      enabled: false,
+      enabled: true,
       spread: 25,
     })
   })
@@ -111,7 +113,7 @@ describe('ParticlesPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset to Default' }))
 
-    expect(useAppStore.getState().particleSettings).toEqual(PARTICLE_PRESETS[0].settings)
+    expect(useAppStore.getState().particleSettings).toEqual(createParticleSettingsDefaults())
     expect((screen.getByRole('combobox', { name: 'Particle preset' }) as HTMLSelectElement).value).toBe('prism')
   })
 })

@@ -6,6 +6,7 @@ import {
 } from '../../store/particlePresets'
 import type { ParticleSettings } from '../../store/types'
 import { useAppStore } from '../../store/store'
+import { ControlSection } from '../shared/ControlSection'
 import styles from './ParticlesPanel.module.css'
 
 const PARTICLE_CONTROLS: Array<{
@@ -44,6 +45,31 @@ export function ParticlesPanel() {
           />
         </label>
 
+        <div className={styles.presetRow}>
+          <label className={styles.presetControl}>
+            <span>Preset</span>
+            <select
+              aria-label="Particle preset"
+              onChange={(event) => {
+                const preset = PARTICLE_PRESETS.find(({ id }) => id === event.target.value)
+                if (preset != null) {
+                  setParticlePreset(preset.id)
+                }
+              }}
+              value={activePreset?.id ?? 'custom'}
+            >
+              {activePreset == null ? <option value="custom">Custom</option> : null}
+              {PARTICLE_PRESETS.map(({ id, label }) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <button className={styles.resetButton} onClick={resetParticleSettings} type="button">
+            Reset to Default
+          </button>
+        </div>
+
+        <ControlSection title="Shape & color" description="Particle appearance">
         <div className={styles.styleControl} role="group" aria-label="Particle shape">
           {(['spark', 'wisp', 'ray'] as const).map((style) => (
             <button
@@ -88,30 +114,8 @@ export function ParticlesPanel() {
           </label>
         ) : null}
 
-        <div className={styles.presetRow}>
-          <label className={styles.presetControl}>
-            <span>Preset</span>
-            <select
-              aria-label="Particle preset"
-              onChange={(event) => {
-                const preset = PARTICLE_PRESETS.find(({ id }) => id === event.target.value)
-                if (preset != null) {
-                  setParticlePreset(preset.id)
-                }
-              }}
-              value={activePreset?.id ?? 'custom'}
-            >
-              {activePreset == null ? <option value="custom">Custom</option> : null}
-              {PARTICLE_PRESETS.map(({ id, label }) => (
-                <option key={id} value={id}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <button className={styles.resetButton} onClick={resetParticleSettings} type="button">
-            Reset to Default
-          </button>
-        </div>
-
+        </ControlSection>
+        <ControlSection title="Motion & glow" description="Density, size, speed and spread">
         <div className={styles.controls}>
           {PARTICLE_CONTROLS.map(({ key, label, min, max }) => (
             <label key={key} className={styles.rangeControl}>
@@ -129,7 +133,7 @@ export function ParticlesPanel() {
               />
             </label>
           ))}
-        </div>
+        </div>        </ControlSection>
       </div>
     </section>
   )

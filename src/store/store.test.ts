@@ -61,7 +61,7 @@ describe('initial state', () => {
       useMic: false,
       useMidiAudio: true,
     })
-    expect(state.handVisualization).toEqual({ enabled: false, opacity: 35 })
+    expect(state.handVisualization).toEqual({ enabled: false, opacity: 55 })
     expect(state.backgroundImageTreatment).toEqual({
       blur: 0,
       dim: 20,
@@ -550,7 +550,7 @@ describe('create note colors', () => {
 })
 
 describe('Create Mode particle settings', () => {
-  it('defaults to enabled 100% multipliers and clamps patches to their supported ranges', () => {
+  it('defaults to disabled particles with 100% multipliers and clamps patches to their supported ranges', () => {
     expect(getAppState().particleSettings).toEqual({
       colorMode: 'note',
       customColor: '#7ec8ff',

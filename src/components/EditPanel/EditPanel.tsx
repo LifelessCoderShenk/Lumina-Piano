@@ -100,7 +100,7 @@ export function EditPanel({
           setIsSettingsOpen(!isSettingsOpen)
         }}
       />
-      {appMode !== 'createRecord' || recordModeView === 'video' ? <SecondBar /> : null}
+      {!isSettingsOpen && (appMode !== 'createRecord' || recordModeView === 'video') ? <SecondBar /> : null}
 
       <div className={styles.body} data-testid="edit-panel-body">
         {appMode === 'createRecord' && recordModeView === 'transcription' ? (

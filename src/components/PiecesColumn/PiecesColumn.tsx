@@ -4,7 +4,7 @@ import { loadMidiBytes } from '../../midi/loadMidiProject'
 import { loadLuminaProjectFileFromPath } from '../../project/luminaProject'
 import { loadMusicXmlFileFromPath } from '../../musicxml/loadMusicXmlProject'
 import { useAppStore } from '../../store/store'
-import { applySamplePieceColorDefault } from './samplePieceColorDefaults'
+import { applySamplePieceVisualDefaults } from './samplePieceColorDefaults'
 import styles from './PiecesColumn.module.css'
 
 const SAMPLE_SHORTCUT_COUNT = 2
@@ -238,7 +238,7 @@ function DefaultSamplePieceCards() {
 
     try {
       await loadMidiBytes(await samplePiecesApi.read(fileName))
-      applySamplePieceColorDefault(fileName)
+      applySamplePieceVisualDefaults(fileName)
     } catch (error) {
       console.error(`Failed to load default sample piece "${fileName}":`, error)
       setErrorMessage(`Failed to load ${formatSamplePieceLabel(fileName)}.`)
@@ -323,7 +323,7 @@ function SamplePiecesList() {
 
     try {
       await loadMidiBytes(await samplePiecesApi.read(fileName))
-      applySamplePieceColorDefault(fileName)
+      applySamplePieceVisualDefaults(fileName)
     } catch (error) {
       console.error(`Failed to load sample piece "${fileName}":`, error)
       setErrorMessage(`Failed to load ${formatSamplePieceLabel(fileName)}.`)

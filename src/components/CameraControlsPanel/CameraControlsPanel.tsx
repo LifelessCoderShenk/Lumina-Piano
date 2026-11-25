@@ -6,6 +6,7 @@ import { getActiveVisualizerRenderer } from '../../renderer/activeVisualizerRend
 import { useAppStore } from '../../store/store'
 import type { CameraOverlaySettings } from '../../store/types'
 import { clampCameraCropValue } from '../shared/cameraOrientation'
+import { ControlSection } from '../shared/ControlSection'
 import styles from './CameraControlsPanel.module.css'
 
 interface CameraControlsPanelProps {
@@ -220,6 +221,7 @@ export function CameraControlsPanel({ disabled = false, onBack, sourceVideoDimen
         </div>
       </div>
 
+      <ControlSection title="Crop edges" description="Trim the camera frame">
       <div className={styles.controlGroup}>
         <span className={styles.label}><AppIcon className={styles.labelIcon} icon={Crop} size={16} />CROP</span>
         <div className={styles.cropGrid}>
@@ -312,6 +314,8 @@ export function CameraControlsPanel({ disabled = false, onBack, sourceVideoDimen
           Reset Crop
         </button>
       </div>
+
+      </ControlSection>
 
       {alignStep === 'waiting-low-a' ? (
         <p className={styles.alignInstruction}>

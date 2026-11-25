@@ -21,7 +21,7 @@ describe('CreateColorPanel', () => {
     render(<CreateColorPanel />)
 
     expect(screen.getByText('CREATE NOTE COLORS')).toBeTruthy()
-    expect(screen.getByRole('group', { name: 'Create note color mode' })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Create note color mode' })).toBeTruthy()
     expect(screen.getByLabelText('Single note color')).toBeTruthy()
     expect(screen.queryByLabelText('C pitch class color')).toBeNull()
   })
@@ -29,7 +29,7 @@ describe('CreateColorPanel', () => {
   it('switches to pitch-class mode and shows the chromatic grid', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pitch Class' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'pitchClass' } })
 
     expect(useAppStore.getState().createNoteColors.mode).toBe('pitchClass')
     expect(screen.getByLabelText('C pitch class color')).toBeTruthy()
@@ -41,7 +41,7 @@ describe('CreateColorPanel', () => {
   it('applies a palette at once and shows Custom after an individual pitch edit', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pitch Class' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'pitchClass' } })
     const paletteSelect = screen.getByRole('combobox', { name: 'Pitch class palette' })
     fireEvent.change(paletteSelect, { target: { value: 'aurora' } })
 
@@ -60,7 +60,7 @@ describe('CreateColorPanel', () => {
   it('shows a low-red to high-violet preview for Gradient mode', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Gradient' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'gradient' } })
 
     expect(useAppStore.getState().createNoteColors.mode).toBe('gradient')
     expect(screen.getByLabelText('Low red to high violet rainbow gradient')).toBeTruthy()
@@ -70,7 +70,7 @@ describe('CreateColorPanel', () => {
   it('uses note velocity to configure soft and strong colors', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dynamics' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'velocity' } })
     fireEvent.change(screen.getByLabelText('Soft note color'), { target: { value: '#112233' } })
     fireEvent.change(screen.getByLabelText('Strong note color'), { target: { value: '#ddeeff' } })
 
@@ -85,7 +85,7 @@ describe('CreateColorPanel', () => {
   it('enables timeline-based Flow colors without adding configuration clutter', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Flow' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'dynamic' } })
 
     expect(useAppStore.getState().createNoteColors.mode).toBe('dynamic')
     expect(screen.getByLabelText('Colors flow through the performance timeline')).toBeTruthy()
@@ -95,7 +95,7 @@ describe('CreateColorPanel', () => {
   it('enables stable per-note Random colors with one click', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Random' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'random' } })
 
     expect(useAppStore.getState().createNoteColors.mode).toBe('random')
     expect(screen.getByLabelText('Each note receives a stable random color')).toBeTruthy()
@@ -104,7 +104,7 @@ describe('CreateColorPanel', () => {
   it('applies the Tutorial blue-and-green split and charcoal background together', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tutorial' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'tutorial' } })
 
     expect(useAppStore.getState().createNoteColors.mode).toBe('tutorial')
     expect(useAppStore.getState().backgroundColor).toBe('#303030')
@@ -114,8 +114,8 @@ describe('CreateColorPanel', () => {
   it('restores the dark background when switching away from Tutorial', () => {
     render(<CreateColorPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tutorial' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Single' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'tutorial' } })
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'single' } })
 
     expect(useAppStore.getState().createNoteColors.mode).toBe('single')
     expect(useAppStore.getState().backgroundColor).toBe('#000000')
@@ -129,7 +129,7 @@ describe('CreateColorPanel', () => {
     })
     expect(useAppStore.getState().createNoteColors.singleColor).toBe('#ff0000')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pitch Class' }))
+    fireEvent.change(screen.getByLabelText('Create note color mode'), { target: { value: 'pitchClass' } })
     const pitchClassColorInput = screen.getByLabelText('A pitch class color')
     fireEvent.change(pitchClassColorInput, {
       target: { value: '#123456' },

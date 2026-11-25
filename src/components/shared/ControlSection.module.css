@@ -1,0 +1,6 @@
+.section { min-width: 0; border-top: 1px solid rgba(255,255,255,.1); }
+.summary { padding: 12px 0; cursor: pointer; color: var(--color-text-body); font-size: 13px; font-weight: 600; }
+.summary > span { display: inline-flex; flex-direction: column; gap: 5px; vertical-align: middle; margin-left: 5px; }
+.summary small { font-size: 11px; font-weight: 400; color: var(--color-text-body); opacity: .65; line-height: 1.5; }
+.summary:focus-visible { outline: 2px solid var(--color-text-header); outline-offset: 3px; border-radius: 3px; }
+.content { display: flex; flex-direction: column; gap: 14px; padding: 0 0 12px; min-width: 0; }

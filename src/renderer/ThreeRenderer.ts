@@ -157,8 +157,8 @@ const LIVE_MIDI_NOTE_MAX_HEIGHT = 42
 const NOTE_ROUNDED_CORNER_RATIO = 0.18
 const NOTE_MAX_CORNER_RADIUS = 6
 const BLOOM_LAYER = 1
-const BLOOM_STRENGTH = 0.7
-const BLOOM_RADIUS = 0.018
+const BLOOM_STRENGTH = 0.95
+const BLOOM_RADIUS = 0.12
 const BLOOM_THRESHOLD = 0.42
 const RENDER_EXPOSURE = 1.08
 const SHOW_BLOOM_DEBUG_VIEW = false
@@ -176,15 +176,15 @@ const NOTE_SWIRL_WARP_FREQUENCY_A = 1.35
 const NOTE_SWIRL_WARP_FREQUENCY_B = 1.85
 const NOTE_SWIRL_SECOND_OCTAVE_SCALE = 2.15
 const NOTE_SWIRL_SECOND_OCTAVE_WEIGHT = 0.32
-const NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY = 0.1
+const NOTE_SWIRL_BRIGHT_DIFFUSE_INTENSITY = 0.24
 const NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY = 0.18
-const NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY = 0.038
+const NOTE_SWIRL_RECESS_DIFFUSE_INTENSITY = 0.18
 const NOTE_SWIRL_RECESS_EMISSIVE_INTENSITY = 0.06
 // Hold the original soft, distant-note look throughout the fall. This is a
 // constant material treatment, not a depth/position effect, so the animated
 // swirl and shimmer remain visible from spawn through impact.
 const NOTE_BASE_BRIGHTNESS_SCALE = 0.68
-const NOTE_BASE_DESATURATION = 0.22
+const NOTE_BASE_DESATURATION = 0
 const NOTE_CORE_TARGET_TOTAL_LUMINANCE = 0.9
 const NOTE_HALO_TARGET_TOTAL_LUMINANCE = 1.22
 const NOTE_CORE_EMISSIVE_STRENGTH_MIN = 0.2
@@ -3964,7 +3964,7 @@ float swirlValueNoise2D(vec2 point) {
 vec2 roundedRectHalfSize = roundedRectSize * 0.5;
 vec2 roundedRectPoint = (vRoundedRectUv - 0.5) * roundedRectSize;
 float roundedRectDistance = roundedRectSignedDistance(roundedRectPoint, roundedRectHalfSize, roundedRectRadius);
-float roundedRectEdge = 1.0;
+float roundedRectEdge = max(fwidth(roundedRectDistance), 0.65);
 float roundedRectMask = 1.0 - smoothstep(0.0, roundedRectEdge, roundedRectDistance);
 if (roundedRectMask <= 0.0) {
   discard;
@@ -3992,27 +3992,38 @@ vec2 noteSwirlSeedA = vec2((noteSwirlSeed * 7.13) + 0.37, (noteSwirlSeed * 13.57
 vec2 noteSwirlSeedB = vec2((noteSwirlSeed * 11.47) + 2.31, (noteSwirlSeed * 17.29) + 1.77);
 vec2 noteSwirlSeedC = vec2((noteSwirlSeed * 19.91) - 1.27, (noteSwirlSeed * 23.83) + 3.41);
 vec2 noteSwirlSeedD = vec2((noteSwirlSeed * 29.13) + 4.92, (noteSwirlSeed * 31.71) - 2.63);
-vec2 noteSwirlWarpSampleA = (noteSwirlLocalCoords * ${NOTE_SWIRL_WARP_FREQUENCY_A.toFixed(3)}) + noteSwirlSeedA + vec2(noteMaterialTime * 0.19, -noteMaterialTime * 0.14);
-vec2 noteSwirlWarpSampleB = (noteSwirlLocalCoords * ${NOTE_SWIRL_WARP_FREQUENCY_B.toFixed(3)}) + noteSwirlSeedB + vec2(-noteMaterialTime * 0.13, noteMaterialTime * 0.17);
+// Keep the default interior gently drifting beneath the steady luminous rim.
+float noteFlowTime = noteMaterialTime * 0.45;
+vec2 noteSwirlWarpSampleA = (noteSwirlLocalCoords * ${NOTE_SWIRL_WARP_FREQUENCY_A.toFixed(3)}) + noteSwirlSeedA + vec2(noteFlowTime * 0.19, -noteFlowTime * 0.14);
+vec2 noteSwirlWarpSampleB = (noteSwirlLocalCoords * ${NOTE_SWIRL_WARP_FREQUENCY_B.toFixed(3)}) + noteSwirlSeedB + vec2(-noteFlowTime * 0.13, noteFlowTime * 0.17);
 vec2 noteSwirlWarp = (vec2(
   swirlValueNoise2D(noteSwirlWarpSampleA),
   swirlValueNoise2D(noteSwirlWarpSampleB)
 ) - 0.5) * 2.0;
 vec2 noteSwirlCoords = (noteSwirlLocalCoords * noteSwirlMainFrequency) + (noteSwirlWarp * noteSwirlWarpStrength);
-float noteSwirlMainA = swirlValueNoise2D(noteSwirlCoords + noteSwirlSeedC + vec2(noteMaterialTime * 0.23, -noteMaterialTime * 0.18));
+float noteSwirlMainA = swirlValueNoise2D(noteSwirlCoords + noteSwirlSeedC + vec2(noteFlowTime * 0.23, -noteFlowTime * 0.18));
 float noteSwirlMainB = swirlValueNoise2D(
-  (noteSwirlCoords * ${NOTE_SWIRL_SECOND_OCTAVE_SCALE.toFixed(2)}) + noteSwirlSeedD + vec2(-noteMaterialTime * 0.31, noteMaterialTime * 0.27)
+  (noteSwirlCoords * ${NOTE_SWIRL_SECOND_OCTAVE_SCALE.toFixed(2)}) + noteSwirlSeedD + vec2(-noteFlowTime * 0.31, noteFlowTime * 0.27)
 );
 float noteSwirlField = mix(noteSwirlMainA, noteSwirlMainB, ${NOTE_SWIRL_SECOND_OCTAVE_WEIGHT.toFixed(2)});
-float noteSwirlRidgedField = 1.0 - abs((noteSwirlField * 2.0) - 1.0);
-noteSwirlRidgedField = pow(clamp(noteSwirlRidgedField, 0.0, 1.0), 1.15);
-float noteSwirlBrightField = pow(noteSwirlRidgedField, 1.55) * noteSwirlInteriorMask;
-float noteSwirlRecessField = max(0.0, pow(noteSwirlRidgedField, 0.78) - pow(noteSwirlRidgedField, 1.55)) * noteSwirlInteriorMask;
+// Advected, domain-warped noise produces irregular wisps without periodic
+// bands. Stretch the flow along the note and let finer eddies shimmer within it.
+vec2 noteFlowCoords = noteSwirlLocalCoords * vec2(3.2, 1.15)
+  + noteSwirlWarp * 1.8 + vec2(0.0, -noteFlowTime * 0.42);
+float noteFlowCloud = swirlValueNoise2D(noteFlowCoords + noteSwirlSeedC);
+float noteFlowDetail = swirlValueNoise2D(noteFlowCoords * 2.1
+  + vec2(noteFlowCloud * 2.4, noteSwirlField * 1.8) + noteSwirlSeedD
+  + vec2(noteFlowTime * 0.12, -noteFlowTime * 0.17));
+float noteFlowDensity = mix(noteFlowCloud, noteFlowDetail, 0.38);
+float noteFlowWidth = max(0.075, fwidth(noteFlowDensity) * 1.5);
+float noteFlowWisp = exp(-pow((noteFlowDensity - 0.53) / noteFlowWidth, 2.0));
+float noteSwirlBrightField = noteFlowWisp
+  * smoothstep(0.15, 0.65, noteSwirlField) * noteSwirlInteriorMask;
+float noteSwirlRecessField = smoothstep(0.48, 0.82, noteFlowDensity) * noteSwirlInteriorMask;
 
-float noteShimmerField = sin((vRoundedRectUv.x * 3.4) + (noteMaterialTime * 0.52))
-  * sin((vRoundedRectUv.y * 2.8) - (noteMaterialTime * 0.31));
+float noteShimmerField = sin((vRoundedRectUv.x * 3.4) + (noteFlowTime * 0.52))
+  * sin((vRoundedRectUv.y * 2.8) - (noteFlowTime * 0.31));
 float noteShimmer = 1.0 + (noteShimmerField * 0.05);
-float noteBreathing = 1.0 + (sin(noteMaterialTime * 0.4) * 0.04);
 float noteAnimatedHighlight = noteHighlightMask * noteShimmer;
 vec3 noteFaceColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix);
 noteFaceColor = mix(noteFaceColor, noteHaloDiffuseColor, noteAnimatedHighlight * 0.08);
@@ -4062,9 +4073,11 @@ float noteGemDirectionalLight = clamp(
 );
 vec3 noteFlatColor = mix(noteCoreDiffuseColor, noteHaloDiffuseColor, noteEdgeMix * 0.12);
 noteFlatColor = mix(noteFlatColor, noteHaloDiffuseColor, noteLeadingEdge * 0.10);
-vec3 noteSculptedColor = noteFaceColor * (1.0 - (noteDimensionalSide * 0.30));
-noteSculptedColor = mix(noteSculptedColor, noteHaloDiffuseColor, noteRimLight * 0.26);
-noteSculptedColor = mix(noteSculptedColor, noteSwirlBrightColor, noteLeadingEdge * 0.34);
+// A dark, translucent-looking body gives the illuminated rim and flowing
+// wisps room to read, instead of filling the entire note with pale light.
+vec3 noteSculptedColor = mix(noteCoreDiffuseColor * 0.10, noteHaloDiffuseColor, noteEdgeMix * 0.72);
+noteSculptedColor += noteSwirlBrightColor * noteSwirlBrightField * 0.20;
+noteSculptedColor *= 1.0 - (noteSwirlRecessField * 0.18);
 vec3 noteSaberColor = mix(noteCoreDiffuseColor, vec3(1.0), noteSaberCore * 0.78);
 noteSaberColor = mix(noteSaberColor, vec3(1.0), noteLeadingEdge * 0.48);
 float noteCrispOutlineMask = max(noteOutlineMask, noteLeadingEdge * 0.82);
@@ -4089,13 +4102,14 @@ diffuseColor.a *= noteStyleMode > 2.5 && noteStyleMode < 3.5 ? mix(0.08, 1.0, no
 diffuseColor.a *= noteStyleMode > 3.5 && noteStyleMode < 4.5 ? 0.88 : 1.0;
 
 vec3 roundedNoteEmissiveRadiance = mix(
-  noteCoreEmissiveColor * noteCoreEmissiveStrength,
+  noteCoreEmissiveColor * noteCoreEmissiveStrength * 0.70,
   noteHaloEmissiveColor * noteHaloEmissiveStrength,
   noteEdgeMix
 );
-roundedNoteEmissiveRadiance *= noteBreathing;
-roundedNoteEmissiveRadiance += noteHaloEmissiveColor * (noteAnimatedHighlight * 0.12 * noteHaloEmissiveStrength);
-roundedNoteEmissiveRadiance += noteSwirlBrightColor * (noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY.toFixed(3)} * noteHaloEmissiveStrength);
+// Keep bloom energy steady as the wisps move. Their detail belongs in the
+// diffuse face, rather than crossing the bloom threshold on every animation.
+roundedNoteEmissiveRadiance += noteHaloEmissiveColor * (noteHighlightMask * 0.06 * noteHaloEmissiveStrength);
+roundedNoteEmissiveRadiance += noteSwirlBrightColor * (noteSwirlBrightField * ${NOTE_SWIRL_BRIGHT_EMISSIVE_INTENSITY.toFixed(3)} * 0.2 * noteHaloEmissiveStrength);
 roundedNoteEmissiveRadiance = max(
   vec3(0.0),
   roundedNoteEmissiveRadiance - (
@@ -4104,6 +4118,13 @@ roundedNoteEmissiveRadiance = max(
   )
 );
 roundedNoteEmissiveRadiance *= ${NOTE_BASE_BRIGHTNESS_SCALE.toFixed(2)};
+// The stable rim supplies the bloom; lower-energy advected wisps light the
+// interior without turning the whole note into a white rectangle.
+if (noteStyleMode > 0.5 && noteStyleMode < 1.5) {
+  roundedNoteEmissiveRadiance = noteCoreEmissiveColor * noteCoreEmissiveStrength * 0.045
+    + noteCoreEmissiveColor * noteHaloEmissiveStrength * noteEdgeMix * 0.85
+    + noteSwirlBrightColor * noteSwirlBrightField * 0.20;
+}
 roundedNoteEmissiveRadiance = noteStyleMode < 0.5
   ? noteCoreEmissiveColor * noteCoreEmissiveStrength * 0.28
   : roundedNoteEmissiveRadiance;
@@ -4142,7 +4163,7 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
           'vec3 totalEmissiveRadiance = roundedNoteEmissiveRadiance;',
         )
     }
-    material.customProgramCacheKey = () => 'rounded-note-pill-v13'
+    material.customProgramCacheKey = () => 'rounded-note-pill-v17'
     return material
   }
 
@@ -4559,6 +4580,9 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
       BLOOM_THRESHOLD,
     )
     this.bloomComposer.addPass(this.bloomRenderPass)
+    // A soft threshold avoids bright animated texels switching glow abruptly.
+    const highPassUniforms = this.bloomPass.highPassUniforms as Record<string, { value: number }>
+    highPassUniforms.smoothWidth.value = 0.18
     this.bloomComposer.addPass(this.bloomPass)
 
     this.finalComposer = new EffectComposer(this.renderer)
@@ -4617,7 +4641,10 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
         }
       `,
     }, 'baseTexture')
-    this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
+    // The composer's result contains the original scene plus bloom. Adding it
+    // to the base scene doubles note brightness and washes out their color.
+    // UnrealBloomPass stores the combined glow alone in its first mip target.
+    this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomPass.renderTargetsHorizontal[0].texture
     this.smaaPass = new SMAAPass()
     this.outputPass = new OutputPass()
 
@@ -4638,11 +4665,11 @@ roundedNoteEmissiveRadiance *= roundedRectMask;`,
   }
 
   private updateBloomCompositeUniforms(): void {
-    if (this.bloomCompositePass == null || this.bloomComposer == null || this.viewportHeight <= 0) {
+    if (this.bloomCompositePass == null || this.bloomPass == null || this.viewportHeight <= 0) {
       return
     }
 
-    this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomComposer.renderTarget2.texture
+    this.bloomCompositePass.uniforms.bloomTexture.value = this.bloomPass.renderTargetsHorizontal[0].texture
     this.bloomCompositePass.uniforms.bloomClipY.value = 1 - (this.getBloomClipTopDownY() / this.viewportHeight)
     this.bloomCompositePass.uniforms.bloomClipFeather.value = (
       BLOOM_CLIP_FEATHER_PIXELS * this.getLayoutScale()

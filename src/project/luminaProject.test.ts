@@ -83,7 +83,7 @@ describe('Lumina project files', () => {
 
     await applyLuminaProjectDocument(legacy)
 
-    expect(useAppStore.getState().handVisualization).toEqual({ enabled: false, opacity: 35 })
+    expect(useAppStore.getState().handVisualization).toEqual({ enabled: false, opacity: 55 })
   })
 
   it('opens older projects without a custom background using the color fallback', async () => {
@@ -115,6 +115,7 @@ describe('Lumina project files', () => {
     expect(() => parseLuminaProject(JSON.stringify({ ...createLuminaProjectDocument({ ...useAppStore.getState(), projectData } as never, 'Test'), version: 2 }))).toThrow('version is not supported')
   })
 })
+
 
 describe('project failure safety', () => {
   it.each([

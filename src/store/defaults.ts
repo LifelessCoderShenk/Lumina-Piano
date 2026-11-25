@@ -75,7 +75,7 @@ export const cameraOverlayInitial: CameraOverlaySettings = {
 
 export const handVisualizationInitial: HandVisualizationSettings = {
   enabled: false,
-  opacity: 35,
+  opacity: 55,
 }
 
 export const recordModeConfigInitial: RecordModeConfig = {
@@ -138,8 +138,8 @@ export function createVisualizerSettingsDefaults(): VisualizerSettingsSlice {
     fallSpeed: 100,
     noteWidth: 100,
     noteOpacity: 100,
-    noteGlow: 100,
-    lightingIntensity: 100,
+    noteGlow: 65,
+    lightingIntensity: 65,
     keyboardSaber: false,
     scoreOverlaySize: 'standard',
     scoreOverlayOpacity: 100,

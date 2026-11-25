@@ -3,6 +3,8 @@ import { ImagePlus, Trash2, X } from 'lucide-react'
 
 import { AppIcon } from '../AppIcon/AppIcon'
 import { type VisualizerSettings, useAppStore, visualizerSettingsInitial } from '../../store/store'
+import { ControlSection } from '../shared/ControlSection'
+import { VisualStyleControl } from '../VisualStyleControl/VisualStyleControl'
 import styles from './SettingsPanel.module.css'
 
 interface SettingsPanelProps {
@@ -29,6 +31,7 @@ const BACKGROUND_STYLE_OPTIONS = ['flat', 'studio', 'aurora', 'stage'] as const
 const MAX_BACKGROUND_IMAGE_BYTES = 12 * 1024 * 1024
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
+  const hasNotes = useAppStore((state) => state.projectData?.tracks.some((track) => track.notes.length > 0) ?? false)
   const settings = useAppStore((state) => state.visualizerSettings)
   const setVisualizerSettings = useAppStore((state) => state.setVisualizerSettings)
   const backgroundColor = useAppStore((state) => state.backgroundColor)
@@ -89,35 +92,119 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </button>
       </div>
 
-      <SettingsSection
-        title="ASPECT RATIO"
-        options={ASPECT_RATIO_OPTIONS}
-        value={settings.aspectRatio}
-        onSelect={(aspectRatio) => {
-          setVisualizerSettings({ aspectRatio })
-        }}
-      />
-
-      <SettingsSection
-        title="RESOLUTION"
-        options={RESOLUTION_OPTIONS}
-        value={settings.resolution}
-        onSelect={(resolution) => {
-          setVisualizerSettings({ resolution })
-        }}
-      />
-
-      <SettingsSection
-        title="FRAMERATE"
-        options={FRAMERATE_OPTIONS}
-        value={settings.framerate}
-        onSelect={(framerate) => {
-          setVisualizerSettings({ framerate })
-        }}
-      />
-
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle} style={headerTextStyle}>APPEARANCE</h3>
+      <VisualStyleControl />
+      <ControlSection title="Notes" description="Style, speed and glow" defaultOpen>
+        <label className={styles.selectControl}>
+          <span>Falling notes</span>
+          <select aria-label="Falling note style" value={noteStyle}
+            onChange={(event) => setNoteStyle(event.target.value as typeof noteStyle)}>
+            {NOTE_STYLE_OPTIONS.map((style) => (
+              <option key={style} value={style}>
+                {{ solid: 'Flat', gradient: 'Sculpted', saber: 'Saber', outline: 'Outline', crystal: 'Crystal', gem: 'Gem' }[style]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.rangeControl}>
+          <span>Fall speed</span>
+          <input
+            aria-label="Fall speed"
+            type="range"
+            min="50"
+            max="200"
+            value={fallSpeed}
+            onChange={(event) => setFallSpeed(Number(event.target.value))}
+          />
+          <output>{fallSpeed}%</output>
+        </label>
+        <label className={styles.rangeControl}>
+          <span>Note glow</span>
+          <input
+            aria-label="Note glow"
+            type="range"
+            min="0"
+            max="200"
+            value={noteGlow}
+            onChange={(event) => setNoteGlow(Number(event.target.value))}
+          />
+          <output>{noteGlow}%</output>
+        </label>
+        <ControlSection title="Fine adjustments" description="Width and opacity">
+          <label className={styles.rangeControl}>
+            <span>Note width</span>
+            <input
+              aria-label="Note width"
+              type="range"
+              min="60"
+              max="120"
+              value={noteWidth}
+              onChange={(event) => setNoteWidth(Number(event.target.value))}
+            />
+            <output>{noteWidth}%</output>
+          </label>
+          <label className={styles.rangeControl}>
+            <span>Note opacity</span>
+            <input
+              aria-label="Note opacity"
+              type="range"
+              min="20"
+              max="100"
+              value={noteOpacity}
+              onChange={(event) => setNoteOpacity(Number(event.target.value))}
+            />
+            <output>{noteOpacity}%</output>
+          </label>
+        </ControlSection>
+      </ControlSection>
+      <ControlSection title="Hands & labels" description="Generated hands and note names">
+        <label className={styles.toggleControl}>
+          <input
+            aria-label="Show ghost hands"
+            type="checkbox"
+            checked={handVisualization.enabled}
+            onChange={(event) => setHandVisualization({ enabled: event.target.checked })}
+          />
+          <span>Ghost hands</span>
+        </label>
+        {handVisualization.enabled ? (
+          <label className={`${styles.rangeControl} ${styles.subControl}`}>
+            <span>Opacity</span>
+            <input
+              aria-label="Ghost hands opacity"
+              type="range"
+              min="10"
+              max="80"
+              value={handVisualization.opacity}
+              onChange={(event) => setHandVisualization({ opacity: Number(event.target.value) })}
+            />
+            <output>{handVisualization.opacity}%</output>
+          </label>
+        ) : null}
+        {handVisualization.enabled ? (
+          <p className={styles.footerNote} role="status">
+            {hasNotes ? 'Hands follow the notes in your loaded MIDI piece during playback.' : 'Load a MIDI piece to generate hands. Live input alone does not generate hand movements.'}
+          </p>
+        ) : null}
+        <label className={styles.toggleControl}>
+          <input
+            aria-label="Show note names on falling notes"
+            type="checkbox"
+            checked={noteLabelsOnNotes}
+            onChange={(event) => setNoteLabelsOnNotes(event.target.checked)}
+          />
+          <span>Show names on falling notes</span>
+        </label>
+        <label className={styles.toggleControl}>
+          <input
+            aria-label="Show note names on keyboard keys"
+            type="checkbox"
+            checked={noteLabelsOnKeys}
+            onChange={(event) => setNoteLabelsOnKeys(event.target.checked)}
+          />
+          <span>Show names on keyboard keys</span>
+        </label>
+      </ControlSection>
+      <ControlSection title="Background" description="Scene, color or image">
         <span className={styles.controlLabel}>Background</span>
         <input
           ref={backgroundImageInputRef}
@@ -219,78 +306,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         {backgroundImageError == null ? null : (
           <p className={styles.imageError} role="alert">{backgroundImageError}</p>
         )}
-        <span className={styles.controlLabel}>Falling notes</span>
-        <div className={styles.segmentedControl} aria-label="Falling note style">
-          {NOTE_STYLE_OPTIONS.map((style) => (
-            <button
-              key={style}
-              type="button"
-              aria-pressed={noteStyle === style}
-              className={`${styles.segmentButton} ${noteStyle === style ? styles.segmentButtonActive : ''}`}
-              onClick={() => setNoteStyle(style)}
-            >
-              {style === 'solid'
-                ? 'Flat'
-                : style === 'gradient'
-                  ? 'Sculpted'
-                  : style === 'saber'
-                    ? 'Saber'
-                    : style === 'outline'
-                      ? 'Outline'
-                      : style === 'crystal'
-                        ? 'Crystal'
-                        : 'Gem'}
-            </button>
-          ))}
-        </div>
-        <label className={styles.rangeControl}>
-          <span>Fall speed</span>
-          <input
-            aria-label="Fall speed"
-            type="range"
-            min="50"
-            max="200"
-            value={fallSpeed}
-            onChange={(event) => setFallSpeed(Number(event.target.value))}
-          />
-          <output>{fallSpeed}%</output>
-        </label>
-        <label className={styles.rangeControl}>
-          <span>Note width</span>
-          <input
-            aria-label="Note width"
-            type="range"
-            min="60"
-            max="120"
-            value={noteWidth}
-            onChange={(event) => setNoteWidth(Number(event.target.value))}
-          />
-          <output>{noteWidth}%</output>
-        </label>
-        <label className={styles.rangeControl}>
-          <span>Note opacity</span>
-          <input
-            aria-label="Note opacity"
-            type="range"
-            min="20"
-            max="100"
-            value={noteOpacity}
-            onChange={(event) => setNoteOpacity(Number(event.target.value))}
-          />
-          <output>{noteOpacity}%</output>
-        </label>
-        <label className={styles.rangeControl}>
-          <span>Note glow</span>
-          <input
-            aria-label="Note glow"
-            type="range"
-            min="0"
-            max="200"
-            value={noteGlow}
-            onChange={(event) => setNoteGlow(Number(event.target.value))}
-          />
-          <output>{noteGlow}%</output>
-        </label>
+      </ControlSection>
+      <ControlSection title="Lighting & effects" description="Ambient light and keyboard beams">
         <label className={styles.rangeControl}>
           <span>Lighting</span>
           <input
@@ -312,52 +329,36 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           />
           <span>Keyboard beams</span>
         </label>
-        <label className={styles.toggleControl}>
-          <input
-            aria-label="Show ghost hands"
-            type="checkbox"
-            checked={handVisualization.enabled}
-            onChange={(event) => setHandVisualization({ enabled: event.target.checked })}
-          />
-          <span>Ghost hands</span>
-        </label>
-        {handVisualization.enabled ? (
-          <label className={`${styles.rangeControl} ${styles.subControl}`}>
-            <span>Opacity</span>
-            <input
-              aria-label="Ghost hands opacity"
-              type="range"
-              min="10"
-              max="80"
-              value={handVisualization.opacity}
-              onChange={(event) => setHandVisualization({ opacity: Number(event.target.value) })}
-            />
-            <output>{handVisualization.opacity}%</output>
-          </label>
-        ) : null}
-      </div>
+      </ControlSection>
+      <ControlSection title="Video output" description={`${settings.aspectRatio === 'fit' ? 'Fit' : settings.aspectRatio} / ${settings.resolution} / ${settings.framerate} fps`}>
+      <SettingsSection
+        title="ASPECT RATIO"
+        options={ASPECT_RATIO_OPTIONS}
+        value={settings.aspectRatio}
+        onSelect={(aspectRatio) => {
+          setVisualizerSettings({ aspectRatio })
+        }}
+      />
 
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle} style={headerTextStyle}>NOTE NAMES</h3>
-        <label className={styles.toggleControl}>
-          <input
-            aria-label="Show note names on falling notes"
-            type="checkbox"
-            checked={noteLabelsOnNotes}
-            onChange={(event) => setNoteLabelsOnNotes(event.target.checked)}
-          />
-          <span>Show names on falling notes</span>
-        </label>
-        <label className={styles.toggleControl}>
-          <input
-            aria-label="Show note names on keyboard keys"
-            type="checkbox"
-            checked={noteLabelsOnKeys}
-            onChange={(event) => setNoteLabelsOnKeys(event.target.checked)}
-          />
-          <span>Show names on keyboard keys</span>
-        </label>
-      </div>
+      <SettingsSection
+        title="RESOLUTION"
+        options={RESOLUTION_OPTIONS}
+        value={settings.resolution}
+        onSelect={(resolution) => {
+          setVisualizerSettings({ resolution })
+        }}
+      />
+
+      <SettingsSection
+        title="FRAMERATE"
+        options={FRAMERATE_OPTIONS}
+        value={settings.framerate}
+        onSelect={(framerate) => {
+          setVisualizerSettings({ framerate })
+        }}
+      />
+
+      </ControlSection>
 
       <p className={styles.footerNote} style={bodyTextStyle}>
         Defaults: {visualizerSettingsInitial.aspectRatio}, {visualizerSettingsInitial.resolution}, {visualizerSettingsInitial.framerate} FPS

@@ -2,9 +2,12 @@
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.25) transparent;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 4px;
   padding: 18px 16px;
   background: var(--color-bg);
   color: var(--color-text-body);
@@ -235,3 +238,10 @@
   font-size: 12px;
   opacity: 0.8;
 }
+
+.headerRow { margin-bottom: 14px; }
+
+.panel > * { flex-shrink: 0; }
+.selectControl { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.selectControl select { color: var(--color-text-body); background: var(--color-bg); border: 1px solid rgba(255,255,255,.22); border-radius: 5px; padding: 8px 10px; font: inherit; min-width: 150px; }
+.selectControl select:focus-visible { outline: 2px solid var(--color-text-header); outline-offset: 2px; }

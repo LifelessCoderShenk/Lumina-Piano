@@ -43,21 +43,7 @@ const APPEARANCE_KEYS: readonly (keyof AppearanceSettings)[] = [
 const auroraPitchClassColors = CREATE_PITCH_CLASS_PALETTES.find(({ id }) => id === 'aurora')!.colors
 
 export const BUILT_IN_VISUAL_STYLE_PRESETS: readonly VisualStylePreset[] = [
-  createBuiltInVisualStylePreset('builtin-clean-studio', 'Clean Studio', {
-    appearance: {
-      backgroundColor: '#05070d',
-      backgroundStyle: 'studio',
-      lightingIntensity: 65,
-      noteGlow: 85,
-      noteLabelsOnNotes: false,
-    },
-    createNoteColors: {
-      singleColor: '#6ebcff',
-    },
-    particleSettings: {
-      enabled: false,
-    },
-  }),
+  createBuiltInVisualStylePreset('builtin-clean-studio', 'Clean Studio', {}),
   createBuiltInVisualStylePreset('builtin-concert-gem', 'Concert Gem', {
     appearance: {
       backgroundColor: '#08060d',

@@ -8,6 +8,7 @@ import {
 } from '../../store/createNoteColorPalettes'
 import { useAppStore } from '../../store/store'
 import { VisualStyleControl } from '../VisualStyleControl/VisualStyleControl'
+import { ControlSection } from '../shared/ControlSection'
 import styles from './CreateColorPanel.module.css'
 
 const PITCH_CLASS_FIELDS = [
@@ -107,50 +108,30 @@ export function CreateColorPanel() {
         <section className={styles.section}>
           <div className={styles.sectionTitle}>CREATE NOTE COLORS</div>
 
-          <div className={styles.fieldGroup}>
-            <div className={styles.fieldLabel}>Mode</div>
-            <div className={styles.segmentedControl} role="group" aria-label="Create note color mode">
-              {(['single', 'pitchClass', 'gradient', 'velocity', 'dynamic', 'random', 'tutorial'] as const).map((mode) => {
-                const isActive = createNoteColors.mode === mode
-
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`${styles.segmentButton} ${isActive ? styles.segmentButtonActive : ''}`}
-                    aria-pressed={isActive}
-                    onClick={() => {
-                      const wasTutorial = createNoteColors.mode === 'tutorial'
-                      if (mode === 'tutorial' && !wasTutorial) {
-                        backgroundBeforeTutorialRef.current = backgroundColor
-                        setBackgroundColor(TUTORIAL_CREATE_PRESET.backgroundColor)
-                      } else if (mode !== 'tutorial' && wasTutorial) {
-                        setBackgroundColor(
-                          backgroundBeforeTutorialRef.current ?? DEFAULT_VISUALIZER_BACKGROUND_COLOR,
-                        )
-                        backgroundBeforeTutorialRef.current = null
-                      }
-                      setCreateNoteColorMode(mode)
-                    }}
-                  >
-                    {mode === 'single'
-                      ? 'Single'
-                      : mode === 'pitchClass'
-                        ? 'Pitch Class'
-                        : mode === 'gradient'
-                          ? 'Gradient'
-                          : mode === 'velocity'
-                            ? 'Dynamics'
-                            : mode === 'dynamic'
-                              ? 'Flow'
-                              : mode === 'random'
-                                ? 'Random'
-                                : 'Tutorial'}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+          <label className={styles.paletteField}>
+            <span className={styles.fieldLabel}>Color mode</span>
+            <select aria-label="Create note color mode" value={createNoteColors.mode}
+              onChange={(event) => {
+                const mode = event.target.value as typeof createNoteColors.mode
+                const wasTutorial = createNoteColors.mode === 'tutorial'
+                if (mode === 'tutorial' && !wasTutorial) {
+                  backgroundBeforeTutorialRef.current = backgroundColor
+                  setBackgroundColor(TUTORIAL_CREATE_PRESET.backgroundColor)
+                } else if (mode !== 'tutorial' && wasTutorial) {
+                  setBackgroundColor(backgroundBeforeTutorialRef.current ?? DEFAULT_VISUALIZER_BACKGROUND_COLOR)
+                  backgroundBeforeTutorialRef.current = null
+                }
+                setCreateNoteColorMode(mode)
+              }}>
+              <option value="single">Single</option>
+              <option value="pitchClass">Pitch Class</option>
+              <option value="gradient">Gradient</option>
+              <option value="velocity">Dynamics</option>
+              <option value="dynamic">Flow</option>
+              <option value="random">Random</option>
+              <option value="tutorial">Tutorial</option>
+            </select>
+          </label>
 
           {createNoteColors.mode === 'single' ? (
             <label className={styles.colorField}>
@@ -193,6 +174,7 @@ export function CreateColorPanel() {
                 </select>
               </label>
 
+              <ControlSection title="Customize individual notes" description="Adjust the twelve pitch colors">
               <div className={styles.pitchClassGrid}>
                 {PITCH_CLASS_FIELDS.map(({ label, pitchClass }) => (
                   <label key={pitchClass} className={styles.colorField}>
@@ -216,6 +198,7 @@ export function CreateColorPanel() {
                   </label>
                 ))}
               </div>
+              </ControlSection>
             </>
           ) : createNoteColors.mode === 'gradient' ? (
             <div className={styles.gradientPreview} aria-label="Low red to high violet rainbow gradient">

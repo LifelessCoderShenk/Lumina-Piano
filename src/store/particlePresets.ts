@@ -138,7 +138,6 @@ export function findParticlePreset(settings: ParticleSettings): ParticlePreset |
 
 function particleSettingsMatch(left: ParticleSettings, right: ParticleSettings): boolean {
   return (
-    left.enabled === right.enabled &&
     left.style === right.style &&
     left.colorMode === right.colorMode &&
     left.customColor.toLowerCase() === right.customColor.toLowerCase() &&

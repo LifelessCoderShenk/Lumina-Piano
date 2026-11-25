@@ -1,33 +1,33 @@
+import { CREATE_PITCH_CLASS_PALETTES } from '../../store/createNoteColorPalettes'
 import {
-  CREATE_PITCH_CLASS_PALETTES,
-  type CreatePitchClassPalette,
-} from '../../store/createNoteColorPalettes'
+  createCreateNoteColorDefaults,
+  createParticleSettingsDefaults,
+  createVisualizerSettingsDefaults,
+  handVisualizationInitial,
+} from '../../store/defaults'
 import { useAppStore } from '../../store/store'
 
-type SamplePieceColorDefault = {
-  mode: 'pitchClass'
-  paletteId: CreatePitchClassPalette['id']
-}
+const DEMO_FILES = new Set([
+  'etude-in-c-minor-opus-10-nr-12.mid',
+  'pirates of the caribbean.mid',
+])
 
-const SAMPLE_PIECE_COLOR_DEFAULTS: Readonly<Record<string, SamplePieceColorDefault>> = {
-  'pirates of the caribbean.mid': {
-    mode: 'pitchClass',
-    paletteId: 'sunset',
-  },
-}
+/** Load a complete demo appearance, never a partial patch over the user's preset. */
+export function applySamplePieceVisualDefaults(fileName: string): void {
+  const name = fileName.toLowerCase()
+  if (!DEMO_FILES.has(name)) return
 
-export function applySamplePieceColorDefault(fileName: string): void {
-  const colorDefault = SAMPLE_PIECE_COLOR_DEFAULTS[fileName.toLowerCase()]
-  if (colorDefault == null) {
-    return
+  const colors = createCreateNoteColorDefaults()
+  if (name === 'pirates of the caribbean.mid') {
+    const sunset = CREATE_PITCH_CLASS_PALETTES.find(({ id }) => id === 'sunset')!
+    colors.mode = 'pitchClass'
+    colors.pitchClassColors = { ...sunset.colors }
   }
 
-  const palette = CREATE_PITCH_CLASS_PALETTES.find(({ id }) => id === colorDefault.paletteId)
-  if (palette == null) {
-    return
-  }
-
-  const store = useAppStore.getState()
-  store.setCreateNoteColorMode(colorDefault.mode)
-  store.setCreatePitchClassColors(palette.colors)
+  useAppStore.getState().batchUpdate((state) => {
+    Object.assign(state, createVisualizerSettingsDefaults())
+    state.createNoteColors = colors
+    state.particleSettings = createParticleSettingsDefaults()
+    state.handVisualization = structuredClone(handVisualizationInitial)
+  })
 }
