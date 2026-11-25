@@ -1,9 +1,9 @@
 // Pin downloads to a reviewed release; never silently replace installer assets.
 export const windowsPreview = {
-  version: "1.0.2 Preview 3",
-  sha256: "55b16ea2149acb828f8bd588241d281ae2010f9dbbf9e4c3bb8755a1c07f336d",
-  url: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/download/v1.0.2-preview.3/Lumina-Piano-1.0.2-preview.3-Setup.exe",
-  notes: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.2-preview.3",
+  version: "1.0.3 Preview 4",
+  sha256: "6bbf6a20d68d10e049e7d360080ac203c30155b8246c2220b70078ccdfe22e07",
+  url: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/download/v1.0.3-preview.4/Lumina-Piano-1.0.3-preview.4-Setup.exe",
+  notes: "https://github.com/LifelessCoderShenk/Lumina-Piano/releases/tag/v1.0.3-preview.4",
 };
 
 export const macPreview = {
