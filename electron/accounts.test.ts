@@ -44,3 +44,22 @@ it('returns signed out when no saved session exists', async () => {
   const { desktopAccount } = await import('./accounts')
   expect(await desktopAccount()).toEqual({ email: null })
 })
+
+it('signs out locally without revoking the website session', async () => {
+  mocks.signOut.mockResolvedValue({ error: null })
+  const { desktopSignOut } = await import('./accounts')
+  expect(await desktopSignOut()).toEqual({ email: null })
+  expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' })
+})
+
+it('reports sign-out failure instead of claiming the session was cleared', async () => {
+  mocks.signOut.mockResolvedValue({ error: new Error('Storage unavailable') })
+  const { desktopSignOut } = await import('./accounts')
+  await expect(desktopSignOut()).rejects.toThrow('Could not sign out')
+})
+
+it('reports an offline account check without accepting an unverified identity', async () => {
+  mocks.getUser.mockResolvedValue({ data: { user: null }, error: { name: 'AuthRetryableFetchError' } })
+  const { desktopAccount } = await import('./accounts')
+  await expect(desktopAccount()).rejects.toThrow('Check your connection')
+})

@@ -37,7 +37,8 @@ app.whenReady().then(async()=>{
    const {ThreeRenderer}=await import('/src/renderer/ThreeRenderer.ts');
    const {registerActiveVisualizerRenderer}=await import('/src/renderer/activeVisualizerRenderer.ts');
    const {ExportEngine}=await import('/src/export/ExportEngine.ts');
-   const project={ticksPerQuarter:480,totalTicks:1920,tempoMap:[{tick:0,bpm:120,microsecondsPerBeat:500000}],timeSignatures:[{tick:0,numerator:4,denominator:4}],tracks:[{id:'test',name:'Test',channel:0,notes:[60,64,67].map((pitch,i)=>({id:'note'+i,pitch,velocity:90,startTick:i*120,endTick:1200,visualEndTick:1200,sustainEndTick:1920}))}]};
+   const totalTicks=${durationSeconds}*960;
+   const project={ticksPerQuarter:480,totalTicks,tempoMap:[{tick:0,bpm:120,microsecondsPerBeat:500000}],timeSignatures:[{tick:0,numerator:4,denominator:4}],tracks:[{id:'test',name:'Test',channel:0,notes:Array.from({length:${durationSeconds}*2},(_,i)=>({id:'note'+i,pitch:[60,64,67,72][i%4],velocity:90,startTick:i*480,endTick:Math.min(totalTicks,i*480+360),visualEndTick:Math.min(totalTicks,i*480+360),sustainEndTick:Math.min(totalTicks,i*480+480)}))}]};
    const {cameraSystem}=await import('/src/camera/CameraSystem.ts');cameraSystem.init(1280,720);
    await loadProjectData(project);
    useAppStore.setState({viewportWidth:1280,viewportHeight:720,visualizerSettings:{aspectRatio:'16:9',resolution:'4K',framerate:30}});
@@ -48,6 +49,7 @@ app.whenReady().then(async()=>{
    const engine=new ExportEngine();let frames=0;
    engine.onProgress(p=>{frames=Math.max(frames,p.framesRendered);window.stressProgress(p.phase);});
    await engine.export({outputPath:${JSON.stringify(output)},includeAudio:true});
+   if(frames!==${durationSeconds}*30)throw new Error('Unexpected export frame count: '+frames);
    if(useAppStore.getState().isExporting)throw new Error('Export flag stuck');
    if(canvas.width!==previousSize.width||canvas.height!==previousSize.height)throw new Error('Preview dimensions not restored '+JSON.stringify({previousSize,after:{width:canvas.width,height:canvas.height},store:{width:useAppStore.getState().viewportWidth,height:useAppStore.getState().viewportHeight}}));
    await renderer.destroy();registerActiveVisualizerRenderer(null);
