@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Monitor } from "lucide-react";
 import { PageIntro } from "@/components/page-intro";
 import { macPreview, previewFeedbackUrl, windowsPreview } from "@/lib/releases";
@@ -20,7 +21,7 @@ export default function Download() {
           Windows & macOS.
         </>
       }
-      description="Free trial · Watermarked exports"
+      description="Free trial · No time limit · Watermarked exports"
     >
       <div className="mt-14 grid max-w-3xl gap-4 sm:grid-cols-2">
         {["Windows", "macOS"].map((platform) => (
@@ -66,6 +67,7 @@ export default function Download() {
           </ol>
         </details>
         <p className="mt-6 text-sm"><a href={previewFeedbackUrl} className="underline underline-offset-4">Report a problem</a><span className="ml-2">GitHub account required · Reports are public</span></p>
+        <Link href="/support" className="mt-4 inline-flex min-h-11 items-center text-sm underline underline-offset-4">Installation & account help</Link>
       </div>
     </PageIntro>
   );

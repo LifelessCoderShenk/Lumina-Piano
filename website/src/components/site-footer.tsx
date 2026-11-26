@@ -27,6 +27,7 @@ export function SiteFooter() {
                 {label}
               </Link>
             ))}
+            <Link href="/support" className="nav-link inline-flex min-h-11 items-center">Support</Link>
           </nav>
         </div>
         <div className="mt-10 flex flex-col justify-between gap-3 border-t border-line pt-6 text-xs leading-5 text-secondary sm:flex-row">
