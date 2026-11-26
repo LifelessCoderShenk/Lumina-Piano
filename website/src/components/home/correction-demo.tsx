@@ -22,10 +22,9 @@ export function CorrectionDemo() {
       </div>
       <p className="mt-2 text-xs text-secondary md:hidden">Scroll the editor sideways to inspect the phrase.</p>
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p aria-live="polite" className="text-sm text-secondary">{corrected ? "The third note now matches the intended melody." : "Listen for the third note, about 1.5 seconds in."}</p>
+        <p aria-live="polite" className="text-sm text-secondary">{corrected ? "Corrected phrase." : "Original phrase."}</p>
         <audio key={stage} controls preload="none" aria-label={`Listen to the ${corrected ? "corrected" : "original"} phrase`} className="w-full sm:w-80"><source src={`/media/correction-${stage}.mp3`} type="audio/mpeg" /></audio>
       </div>
-      <p className="mt-6 text-xs leading-relaxed text-secondary">Staged example · Edited in Lumina Piano</p>
     </section>
   );
 }

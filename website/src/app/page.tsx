@@ -133,7 +133,6 @@ export default function Home() {
         </div>
         <div className={styles.desktopPreview}>
           <MediaPreview media={homeMedia.workflow} shape="wide" />
-          <p>Import, correct, style, export. A captioned guide using actual app captures and the finished video.</p>
         </div>
       </section>
 

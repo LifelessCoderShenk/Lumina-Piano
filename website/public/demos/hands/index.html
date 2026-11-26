@@ -58,7 +58,20 @@
         font-size: 13px;
       }
 
-      header { gap: 12px; flex-wrap: wrap; }
+      body { background: #0b0b0d; font: 14px system-ui; }
+      header { display: none; }
+      canvas { height: auto; }
+      #viewport { overflow: hidden; border-block: 1px solid #ffffff12; }
+      section.note { padding: 16px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+      footer { padding: 16px 20px; gap: 14px; }
+      footer details, #view { display: none; }
+      #import-status:empty, #audit-result:empty { display: none; }
+      #exercise { max-width: 210px; }
+      button, select { background: #17171b; border-color: #ffffff25; border-radius: 20px; }
+      #play { min-width: 76px; background: #f5f5f7; color: #0b0b0d; }
+      input[type="file"] { max-width: 220px; }
+      #time { accent-color: #a8cee8; }
+
       summary { cursor: pointer; padding: 10px 0; color: #aab0bc; }
       details[open] { padding-bottom: 12px; }
       input, select { max-width: 100%; box-sizing: border-box; }
@@ -75,7 +88,7 @@
     <header>
       <div>
         <h1>Generated hands</h1>
-        <p>Silent MIDI preview</p>
+        <p></p>
       </div>
       <span id="status">Loading hand…</span>
     </header>
@@ -107,7 +120,7 @@
       /></label>
       </details><button id="cancel-import" hidden>Cancel import</button>
       <p id="import-status" role="status">
-        Your MIDI stays in your browser.
+
       </p>
     </section>
     <main id="viewport"></main>

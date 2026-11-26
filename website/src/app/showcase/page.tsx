@@ -58,15 +58,7 @@ export default function Showcase() {
           <h2 id="workspace-title" className="text-3xl font-medium tracking-tight">From MIDI to finished video.</h2>
         </div>
         <MediaPreview media={homeMedia.workflow} shape="hero" />
-        <details className="mt-5 border-t border-white/10 pt-4 text-sm">
-          <summary className="cursor-pointer py-2 font-medium">Read the walkthrough</summary>
-          <ol className="mt-3 max-w-2xl list-decimal space-y-3 pl-5 leading-relaxed text-secondary">
-            <li><strong className="text-primary">Import.</strong> Use Add MIDI to load the original eight-bar miniature.</li>
-            <li><strong className="text-primary">Correct.</strong> Select the first melody note, deliberately changed to F5 for this example, and move it down to E5. The rest of the piece stays intact.</li>
-            <li><strong className="text-primary">Style.</strong> Choose a visual style, tune the effects, and enable generated hands.</li>
-            <li><strong className="text-primary">Export.</strong> Keep Include Audio enabled and render the video. The final segment plays the resulting file.</li>
-          </ol>
-        </details>
+
       </section>
     </Container>
   );

@@ -7,12 +7,9 @@ export function HandDemo() {
   return (
     <section id="hand-demo" aria-labelledby="hand-demo-title" className="mt-12 border-t border-white/10 pt-10">
       <h2 id="hand-demo-title" className="text-2xl font-medium tracking-tight">Try generated hands.</h2>
-      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-secondary">
-        Silent preview · Experimental
-      </p>
       {open ? (
         <>
-          <iframe src="/demos/hands/index.html" title="Interactive Lumina Piano hand motion and MIDI preview" className="mt-6 h-[1050px] w-full rounded-xl border border-white/10 bg-[#101115] sm:h-[820px]" />
+          <iframe src="/demos/hands/index.html?v=clean-2" title="Interactive Lumina Piano hands" className="mt-6 h-[620px] w-full rounded-xl border border-white/10 bg-[#0b0b0d] sm:h-[640px]" />
           <button onClick={() => setOpen(false)} className="mt-4 rounded-full border border-white/20 px-5 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-4">Close preview</button>
         </>
       ) : (
