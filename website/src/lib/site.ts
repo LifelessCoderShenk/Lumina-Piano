@@ -1,5 +1,6 @@
 export const site = {
   name: "Lumina Piano",
+  supportEmail: "luminapiano.app@gmail.com",
   description:
     "A creative desktop workspace for everyday pianists. Visualize, record, edit, and share your piano performances on Windows and macOS.",
 };

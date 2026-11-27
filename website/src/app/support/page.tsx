@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PageIntro } from "@/components/page-intro";
 import { previewFeedbackUrl } from "@/lib/releases";
+import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Support",
@@ -53,10 +54,11 @@ export default function Support() {
         ))}
       </div>
       <div className="mt-10 flex flex-wrap gap-4">
-        <a href={previewFeedbackUrl} className="button button--primary">Report a problem</a>
+        <a href={`mailto:${site.supportEmail}`} className="button button--primary">Email support</a>
         <Link href="/download" className="button button--secondary">Downloads</Link>
       </div>
-      <p className="mt-4 text-sm text-secondary">GitHub account required. Reports are public.</p>
+      <p className="mt-4 text-sm text-secondary"><a href={`mailto:${site.supportEmail}`} className="underline underline-offset-4">{site.supportEmail}</a></p>
+      <p className="mt-4 text-sm text-secondary"><a href={previewFeedbackUrl} className="underline underline-offset-4">Report a public issue on GitHub</a></p>
     </PageIntro>
   );
 }
