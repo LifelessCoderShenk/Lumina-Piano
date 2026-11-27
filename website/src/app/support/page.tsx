@@ -27,6 +27,10 @@ const answers = [
     answer: "Check your connection and retry from the app. If Lumina says the callback port is unavailable, close other Lumina windows and reopen the app. If sign-in times out, start again rather than reusing the old browser link.",
   },
   {
+    question: "How do I request account deletion?",
+    answer: `Email ${site.supportEmail} from the address used for your Lumina account, with the subject “Lumina account deletion request”. This is a manual request, not instant deletion. Do not send passwords or sign-in codes. Deleting the account does not remove projects or exports from your device.`,
+  },
+  {
     question: "Can I work offline?",
     answer: "Local MIDI editing and video exports do not require sign-in. Signing in and checking your account require an internet connection. Offline exports still include the trial watermark.",
   },

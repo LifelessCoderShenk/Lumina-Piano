@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { accountClient } from "@/lib/auth/server";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { signOut } from "@/app/login/actions";
+import { accountDeletionEmailUrl, site } from "@/lib/site";
 
 export const metadata = { title: "Your account" };
 export const dynamic = "force-dynamic";
@@ -23,5 +24,11 @@ export default async function AccountPage() {
       <ButtonLink href="/download" className="mt-6">Get Lumina Piano</ButtonLink>
     </div>
     <form action={signOut}><Button type="submit" variant="secondary">Sign out</Button></form>
+    <details className="mt-10 border-t border-line pt-6">
+      <summary className="cursor-pointer rounded-sm text-sm text-secondary focus-visible:outline-2 focus-visible:outline-offset-4">Delete your account</summary>
+      <p className="mt-4 text-sm leading-relaxed text-secondary">Email us from your account address to request deletion. This opens an email draft; it does not delete your account. Local projects and exported files stay on your device.</p>
+      <a href={accountDeletionEmailUrl} className="mt-4 inline-flex min-h-11 items-center text-sm underline underline-offset-4">Email a deletion request</a>
+      <p className="mt-2 break-all text-sm text-secondary">{site.supportEmail}</p>
+    </details>
   </section>;
 }

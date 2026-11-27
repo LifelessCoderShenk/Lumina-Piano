@@ -12,3 +12,5 @@ export const navigation = [
   { href: "/pricing", label: "Pricing" },
   { href: "/download", label: "Download" },
 ] as const;
+
+export const accountDeletionEmailUrl = `mailto:${site.supportEmail}?subject=${encodeURIComponent("Lumina account deletion request")}`;
